@@ -1,0 +1,74 @@
+rules_version = '2';
+
+// Правила доступа к базе «Батончика».
+// Читать и менять данные могут только те, чей адрес почты есть в коллекции allowed.
+// Коллекцию allowed заполняют вручную в консоли Firebase: ID документа = адрес почты строчными буквами.
+// Из приложения её изменить нельзя.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null
+        && request.auth.token.email != null
+        && request.auth.token.email_verified == true;
+    }
+
+    function myEmail() {
+      return request.auth.token.email.lower();
+    }
+
+    function isAllowed() {
+      return signedIn() && exists(/databases/$(database)/documents/allowed/$(myEmail()));
+    }
+
+    // Отметка: кто (uid и имя) и когда (время сервера)
+    function validMark(d) {
+      return d.keys().hasOnly(['uid', 'name', 'at'])
+        && d.uid == request.auth.uid
+        && d.name is string && d.name.size() <= 40
+        && d.at == request.time;
+    }
+
+    // Список допущенных: каждый может проверить только свой адрес
+    match /allowed/{email} {
+      allow get: if signedIn() && email == myEmail();
+      allow list, write: if false;
+    }
+
+    // Отметки за день: один документ на дату (по Москве), поле checks
+    match /days/{day} {
+      allow read: if isAllowed();
+      allow create, update: if isAllowed()
+        && day.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+        && request.resource.data.keys().hasOnly(['checks'])
+        && request.resource.data.checks is map
+        && request.resource.data.checks.size() <= 200;
+      allow delete: if false;
+    }
+
+    // «Освоено» и галочки прогресса
+    match /marks/{id} {
+      allow read: if isAllowed();
+      allow create, update: if isAllowed() && id.size() <= 200 && validMark(request.resource.data);
+      allow delete: if isAllowed();
+    }
+
+    // Распорядок дня и список «Тренируем сейчас»
+    match /settings/{doc} {
+      allow read: if isAllowed();
+      allow create, update: if isAllowed()
+        && doc == 'plan'
+        && request.resource.data.keys().hasOnly(['schedule', 'focus', 'updatedAt', 'updatedBy'])
+        && request.resource.data.schedule is list && request.resource.data.schedule.size() <= 60
+        && request.resource.data.focus is list && request.resource.data.focus.size() <= 60
+        && request.resource.data.updatedBy is string && request.resource.data.updatedBy.size() <= 40;
+      allow delete: if false;
+    }
+
+    // Всё остальное закрыто
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
