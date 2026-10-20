@@ -305,63 +305,102 @@ export function plainText(blocks) {
 
 // Файл каталога: # группа, ## карточка, ### блок. Возвращает {groups, loose}.
 // loose — текст до первой группы (показывается сверху как есть).
+// У карточек и блоков сохраняется исходный текст (raw) — он нужен редактору и резервной копии.
 export function parseCatalog(text, usedIds = new Set()) {
-  const blocks = parseBlocks(text);
   const groups = [];
-  const loose = [];
+  const looseLines = [];
   let group = null;
   let card = null;
   let block = null;
 
-  const newGroup = (title) => { group = { title, intro: [], cards: [] }; groups.push(group); card = null; block = null; };
+  const newGroup = (title) => { group = { title, introLines: [], cards: [] }; groups.push(group); card = null; block = null; };
 
-  for (const b of blocks) {
-    if (b.type === 'heading' && b.level === 1) { newGroup(b.text); continue; }
-    if (b.type === 'heading' && b.level === 2) {
+  for (const line of stripComments(text).split('\n')) {
+    const h = line.match(/^\s{0,3}(#{1,3})\s+(.*?)\s*#*\s*$/);
+    const level = h ? h[1].length : 0;
+    if (level === 1) { newGroup(h[2]); continue; }
+    if (level === 2) {
       if (!group) newGroup('');
-      const { name, subtitle } = splitTitle(b.text);
-      let id = slug(name);
-      let n = 2;
-      while (usedIds.has(id)) id = `${slug(name)}-${n++}`;
-      usedIds.add(id);
-      card = { id, title: b.text, name, subtitle, lead: [], blocks: [] };
+      card = { title: h[2], leadLines: [], blocks: [], rawLines: [line] };
       group.cards.push(card);
       block = null;
       continue;
     }
-    if (b.type === 'heading' && b.level === 3 && card) {
-      block = { title: b.text, kind: blockKind(b.text), content: [] };
+    if (level === 3 && card) {
+      block = { title: h[2], lines: [] };
       card.blocks.push(block);
+      card.rawLines.push(line);
       continue;
     }
-    if (block) block.content.push(b);
-    else if (card) card.lead.push(b);
-    else if (group) group.intro.push(b);
-    else loose.push(b);
+    if (card) card.rawLines.push(line);
+    if (block) block.lines.push(line);
+    else if (card) card.leadLines.push(line);
+    else if (group) group.introLines.push(line);
+    else looseLines.push(line);
   }
 
+  const raw = (lines) => lines.join('\n').trim();
   for (const g of groups) {
-    for (const c of g.cards) {
-      // Короткая строка сразу под заголовком карточки — это подпись
-      if (!c.subtitle && c.lead.length === 1 && c.lead[0].type === 'para' && c.lead[0].text.length <= 100) {
-        c.subtitle = c.lead[0].text;
-        c.lead = [];
+    g.introRaw = raw(g.introLines);
+    g.intro = parseBlocks(g.introRaw);
+    delete g.introLines;
+    g.cards = g.cards.map((c) => finishCard(c, usedIds));
+  }
+  return { groups, loose: parseBlocks(raw(looseLines)) };
+}
+
+function finishCard(c, usedIds) {
+  const raw = (lines) => lines.join('\n').trim();
+  const { name, subtitle } = splitTitle(c.title);
+  let id = slug(name);
+  let n = 2;
+  while (usedIds.has(id)) id = `${slug(name)}-${n++}`;
+  usedIds.add(id);
+  const card = {
+    id, title: c.title, name, subtitle, subtitleFromLead: false,
+    raw: raw(c.rawLines), leadRaw: raw(c.leadLines), lead: parseBlocks(raw(c.leadLines)),
+    blocks: c.blocks.map((b) => ({ title: b.title, kind: blockKind(b.title), raw: raw(b.lines), content: parseBlocks(raw(b.lines)) })),
+  };
+  // Короткая строка сразу под заголовком карточки — это подпись
+  if (!card.subtitle && card.lead.length === 1 && card.lead[0].type === 'para' && card.lead[0].text.length <= 100) {
+    card.subtitle = card.lead[0].text;
+    card.subtitleFromLead = true;
+    card.lead = [];
+  }
+  card.steps = [];
+  card.stepTitles = {};
+  for (const blk of card.blocks) {
+    if (blk.kind !== 'steps' && blk.kind !== 'how') continue;
+    for (const b of blk.content) {
+      if (b.type === 'list' && (b.ordered || b.items.some((it) => it.task !== null))) {
+        b.items.forEach((it) => {
+          const key = stepKey(it.text);
+          card.steps.push(key);
+          card.stepTitles[key] = stepTitle(it.text);
+        });
       }
-      c.steps = [];
-      for (const blk of c.blocks) {
-        if (blk.kind !== 'steps' && blk.kind !== 'how') continue;
-        for (const b of blk.content) {
-          if (b.type === 'list' && (b.ordered || b.items.some((it) => it.task !== null))) {
-            b.items.forEach((it) => c.steps.push(stepKey(it.text)));
-          }
-        }
-      }
-      c.hasResult = c.blocks.some((x) => x.kind === 'result');
-      const now = c.blocks.find((x) => x.kind === 'now');
-      c.nowText = now ? plainText(now.content) : '';
     }
   }
-  return { groups, loose };
+  card.hasResult = card.blocks.some((x) => x.kind === 'result');
+  const now = card.blocks.find((x) => x.kind === 'now');
+  card.nowText = now ? plainText(now.content) : '';
+  return card;
+}
+
+// Одна карточка из Markdown (правки из приложения); id сохраняется прежним, чтобы не терять отметки
+export function parseCardMd(md, id) {
+  const cat = parseCatalog('# _\n\n' + md);
+  const card = cat.groups[0] && cat.groups[0].cards[0];
+  if (!card) return null;
+  card.id = id;
+  return card;
+}
+
+// «**1. Зарядка маркера.** Скажите…» → «Зарядка маркера»
+export function stepTitle(text) {
+  const bold = text.match(/^\*\*(.+?)\*\*/);
+  const t = bold ? bold[1] : text.replace(/\*\*/g, '').slice(0, 50);
+  return t.replace(/^\d+\.\s*/, '').replace(/[.:]\s*$/, '').trim();
 }
 
 // Ключ шага: жирное начало пункта (или первые слова), чтобы правка подробностей не сбрасывала отметку.

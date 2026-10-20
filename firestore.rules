@@ -66,6 +66,46 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // Журнал: туалет, прогулки, кормления, подъём, отбой, заметки
+    function validEvent(d) {
+      return d.keys().hasOnly(['type', 'sub', 'text', 'at', 'day', 'uid', 'name', 'createdAt'])
+        && d.type in ['toilet', 'accident', 'walk', 'meal', 'wake', 'bed', 'note']
+        && d.sub in ['', 'pee', 'poo', 'both']
+        && d.text is string && d.text.size() <= 2000
+        && d.at is timestamp
+        && d.day is string && d.day.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+        && d.uid is string && d.name is string && d.name.size() <= 40;
+    }
+
+    match /events/{id} {
+      allow read: if isAllowed();
+      allow create: if isAllowed() && validEvent(request.resource.data)
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.createdAt == request.time;
+      // Править время и комментарий может любой из двоих; автор и время создания не меняются
+      allow update: if isAllowed() && validEvent(request.resource.data)
+        && request.resource.data.uid == resource.data.uid
+        && request.resource.data.createdAt == resource.data.createdAt;
+      allow delete: if isAllowed();
+    }
+
+    // Карточки, добавленные или исправленные в приложении (поверх файлов из папки content)
+    match /cards/{id} {
+      allow read: if isAllowed();
+      allow create, update: if isAllowed()
+        && id.size() <= 120
+        && request.resource.data.keys().hasOnly(['tab', 'cardId', 'group', 'md', 'deleted', 'updatedAt', 'updatedBy'])
+        && request.resource.data.tab in ['k', 'g', 't']
+        && request.resource.data.cardId is string && request.resource.data.cardId.size() <= 100
+        && id == request.resource.data.tab + '__' + request.resource.data.cardId
+        && request.resource.data.group is string && request.resource.data.group.size() <= 200
+        && request.resource.data.md is string && request.resource.data.md.size() <= 30000
+        && request.resource.data.deleted is bool
+        && request.resource.data.updatedAt == request.time
+        && request.resource.data.updatedBy is string && request.resource.data.updatedBy.size() <= 40;
+      allow delete: if isAllowed();
+    }
+
     // Всё остальное закрыто
     match /{document=**} {
       allow read, write: if false;
