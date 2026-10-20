@@ -89,7 +89,7 @@ svg { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; 
   border-bottom: 1px solid var(--border);
 }
 .logo { display: flex; align-items: center; gap: 10px; color: var(--text); text-decoration: none; font-weight: 700; font-size: 19px; min-height: 44px; }
-.logo img { border-radius: 8px; }
+.logo img { border-radius: 50%; }
 .net { font-size: 13px; padding: 3px 10px; border-radius: 99px; background: var(--hint); border: 1px solid var(--hint-border); }
 .me-btn { margin-left: auto; width: 44px; height: 44px; display: grid; place-items: center; border-radius: 50%; color: var(--text); }
 .me-btn svg { width: 26px; height: 26px; }
