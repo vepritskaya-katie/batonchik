@@ -3,6 +3,17 @@
 import { parseBlocks, parseCatalog, parseSchedule, renderBlocks, inline, escapeHtml, hash, plainText, stepKey as stepKeyFor } from './md.js';
 import { createStore } from './store.js';
 
+// Настройки Firebase читаем отдельно: если в файле ошибка, приложение всё равно откроется
+let firebaseConfig = null;
+let configBroken = false;
+try {
+  ({ firebaseConfig } = await import('./firebase-config.js'));
+  if (!firebaseConfig || typeof firebaseConfig !== 'object') configBroken = true;
+} catch (err) {
+  console.error(err);
+  configBroken = true;
+}
+
 const TZ = 'Europe/Moscow';
 const TABS = {
   k: { title: 'Команды', files: ['komandy.md'] },
@@ -60,7 +71,7 @@ const store = createStore({
   onDay(checks) { S.checks = checks || {}; render(); },
   onMarks(marks) { S.marks = marks || {}; render(); },
   onError(message) { toast(message); },
-});
+}, firebaseConfig);
 
 const canWrite = () => S.store.status === 'ready';
 
@@ -195,9 +206,12 @@ function cardProgress(tab, card) {
 
 // ---------- Общие куски разметки ----------
 
+const CONFIG_BROKEN = `В файле js/firebase-config.js ошибка, поэтому отметки сохраняются только на этом телефоне.
+  Как исправить — README.md, шаг 8.`;
+
 function statusBanner() {
   const st = S.store;
-  if (st.mode === 'local') return '';
+  if (st.mode === 'local') return configBroken ? `<div class="banner warn">${CONFIG_BROKEN}</div>` : '';
   if (st.status === 'loading') return '<div class="banner">Подключаемся…</div>';
   if (st.status === 'signed-out') {
     return `<div class="banner">Войдите, чтобы отмечать и видеть общий прогресс.
@@ -373,7 +387,9 @@ function renderCard(tab, id) {
 function renderMe() {
   const st = S.store;
   let account = '';
-  if (st.mode === 'local') {
+  if (st.mode === 'local' && configBroken) {
+    account = `<p>${CONFIG_BROKEN}</p>`;
+  } else if (st.mode === 'local') {
     account = `<p>Общий прогресс пока не настроен, поэтому отметки сохраняются только на этом телефоне.</p>
       <p class="muted">Чтобы отмечать вдвоём, настройте Firebase по инструкции в файле README.md в репозитории.</p>`;
   } else if (st.status === 'loading') account = '<p>Подключаемся…</p>';
