@@ -2,17 +2,15 @@
 // Если Firebase настроен — общие данные в Firestore, обновления в реальном времени.
 // Если нет — всё хранится только на этом телефоне (localStorage), чтобы приложением можно было пользоваться сразу.
 
-import { firebaseConfig } from './firebase-config.js';
-
 const SDK = 'https://www.gstatic.com/firebasejs/12.19.0/';
 
-export function isConfigured() {
-  return !!(firebaseConfig && firebaseConfig.apiKey && !/ВСТАВЬТЕ/i.test(firebaseConfig.apiKey));
+export function isConfigured(config) {
+  return !!(config && typeof config.apiKey === 'string' && config.apiKey && !/ВСТАВЬТЕ/i.test(config.apiKey));
 }
 
 // Состояние: mode 'local' | 'firebase'; status 'loading' | 'signed-out' | 'denied' | 'ready' | 'error'
-export function createStore(handlers) {
-  return isConfigured() ? firebaseStore(handlers) : localStore(handlers);
+export function createStore(handlers, config) {
+  return isConfigured(config) ? firebaseStore(handlers, config) : localStore(handlers);
 }
 
 const read = (key, fallback) => {
@@ -65,7 +63,7 @@ function localStore({ onState, onPlan, onDay, onMarks }) {
 
 // ---------- Firebase ----------
 
-function firebaseStore({ onState, onPlan, onDay, onMarks, onError }) {
+function firebaseStore({ onState, onPlan, onDay, onMarks, onError }, firebaseConfig) {
   const state = { mode: 'firebase', status: 'loading', user: null, message: '' };
   let fb = null; // модули SDK
   let db = null;

@@ -1,7 +1,7 @@
 // Работа без интернета: файлы приложения и памятки хранятся на телефоне.
 // При наличии сети всегда берётся свежая версия, без сети — сохранённая.
 
-const VERSION = 'batonchik-v1';
+const VERSION = 'batonchik-v2';
 const SDK = 'https://www.gstatic.com/firebasejs/12.19.0/';
 const APP_FILES = [
   './', 'index.html', 'manifest.webmanifest', 'css/style.css',
@@ -31,7 +31,9 @@ self.addEventListener('activate', (event) => {
 async function networkFirst(request) {
   const cache = await caches.open(VERSION);
   try {
-    const response = await fetchWithTimeout(request, 5000);
+    // Мимо HTTP-кэша браузера: GitHub Pages разрешает держать старую копию до 10 минут
+    const fresh = request.mode === 'navigate' ? request : new Request(request.url, { cache: 'no-cache', credentials: 'same-origin' });
+    const response = await fetchWithTimeout(fresh, 5000);
     if (response.ok) cache.put(request, response.clone());
     return response;
   } catch {
