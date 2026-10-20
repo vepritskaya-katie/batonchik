@@ -4,7 +4,14 @@
 // Эти настройки не секретные: данные защищают правила Firestore (файл firestore.rules).
 
 export const firebaseConfig = {
-  apiKey: 'ВСТАВЬТЕ_СЮДА',
+  apiKey: 'const firebaseConfig = {
+  apiKey: "AIzaSyD2ubzpzum2nS5V7Uh8hVJvcTFw07vxke8",
+  authDomain: "batonchik-vepritskiy.firebaseapp.com",
+  projectId: "batonchik-vepritskiy",
+  storageBucket: "batonchik-vepritskiy.firebasestorage.app",
+  messagingSenderId: "38227995827",
+  appId: "1:38227995827:web:833b814ac8d462f92914c6"
+};',
   authDomain: '',
   projectId: '',
   storageBucket: '',
