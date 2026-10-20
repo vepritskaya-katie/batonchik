@@ -145,7 +145,14 @@ export function inline(text) {
   let s = escapeHtml(text);
   const codes = [];
   s = s.replace(/`([^`]+)`/g, (_, c) => { codes.push(c); return `\u0000${codes.length - 1}\u0000`; });
-  s = s.replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+  s = s.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (m, label, url) => {
+    if (/^https?:\/\//i.test(url)) return `<a href="${url}" target="_blank" rel="noopener">${label}</a>`;
+    // Ссылка на файл рядом с памяткой, например PDF в папке content
+    if (/^[\w.\-\/]+$/.test(url) && !url.startsWith('/') && !url.includes('..')) {
+      return `<a href="content/${url}" target="_blank" rel="noopener">${label}</a>`;
+    }
+    return m;
+  });
   s = s.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
   s = s.replace(/(^|[^*\w])\*(?!\s)(.+?)\*(?!\w)/g, '$1<em>$2</em>');
   s = s.replace(/\u0000(\d+)\u0000/g, (_, n) => `<code>${codes[n]}</code>`);
@@ -156,6 +163,17 @@ export function inline(text) {
 export function isHint(text) {
   return /^(дальше|переход)[^.]{0,20}когда/i.test(text.trim());
 }
+
+const HINT_RE = /\s*(?:\*\*)?((?:Дальше|Переход),?\s+когда)\s*:?\s*(?:\*\*)?\s*:?\s*/i;
+
+// «Текст шага. **Дальше, когда:** критерий» → { main: 'Текст шага.', hint: 'критерий' }
+export function splitHint(text) {
+  const m = text.match(HINT_RE);
+  if (!m || m.index === 0) return { main: text, hint: '', label: '' };
+  return { main: text.slice(0, m.index).trim(), hint: text.slice(m.index + m[0].length).trim(), label: m[1] };
+}
+
+const hintHtml = (label, hint) => `<div class="hint-box"><strong>${escapeHtml(label)}:</strong> ${inline(hint)}</div>`;
 
 // opts.task(text) → {key, html} — разметка общей галочки вместо «[ ]»
 // opts.step(item, index) → html — кнопка «Освоено» у пункта нумерованного списка верхнего уровня
@@ -178,19 +196,39 @@ function renderBlock(b, opts, depth) {
   }
 }
 
+function renderSteps(b, opts, depth) {
+  const items = b.items.map((it, idx) => {
+    let text = it.text;
+    let num = b.ordered ? b.start + idx : idx + 1;
+    const nm = text.match(/^\*\*(\d+)\.\s*/);
+    if (nm) {
+      num = +nm[1];
+      text = ('**' + text.slice(nm[0].length)).replace(/^\*\*\*\*\s*/, '');
+    }
+    const { main, hint, label } = splitHint(text);
+    return `<li class="step"><span class="num">${num}</span><div class="step-body">
+      <div class="li-text">${inline(main)}</div>${hint ? hintHtml(label, hint) : ''}
+      ${renderBlocks(it.children, opts, depth + 1)}${opts.step(it, idx)}</div></li>`;
+  }).join('');
+  return `<ol class="steps">${items}</ol>`;
+}
+
 function renderList(b, opts, depth) {
-  const isSteps = b.ordered && depth === 0 && typeof opts.step === 'function';
+  const hasTasks = b.items.some((it) => it.task !== null);
+  if (depth === 0 && typeof opts.step === 'function' && (b.ordered || hasTasks)) return renderSteps(b, opts, depth);
+  const isSteps = false;
   const tag = b.ordered ? 'ol' : 'ul';
   const startAttr = b.ordered && b.start !== 1 ? ` start="${b.start}"` : '';
-  const cls = isSteps ? ' class="steps"' : (b.items.some((it) => it.task !== null) ? ' class="tasks"' : '');
-  const items = b.items.map((it, idx) => {
+  const cls = isSteps ? ' class="steps"' : (hasTasks ? ' class="tasks"' : '');
+  const items = b.items.map((it) => {
     const children = renderBlocks(it.children, opts, depth + 1);
     if (it.task !== null && typeof opts.task === 'function') {
       return `<li class="task">${opts.task(it.text)}${children}</li>`;
     }
     const hint = isHint(it.text) ? ' class="hint"' : '';
-    const step = isSteps ? opts.step(it, idx) : '';
-    return `<li${hint}><div class="li-text">${inline(it.text)}</div>${children}${step}</li>`;
+    const split = hint ? { hint: '' } : splitHint(it.text);
+    const text = split.hint ? `${inline(split.main)}${hintHtml(split.label, split.hint)}` : inline(it.text);
+    return `<li${hint}><div class="li-text">${text}</div>${children}</li>`;
   }).join('');
   return `<${tag}${startAttr}${cls}>${items}</${tag}>`;
 }
@@ -225,6 +263,8 @@ export function hash(text) {
 // Название «"Ко мне" (подзыв, recall)» → имя «Ко мне» и подпись «подзыв, recall».
 export function splitTitle(title) {
   const i = title.indexOf(' (');
+  const dash = title.match(/^(«[^»]+»)\s+—\s+(.+)$/);
+  if (i < 0 && dash) return { name: dash[1], subtitle: dash[2].trim() };
   if (i < 0) return { name: title.trim(), subtitle: '' };
   let rest = title.slice(i + 1).trim();
   const close = rest.indexOf(')');
@@ -234,11 +274,16 @@ export function splitTitle(title) {
 
 const KINDS = [
   ['now', /^тренируем сейчас/],
-  ['why', /^зачем/],
+  ['why', /^(зачем|почему так)/],
+  ['need', /^понадобится/],
+  ['steps', /^шаги/],
   ['how', /^как тренировать/],
-  ['success', /^(считается успехом|готово, когда)/],
+  ['success', /^(считается успехом|готово, когда|освоено, когда|получается, если)/],
   ['keep', /^как поддерживать/],
-  ['important', /^важно/],
+  ['important', /^(важно|чего не делать)/],
+  ['tip', /^подсказка/],
+  ['doctor', /^когда (к |нужен)/],
+  ['result', /^итог/],
   ['play', /^как играть/],
 ];
 
@@ -297,13 +342,21 @@ export function parseCatalog(text, usedIds = new Set()) {
 
   for (const g of groups) {
     for (const c of g.cards) {
-      const how = c.blocks.find((x) => x.kind === 'how');
+      // Короткая строка сразу под заголовком карточки — это подпись
+      if (!c.subtitle && c.lead.length === 1 && c.lead[0].type === 'para' && c.lead[0].text.length <= 100) {
+        c.subtitle = c.lead[0].text;
+        c.lead = [];
+      }
       c.steps = [];
-      if (how) {
-        for (const b of how.content) {
-          if (b.type === 'list' && b.ordered) b.items.forEach((it) => c.steps.push(stepKey(it.text)));
+      for (const blk of c.blocks) {
+        if (blk.kind !== 'steps' && blk.kind !== 'how') continue;
+        for (const b of blk.content) {
+          if (b.type === 'list' && (b.ordered || b.items.some((it) => it.task !== null))) {
+            b.items.forEach((it) => c.steps.push(stepKey(it.text)));
+          }
         }
       }
+      c.hasResult = c.blocks.some((x) => x.kind === 'result');
       const now = c.blocks.find((x) => x.kind === 'now');
       c.nowText = now ? plainText(now.content) : '';
     }
@@ -314,13 +367,21 @@ export function parseCatalog(text, usedIds = new Set()) {
 // Ключ шага: жирное начало пункта (или первые слова), чтобы правка подробностей не сбрасывала отметку.
 export function stepKey(text) {
   const bold = text.match(/^\*\*(.+?)\*\*/);
-  const base = (bold ? bold[1] : text.slice(0, 60)).toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
+  const base = (bold ? bold[1] : text.slice(0, 60)).replace(/^\d+\.\s*/, '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
   return hash(base);
 }
 
-// Таблица распорядка: первая таблица в файле; текст до неё — вступление, после — заключение.
+// Расписание дня. Устройство файла:
+//   # Расписание дня          — пункты с отметками; текст под заголовком — вступление
+//   ## Утренняя прогулка      — пункт; строка под ним — ярлычок длительности
+//   ### Что делаем / ### Подсказка
+//   # В течение дня            — следующие группы показываются без отметок
+// Старый формат (одна таблица «Когда | Сколько | Что тренируем») тоже понимаем.
 export function parseSchedule(text) {
-  const blocks = parseBlocks(text);
+  const clean = stripComments(text);
+  if (/^##\s/m.test(clean)) return parseScheduleSections(clean);
+
+  const blocks = parseBlocks(clean);
   const ti = blocks.findIndex((b) => b.type === 'table');
   if (ti < 0) return null;
   const t = blocks[ti];
@@ -332,8 +393,55 @@ export function parseSchedule(text) {
   const cLong = col(/сколько|длит/, 1);
   const cWhat = col(/что|трениру/, 2);
   return {
+    title: '',
     intro: blocks.slice(0, ti).filter((b) => !(b.type === 'heading' && b.level === 1)),
     footer: blocks.slice(ti + 1),
-    rows: t.rows.map((r) => ({ when: r[cWhen] || '', howlong: r[cLong] || '', what: r[cWhat] || '' })),
+    rows: t.rows.map((r) => ({ title: r[cWhen] || '', duration: r[cLong] || '', note: r[cWhat] || '', tip: '' })),
+    extra: [],
+  };
+}
+
+function parseScheduleSections(clean) {
+  const groups = [];
+  let group = null;
+  let item = null;
+  let block = null;
+  for (const line of clean.split('\n')) {
+    const h = line.match(/^(#{1,3})\s+(.*?)\s*$/);
+    if (h && h[1].length === 1) {
+      group = { title: h[2], intro: [], items: [] };
+      groups.push(group);
+      item = null; block = null;
+    } else if (h && h[1].length === 2) {
+      if (!group) { group = { title: '', intro: [], items: [] }; groups.push(group); }
+      item = { title: h[2], lead: [], blocks: [] };
+      group.items.push(item);
+      block = null;
+    } else if (h && item) {
+      block = { title: h[2], lines: [] };
+      item.blocks.push(block);
+    } else if (block) block.lines.push(line);
+    else if (item) item.lead.push(line);
+    else if (group) group.intro.push(line);
+  }
+  const text = (lines) => lines.join('\n').trim();
+  const toRow = (it) => {
+    const note = [];
+    let tip = '';
+    for (const b of it.blocks) {
+      const name = b.title.toLowerCase();
+      if (/^подсказка/.test(name)) tip = text(b.lines);
+      else if (/^что (делаем|тренируем)/.test(name)) note.unshift(text(b.lines));
+      else if (text(b.lines)) note.push(`**${b.title}.** ${text(b.lines)}`);
+    }
+    return { title: it.title, duration: text(it.lead).split('\n')[0].trim(), note: note.filter(Boolean).join('\n\n'), tip };
+  };
+  const [main, ...rest] = groups;
+  return {
+    title: main ? main.title : '',
+    intro: main ? parseBlocks(text(main.intro)) : [],
+    footer: [],
+    rows: main ? main.items.map(toRow) : [],
+    extra: rest.map((g) => ({ title: g.title, intro: parseBlocks(text(g.intro)), items: g.items.map(toRow) })),
   };
 }
