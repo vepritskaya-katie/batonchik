@@ -273,6 +273,7 @@ export function splitTitle(title) {
 }
 
 const KINDS = [
+  ['reps', /^(количество\s+)?повтор\S*\s+в\s+день/],
   ['now', /^тренируем сейчас/],
   ['why', /^(зачем|почему так)/],
   ['need', /^понадобится/],
@@ -382,6 +383,10 @@ function finishCard(c, usedIds) {
     }
   }
   card.hasResult = card.blocks.some((x) => x.kind === 'result');
+  // «Повторов в день» — цель для главного экрана; первое число в блоке
+  const reps = card.blocks.find((x) => x.kind === 'reps');
+  const perDay = reps && parseInt((reps.raw.match(/\d+/) || [])[0], 10);
+  card.reps = perDay ? Math.min(50, Math.max(1, perDay)) : null;
   const now = card.blocks.find((x) => x.kind === 'now');
   card.nowText = now ? plainText(now.content) : '';
   return card;
@@ -455,8 +460,9 @@ export function parseToday(source) {
   const defaults = [];
   const introLines = [];
   for (const line of tg ? tg.intro : []) {
-    const m = line.match(/^\s*[-*]\s+(.+?)\s+[×x]\s*(\d{1,2})(?:\s+—\s+(.*))?\s*$/);
-    if (m) defaults.push({ name: m[1].trim(), target: +m[2], note: (m[3] || '').trim() });
+    // «- Название × 2 — пояснение»; «× N» необязательно (у тренировок цель — в карточке)
+    const m = line.match(/^\s*[-*]\s+(.+?)(?:\s+[×x]\s*(\d{1,2}))?(?:\s+—\s+(.*))?\s*$/);
+    if (m) defaults.push({ name: m[1].trim(), target: m[2] ? +m[2] : null, note: (m[3] || '').trim() });
     else introLines.push(line);
   }
   return {

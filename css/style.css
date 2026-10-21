@@ -112,6 +112,8 @@ svg { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; 
 }
 .tabbar a svg { width: 27px; height: 27px; }
 .tabbar a.on { color: var(--accent); }
+/* Иконки Material Symbols — залитые фигуры, а не линии */
+.tabbar a svg.ms { fill: currentColor; stroke: none; }
 
 /* ---------- Кнопки ---------- */
 .btn {
@@ -467,3 +469,8 @@ button.ev-row { cursor: pointer; }
 
 /* ---------- Дневник: тренировки ---------- */
 .trains { margin: 10px 0 0; font-size: 15.5px; }
+
+/* ---------- Повторов в день ---------- */
+.reps-line { margin: -4px 0 12px; font-size: 16px; }
+.reps-line a { margin-left: 6px; font-size: 15px; }
+.reps-field input { max-width: 140px; font-variant-numeric: tabular-nums; }

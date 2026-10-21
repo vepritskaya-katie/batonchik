@@ -286,7 +286,7 @@ function buildDefaultPlan() {
     schedule: [],
     focus: defaults.map((d) => {
       const found = findCardByName(d.name);
-      return found ? { id: rid(), card: `${found.tab}/${found.card.id}`, target: d.target, note: d.note, v: PLAN_VERSION } : null;
+      return found ? { id: rid(), card: `${found.tab}/${found.card.id}`, target: d.target || MIN_REPS, note: d.note, v: PLAN_VERSION } : null;
     }).filter(Boolean),
   };
 }
@@ -400,6 +400,12 @@ function journalHtml() {
   </section>`;
 }
 
+// Цель на день: у тренировки — поле «Повторов в день» в карточке (по умолчанию 5), у игры — число в списке
+function targetOf(item) {
+  const { tab, card } = cardByRef(item.card);
+  return tab === 'k' && card ? (card.reps || MIN_REPS) : item.target;
+}
+
 // Подходы за сегодня по карточкам: { 'k/ko-mne': 2 }
 function todayTrains() {
   const counts = {};
@@ -423,23 +429,25 @@ function trainingsHtml() {
   const items = plan.focus.map((it, i) => {
     const { tab, id, card } = cardByRef(it.card);
     const n = counts[it.card] || 0;
-    const done = n >= it.target;
+    const target = targetOf(it);
+    const done = n >= target;
     const name = card ? card.name : 'Карточка не найдена';
-    const segs = it.target <= 10
-      ? `<span class="segs">${Array.from({ length: it.target }, (_, j) => `<span class="seg-dot${j < n ? ' on' : ''}"></span>`).join('')}</span>`
-      : `<span class="mini-bar"><span style="width:${Math.min(100, Math.round(n / it.target * 100))}%"></span></span>`;
+    const segs = target <= 10
+      ? `<span class="segs">${Array.from({ length: target }, (_, j) => `<span class="seg-dot${j < n ? ' on' : ''}"></span>`).join('')}</span>`
+      : `<span class="mini-bar"><span style="width:${Math.min(100, Math.round(n / target * 100))}%"></span></span>`;
     return `<li class="item tr${done ? ' done' : ''}">
       ${edit ? '' : `<button class="tr-tap${done ? ' on' : ''}" data-action="tr-tap" data-card="${it.card}"${can && card ? '' : ' disabled'}
-        aria-label="Отметить повтор: ${escapeHtml(name)}, сделано ${n} из ${it.target}">
+        aria-label="Отметить повтор: ${escapeHtml(name)}, сделано ${n} из ${target}">
         ${done ? '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>' : `<span class="tr-plus">+1</span>`}</button>`}
       <div class="item-body">
         <div class="item-head">${card ? `<a class="item-title link" href="#/${tab}/${id}">${escapeHtml(name)}</a>` : `<span class="item-title muted">${name}</span>`}</div>
         ${card && tab === 'k' ? `<div class="tr-step">${escapeHtml(currentStep(tab, card))}</div>` : ''}
         ${it.note ? `<div class="muted small">${inline(it.note)}</div>` : ''}
-        <div class="tr-progress">${segs}<span class="tr-count">${n} из ${it.target}</span></div>
+        <div class="tr-progress">${segs}<span class="tr-count">${n} из ${target}</span></div>
+        ${edit && tab === 'k' && card ? `<p class="muted small">Повторов в день меняется в карточке: <a href="#/edit/k/${id}">изменить</a></p>` : ''}
         ${edit ? `<div class="edit-row">
-          <button class="icon-btn" data-action="tr-target" data-id="${it.id}" data-dir="-1" aria-label="Меньше повторов"${it.target <= 1 ? ' disabled' : ''}>−</button>
-          <button class="icon-btn" data-action="tr-target" data-id="${it.id}" data-dir="1" aria-label="Больше повторов"${it.target >= MAX_REPS ? ' disabled' : ''}>+</button>
+          ${tab === 'k' ? '' : `<button class="icon-btn" data-action="tr-target" data-id="${it.id}" data-dir="-1" aria-label="Меньше повторов"${it.target <= 1 ? ' disabled' : ''}>−</button>
+          <button class="icon-btn" data-action="tr-target" data-id="${it.id}" data-dir="1" aria-label="Больше повторов"${it.target >= MAX_REPS ? ' disabled' : ''}>+</button>`}
           <button class="icon-btn" data-action="tr-move" data-id="${it.id}" data-dir="-1" aria-label="Выше"${i === 0 ? ' disabled' : ''}>↑</button>
           <button class="icon-btn" data-action="tr-move" data-id="${it.id}" data-dir="1" aria-label="Ниже"${i === plan.focus.length - 1 ? ' disabled' : ''}>↓</button>
           <button class="btn small danger" data-action="tr-remove" data-id="${it.id}">Убрать</button>
@@ -490,8 +498,8 @@ function ideasHtml() {
 function renderToday() {
   const plan = currentPlan();
   const counts = todayTrains();
-  const total = plan.focus.reduce((a, f) => a + f.target, 0);
-  const done = plan.focus.reduce((a, f) => a + Math.min(f.target, counts[f.card] || 0), 0);
+  const total = plan.focus.reduce((a, f) => a + targetOf(f), 0);
+  const done = plan.focus.reduce((a, f) => a + Math.min(targetOf(f), counts[f.card] || 0), 0);
   const t = S.today || {};
 
   // «В течение дня» — из файла, без отметок
@@ -568,7 +576,7 @@ function renderCard(tab, id) {
   }
   const body = safe(() => {
     const lead = card.lead.length ? `<div class="prose">${blocksHtml(card.lead, tab, card)}</div>` : '';
-    return lead + card.blocks.filter((b) => b.content.length).map((b) => {
+    return lead + card.blocks.filter((b) => b.content.length && b.kind !== 'reps').map((b) => {
       if (b.kind === 'result') return resultHtml(tab, card, b);
       const opts = b.kind === 'steps' || b.kind === 'how'
         ? { step: (item) => markButton(stepId(tab, card, stepKeyFor(item.text))) } : {};
@@ -583,6 +591,7 @@ function renderCard(tab, id) {
     <div class="page-head"><h1 class="card-title">${inline(card.name)}</h1>
       ${canWrite() ? `<a class="btn small" href="#/edit/${tab}/${card.id}">Изменить</a>` : ''}</div>
     ${card.subtitle ? `<p class="card-sub big">${inline(card.subtitle)}</p>` : ''}
+    ${tab === 'k' ? `<p class="reps-line">🎯 Повторов в день: <b>${card.reps || MIN_REPS}</b>${canWrite() ? ` <a href="#/edit/k/${card.id}">изменить</a>` : ''}</p>` : ''}
     ${prog}
     ${card.steps.length || card.hasResult ? statusBanner() : ''}
     ${body}`;
@@ -614,7 +623,7 @@ function renderEditor(r) {
       const card = findCard(tab, r.id);
       if (!card) return `<p class="muted">Карточка не найдена.</p><a class="btn" href="#/${tab}">Назад</a>`;
       const g = groupOf(tab, card.id);
-      S.editor = { key: editorKey(r), tab, id: card.id, isNew, source: card.source, form: cardToForm(card, g ? g.title : '') };
+      S.editor = { key: editorKey(r), tab, id: card.id, isNew, source: card.source, form: cardToForm(card, g ? g.title : '', tab) };
     }
   }
   const e = S.editor;
@@ -873,7 +882,7 @@ function saveTrain(ref) {
   const n = (todayTrains()[ref] || 0) + 1; // считаем до записи: хранилище может обновить журнал сразу
   const id = store.addEvent({ type: 'train', card: ref, at, day: dayKey(at) });
   const it = currentPlan().focus.find((f) => f.card === ref);
-  toast(`${TRAIN.label}: ${cardName(ref)}${it ? ` — ${Math.min(n, 99)} из ${it.target}` : ''}`, {
+  toast(`${TRAIN.label}: ${cardName(ref)}${it ? ` — ${Math.min(n, 99)} из ${targetOf(it)}` : ''}`, {
     label: 'Отменить', onClick: () => { if (id) store.deleteEvent(id); },
   });
 }
@@ -1060,6 +1069,7 @@ document.addEventListener('click', (e) => {
 function onEditorInput(e) {
   const el = e.target;
   if (!S.editor || !el.dataset || !el.dataset.path || !el.closest('[data-editor]')) return;
+  if (el.dataset.path === 'reps' && /\D/.test(el.value)) el.value = el.value.replace(/\D/g, '');
   setPath(S.editor.form, el.dataset.path, el.type === 'checkbox' ? el.checked : el.value);
 }
 view.addEventListener('input', onEditorInput);
