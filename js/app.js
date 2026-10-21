@@ -1,7 +1,11 @@
 // Экраны приложения «Батончик»: Сегодня, Команды, Игры, Советы и настройки.
 
-import { parseBlocks, parseCatalog, parseSchedule, renderBlocks, inline, escapeHtml, hash, plainText, stepKey as stepKeyFor } from './md.js';
+import { parseBlocks, parseCatalog, parseCardMd, parseSchedule, renderBlocks, inline, escapeHtml, hash, plainText, stepKey as stepKeyFor } from './md.js';
 import { createStore } from './store.js';
+import { cardToForm, emptyForm, formToMd, editorHtml, editorAction, setPath } from './editor.js';
+import {
+  EVENT_TYPES, SUBS, dayKey, fmtTime, fmtDate, addDays, moscowDate, dayStats, eventRow, todaySummary, nightLine, nightFor, diaryHtml,
+} from './diary.js';
 
 // Настройки Firebase читаем отдельно: если в файле ошибка, приложение всё равно откроется
 let firebaseConfig = null;
@@ -15,6 +19,7 @@ try {
 }
 
 const TZ = 'Europe/Moscow';
+const DIARY_STEP = 28; // дневник подгружает историю по 4 недели
 const TABS = {
   k: { title: 'Команды', files: ['komandy.md'] },
   g: { title: 'Игры', files: ['igry.md'] },
@@ -22,7 +27,9 @@ const TABS = {
 };
 
 const S = {
-  catalogs: {},       // k, g, t → { groups, loose }
+  base: {},           // k, g, t → каталог из файлов
+  cardDocs: {},       // правки карточек из приложения: «k__ko-mne» → { md, group, deleted }
+  catalogs: {},       // k, g, t → { groups, loose } — файлы с правками поверх
   schedule: null,     // разобранный rasporyadok.md
   contentReady: false,
   defaultPlan: null,
@@ -30,6 +37,10 @@ const S = {
   needSeed: false,
   checks: {},
   marks: {},
+  events: [],         // журнал за сегодня
+  yesterday: [],      // журнал за вчера — для ночного перерыва, если легли до полуночи
+  diary: { from: null, events: [], days: {}, loading: false, loadedAt: 0 },
+  editor: null,       // { tab, id, form, isNew } — открытая форма правки карточки
   store: { mode: 'local', status: 'loading' },
   day: dayKey(),
   edit: { schedule: false },
@@ -40,11 +51,6 @@ const view = $('#view');
 
 // ---------- Время по Москве ----------
 
-function dayKey(date = new Date()) {
-  return new Intl.DateTimeFormat('en-CA', { timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit' }).format(date);
-}
-const fmtTime = (d) => new Intl.DateTimeFormat('ru-RU', { timeZone: TZ, hour: '2-digit', minute: '2-digit' }).format(d);
-const fmtDate = (d) => new Intl.DateTimeFormat('ru-RU', { timeZone: TZ, day: 'numeric', month: 'long' }).format(d);
 function todayTitle() {
   const s = new Intl.DateTimeFormat('ru-RU', { timeZone: TZ, weekday: 'long', day: 'numeric', month: 'long' }).format(new Date());
   return s.charAt(0).toUpperCase() + s.slice(1);
@@ -56,7 +62,9 @@ const rid = () => Math.random().toString(36).slice(2, 10);
 
 const store = createStore({
   onState(st) {
+    const becameReady = st.status === 'ready' && S.store.status !== 'ready';
     S.store = st;
+    if (becameReady) loadYesterday();
     if (st.status !== 'ready') S.edit.schedule = false;
     renderHeader();
     render();
@@ -70,10 +78,17 @@ const store = createStore({
   },
   onDay(checks) { S.checks = checks || {}; render(); },
   onMarks(marks) { S.marks = marks || {}; render(); },
+  onEvents(list) { S.events = list || []; render(); },
+  onCards(docs) { S.cardDocs = docs || {}; rebuildCatalogs(); render(); },
   onError(message) { toast(message); },
 }, firebaseConfig);
 
 const canWrite = () => S.store.status === 'ready';
+
+function loadYesterday() {
+  const y = addDays(S.day, -1);
+  store.loadHistory(y, y).then((d) => { S.yesterday = d.events; render(); }).catch(() => {});
+}
 
 function cleanPlan(p) {
   const str = (v, n) => (typeof v === 'string' ? v.slice(0, n) : '');
@@ -129,18 +144,63 @@ async function loadContent() {
         cat.groups.push({ title: '', intro: [], cards: [], raw: text });
       }
     }
-    S.catalogs[key] = cat;
+    S.base[key] = cat;
   });
   tasks.push(loadText('rasporyadok.md').then((t) => {
     try { S.schedule = parseSchedule(t) || { raw: t }; } catch { S.schedule = { raw: t }; }
   }).catch(() => { S.schedule = { error: true }; }));
   await Promise.all(tasks);
 
+  rebuildCatalogs();
   S.defaultPlan = buildDefaultPlan();
   S.contentReady = true;
   if (S.needSeed) { S.needSeed = false; store.seedPlan(S.defaultPlan); }
   render();
 }
+
+// Карточки из файлов, поверх — правки из приложения (по id карточки), в конце — новые карточки
+function rebuildCatalogs() {
+  for (const tab of Object.keys(TABS)) {
+    const base = S.base[tab];
+    if (!base) continue;
+    const docs = Object.values(S.cardDocs).filter((d) => d && d.tab === tab);
+    const byId = new Map(docs.map((d) => [d.cardId, d]));
+    const baseIds = new Set();
+    const groups = base.groups.map((g) => ({
+      ...g,
+      cards: g.cards.flatMap((c) => {
+        baseIds.add(c.id);
+        const d = byId.get(c.id);
+        if (!d) return [{ ...c, source: 'file' }];
+        if (d.deleted) return [];
+        const edited = d.md && safeParseCard(d.md, c.id);
+        return edited ? [{ ...edited, source: 'edited' }] : [{ ...c, source: 'file' }];
+      }),
+    }));
+    docs.filter((d) => !baseIds.has(d.cardId) && !d.deleted).sort((a, b) => (a.cardId < b.cardId ? -1 : 1)).forEach((d) => {
+      const card = safeParseCard(d.md, d.cardId);
+      if (!card) return;
+      let g = groups.find((x) => x.title === d.group) || groups[0];
+      if (!g) { g = { title: '', intro: [], introRaw: '', cards: [] }; groups.push(g); }
+      g.cards.push({ ...card, source: 'new' });
+    });
+    S.catalogs[tab] = { ...base, groups };
+  }
+}
+
+function safeParseCard(md, id) {
+  try { return parseCardMd(md, id); } catch (err) { console.error(err); return null; }
+}
+
+// Скрытые карточки из файлов (для восстановления в настройках)
+function hiddenCards() {
+  return Object.values(S.cardDocs).filter((d) => d && d.deleted).map((d) => {
+    const base = S.base[d.tab] && S.base[d.tab].groups.flatMap((g) => g.cards).find((c) => c.id === d.cardId);
+    return base ? { tab: d.tab, id: d.cardId, name: base.name } : null;
+  }).filter(Boolean);
+}
+
+const groupOf = (tab, id) => (S.catalogs[tab] ? S.catalogs[tab].groups.find((g) => g.cards.some((c) => c.id === id)) : null);
 
 const commandCards = () => (S.catalogs.k ? S.catalogs.k.groups.flatMap((g) => g.cards) : []);
 const findCard = (tab, id) => (S.catalogs[tab] ? S.catalogs[tab].groups.flatMap((g) => g.cards).find((c) => c.id === id) : null);
@@ -256,6 +316,24 @@ function scheduleItemHtml(it, opts = {}) {
     ${opts.after || ''}`;
 }
 
+// Журнал: кнопки быстрых записей и лента за сегодня
+function journalHtml() {
+  const can = canWrite();
+  const buttons = Object.entries(EVENT_TYPES).map(([type, t]) =>
+    `<button class="ev-btn" data-action="ev-add" data-type="${type}"${can ? '' : ' disabled'}><span class="ev-icon" aria-hidden="true">${t.icon}</span><span>${t.label}</span></button>`).join('');
+  const st = dayStats(S.day, S.events, S.checks, 0);
+  const night = nightFor(S.day, [...S.yesterday, ...S.events]);
+  const list = [...st.list].reverse();
+  return `<section class="section">
+    <div class="section-head"><h2>Журнал</h2><a class="btn small" href="#/d">Дневник</a></div>
+    <div class="ev-buttons">${buttons}</div>
+    ${todaySummary(st)}
+    ${nightLine(night)}
+    ${list.length ? `<ul class="ev-list">${list.map((e) => eventRow(e, { editable: can })).join('')}</ul>`
+      : '<p class="muted">Сегодня ещё ничего не записано. Нажмите кнопку, и запись появится здесь с временем и именем.</p>'}
+  </section>`;
+}
+
 function renderToday() {
   const plan = currentPlan();
   const editS = S.edit.schedule;
@@ -299,6 +377,7 @@ function renderToday() {
       <p class="muted">Сделано ${done} из ${total}. Отметки обнуляются в полночь по Москве.</p>` : ''}
     </div>
     ${statusBanner()}
+    ${journalHtml()}
     <section class="section">
       <div class="section-head"><h2>${escapeHtml(sch.title || 'Расписание дня')}</h2>${editBtn}</div>
       ${sch.intro && sch.intro.length ? `<details class="intro"><summary>Как устроено расписание</summary><div class="prose">${renderBlocks(sch.intro)}</div></details>` : ''}
@@ -349,7 +428,8 @@ function renderCatalog(tab) {
       ${cards ? `<ul class="cards">${cards}</ul>` : (g.intro.length ? '' : '<p class="empty">Здесь пока пусто.</p>')}
     </section>`;
   }).join('');
-  return `<h1>${single ? inline(cat.groups[0].title) : title}</h1>${errors}${loose}${groups}`;
+  const addBtn = canWrite() ? `<a class="btn small" href="#/edit/${tab}/new">+ Новая карточка</a>` : '';
+  return `<div class="page-head"><h1>${single ? inline(cat.groups[0].title) : title}</h1>${addBtn}</div>${errors}${loose}${groups}`;
 }
 
 function renderCard(tab, id) {
@@ -372,7 +452,8 @@ function renderCard(tab, id) {
   const prog = p.mastered ? '<p class="card-prog ok big">✓ Освоено</p>'
     : (p.total ? `<p class="muted">Освоено шагов: ${p.done} из ${p.total}</p>` : '');
   return `${back}
-    <h1 class="card-title">${inline(card.name)}</h1>
+    <div class="page-head"><h1 class="card-title">${inline(card.name)}</h1>
+      ${canWrite() ? `<a class="btn small" href="#/edit/${tab}/${card.id}">Изменить</a>` : ''}</div>
     ${card.subtitle ? `<p class="card-sub big">${inline(card.subtitle)}</p>` : ''}
     ${prog}
     ${card.steps.length || card.hasResult ? statusBanner() : ''}
@@ -387,6 +468,124 @@ function resultHtml(tab, card, b) {
     ? markButton(cardId(tab, card), escapeHtml(items[0].text.replace(/\*\*/g, '')) || 'Освоено')
     : `<div class="prose">${blocksHtml(b.content, tab, card)}</div>`;
   return `<section class="blk blk-result"><h2>${inline(b.title)}</h2>${inner}</section>`;
+}
+
+// ---------- Редактор карточки ----------
+
+function editorKey(r) { return `${r.tab}/${r.id}`; }
+
+function renderEditor(r) {
+  const tab = r.tab;
+  if (!TABS[tab] || !S.catalogs[tab]) return '<p class="muted">Загружаем…</p>';
+  if (!canWrite()) return `<p class="muted">Чтобы править карточки, войдите в приложение.</p><a class="btn" href="#/${tab}">Назад</a>`;
+  const isNew = r.id === 'new';
+  if (!S.editor || S.editor.key !== editorKey(r)) {
+    const groups = S.catalogs[tab].groups.map((g) => g.title).filter(Boolean);
+    if (isNew) S.editor = { key: editorKey(r), tab, id: null, isNew, form: emptyForm(tab, groups[0] || '') };
+    else {
+      const card = findCard(tab, r.id);
+      if (!card) return `<p class="muted">Карточка не найдена.</p><a class="btn" href="#/${tab}">Назад</a>`;
+      const g = groupOf(tab, card.id);
+      S.editor = { key: editorKey(r), tab, id: card.id, isNew, source: card.source, form: cardToForm(card, g ? g.title : '') };
+    }
+  }
+  const e = S.editor;
+  return editorHtml({
+    tab, form: e.form, isNew,
+    groups: S.catalogs[tab].groups.map((g) => g.title).filter(Boolean),
+    canReset: e.source === 'edited',
+    title: isNew ? `Новая карточка · ${TABS[tab].title}` : 'Изменить карточку',
+  });
+}
+
+function saveEditor() {
+  const e = S.editor;
+  if (!e) return;
+  if (!e.form.name.trim()) { toast('Впишите название карточки.'); return; }
+  const id = e.isNew ? 'n' + Date.now().toString(36) : e.id;
+  const group = e.isNew ? e.form.group : ((groupOf(e.tab, id) || {}).title || '');
+  store.saveCard(e.tab, id, { group, md: formToMd(e.form) });
+  S.editor = null;
+  location.hash = `#/${e.tab}/${id}`;
+  toast('Карточка сохранена.');
+}
+
+// ---------- Дневник ----------
+
+async function loadDiary(more) {
+  const today = S.day;
+  const from = more && S.diary.from ? addDays(S.diary.from, -DIARY_STEP) : addDays(today, -(DIARY_STEP - 1));
+  S.diary.loading = true;
+  render();
+  try {
+    const data = await store.loadHistory(from, today);
+    S.diary = { from, events: data.events, days: data.days, loading: false, loadedAt: Date.now() };
+  } catch (err) {
+    console.error(err);
+    S.diary.loading = false;
+    toast('Не удалось загрузить дневник. Проверьте интернет.');
+  }
+  render();
+}
+
+// Подпись отметки «Освоено» для дневника: «"Буп": Ладонь у носа»
+function markLabel(id) {
+  const [type, tab, cid, key] = id.split('_');
+  const card = findCard(tab, cid);
+  if (!card) return null;
+  if (type === 'card') return `${card.name} — вся карточка`;
+  if (type === 'step') return card.stepTitles[key] ? `${card.name}: ${card.stepTitles[key]}` : card.name;
+  if (type === 'task') {
+    for (const b of card.blocks) for (const x of b.content) {
+      if (x.type !== 'list') continue;
+      const it = x.items.find((i) => i.task !== null && taskId(tab, card, i.text) === id);
+      if (it) return `${card.name}: ${it.text.replace(/\*\*/g, '')}`;
+    }
+    return card.name;
+  }
+  return null;
+}
+
+function renderDiary() {
+  if (!canWrite()) return `<h1>Дневник</h1>${statusBanner()}<p class="muted">Дневник появится после входа.</p>`;
+  if (!S.diary.from || (Date.now() - S.diary.loadedAt > 60000 && !S.diary.loading)) {
+    if (!S.diary.loading) setTimeout(() => loadDiary(false), 0);
+  }
+  const today = S.day;
+  // Сегодняшние записи — живые, остальное — из загруженной истории
+  const events = [...S.diary.events.filter((e) => e.day !== today), ...S.events];
+  const total = currentPlan().schedule.length;
+  const days = [];
+  for (let k = today; S.diary.from && k >= S.diary.from; k = addDays(k, -1)) {
+    days.push(dayStats(k, events, k === today ? S.checks : S.diary.days[k], total));
+  }
+  const markLabels = {};
+  for (const [id, m] of Object.entries(S.marks)) {
+    if (!m.at) continue;
+    const label = markLabel(id);
+    if (label) (markLabels[dayKey(m.at)] = markLabels[dayKey(m.at)] || []).push(label);
+  }
+  return diaryHtml({ days, prevWeek: days.slice(7, 14), markLabels, hasMore: !!S.diary.from && !S.diary.loading, loading: S.diary.loading || !S.diary.from });
+}
+
+// ---------- Резервная копия ----------
+
+function download(name, text, type) {
+  const url = URL.createObjectURL(new Blob([text], { type }));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
+}
+
+// Каталог вкладки в том же формате, что файлы в папке content (с правками из приложения)
+function catalogMd(tab) {
+  const cat = S.catalogs[tab];
+  return cat.groups.map((g) => [g.title ? `# ${g.title}` : '', g.introRaw || '', ...g.cards.map((c) => c.raw)]
+    .filter(Boolean).join('\n\n')).join('\n\n') + '\n';
 }
 
 // ---------- Настройки ----------
@@ -418,6 +617,18 @@ function renderMe() {
   return `<h1>Настройки</h1>
     <section class="section panel"><h2>Аккаунт</h2>${account}</section>
     <section class="section panel"><h2>Тема</h2><div class="segmented">${opt('auto', 'Как в телефоне')}${opt('light', 'Светлая')}${opt('dark', 'Тёмная')}</div></section>
+    ${hiddenCards().length ? `<section class="section panel"><h2>Удалённые карточки</h2>
+      <p class="muted">Эти карточки из файлов скрыты в приложении. Их можно вернуть.</p>
+      <ul class="plain-list">${hiddenCards().map((c) => `<li><span>${escapeHtml(c.name)} <span class="muted">· ${TABS[c.tab].title}</span></span>
+        <button class="btn small" data-action="card-restore" data-tab="${c.tab}" data-id="${c.id}"${canWrite() ? '' : ' disabled'}>Вернуть</button></li>`).join('')}</ul></section>` : ''}
+    <section class="section panel"><h2>Резервная копия</h2>
+      <p class="muted">Карточки скачиваются в том же формате, что файлы в папке content, вместе с вашими правками. Журнал, отметки и расписание — одним файлом .json.</p>
+      <div class="edit-actions">
+        <button class="btn small" data-action="backup-md" data-tab="k">Команды (.md)</button>
+        <button class="btn small" data-action="backup-md" data-tab="g">Игры (.md)</button>
+        <button class="btn small" data-action="backup-md" data-tab="t">Советы (.md)</button>
+        <button class="btn small" data-action="backup-json"${canWrite() ? '' : ' disabled'}>Журнал и отметки (.json)</button>
+      </div></section>
     <section class="section panel"><h2>Содержание</h2>
       <p class="muted">Тексты берутся из файлов в папке content. После замены файла на GitHub нажмите кнопку ниже.</p>
       <button class="btn wide" data-action="reload">Загрузить свежую версию</button></section>`;
@@ -427,26 +638,33 @@ function renderMe() {
 
 function route() {
   const parts = location.hash.replace(/^#\/?/, '').split('/').filter(Boolean).map(decodeURIComponent);
-  return { tab: parts[0] || 'today', id: parts[1] || null };
+  if (parts[0] === 'edit') return { page: 'edit', tab: parts[1], id: parts[2] || 'new' };
+  return { page: parts[0] || 'today', tab: parts[0] || 'today', id: parts[1] || null };
 }
 
 let lastRouteKey = '';
 
-function render() {
+function render(force) {
   const r = route();
+  if (r.page !== 'edit') S.editor = null;
+  // Открытую форму правки не перерисовываем от обновлений с сервера, чтобы не стереть набранный текст
+  if (r.page === 'edit' && !force && S.editor && S.editor.key === editorKey(r) && view.querySelector('[data-editor]')) return;
   let html;
-  if (r.tab === 'me') html = renderMe();
+  if (r.page === 'me') html = renderMe();
+  else if (r.page === 'edit') html = renderEditor(r);
+  else if (r.page === 'd') html = renderDiary();
   else if (TABS[r.tab]) html = r.id ? renderCard(r.tab, r.id) : renderCatalog(r.tab);
   else html = renderToday();
   view.innerHTML = html;
 
-  const routeKey = r.tab + '/' + (r.id || '');
+  const routeKey = r.page + '/' + (r.tab || '') + '/' + (r.id || '');
   if (routeKey !== lastRouteKey) {
     lastRouteKey = routeKey;
     window.scrollTo(0, 0);
   }
   document.querySelectorAll('.tabbar a').forEach((a) => {
-    const on = a.dataset.tab === (TABS[r.tab] || r.tab === 'me' ? r.tab : 'today');
+    const current = r.page === 'edit' ? r.tab : (TABS[r.tab] || r.page === 'me' || r.page === 'd' ? r.page : 'today');
+    const on = a.dataset.tab === current;
     a.classList.toggle('on', on);
     if (on) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
   });
@@ -512,6 +730,56 @@ function editItem(id) {
   });
 }
 
+function saveEvent(type, extra = {}) {
+  const at = new Date();
+  const id = store.addEvent({ type, sub: '', text: '', ...extra, at, day: dayKey(at) });
+  const t = EVENT_TYPES[type];
+  toast(`Записано: ${t.label.toLowerCase()}${extra.sub ? ` — ${SUBS[extra.sub]}` : ''}, ${fmtTime(at)}`, {
+    label: 'Отменить', onClick: () => { if (id) store.deleteEvent(id); },
+  });
+}
+
+function addEventFlow(type) {
+  const t = EVENT_TYPES[type];
+  if (!t) return;
+  if (t.subs) {
+    openSheet(`<div class="form"><h2>${t.icon} ${t.label}</h2>
+      ${Object.entries(SUBS).map(([k, v]) => `<button type="button" class="pick big" data-action="ev-sub" data-type="${type}" data-sub="${k}">${v.charAt(0).toUpperCase() + v.slice(1)}</button>`).join('')}
+      <div class="form-actions"><button type="button" class="btn" data-action="sheet-close">Отмена</button></div></div>`, null);
+  } else if (t.text) {
+    openSheet(`<form class="form"><h2>${t.icon} ${t.label}</h2>
+      <label>Что произошло <textarea name="text" rows="4" maxlength="2000" required placeholder="Например: «Буп» на выходе из лифта получился 4 раза из 5"></textarea></label>
+      <div class="form-actions"><button type="button" class="btn" data-action="sheet-close">Отмена</button><button class="btn primary">Записать</button></div>
+    </form>`, (fd) => {
+      const text = String(fd.get('text')).trim();
+      if (text) saveEvent(type, { text });
+    });
+    setTimeout(() => { const ta = sheet.querySelector('textarea'); if (ta) ta.focus(); }, 50);
+  } else {
+    saveEvent(type);
+  }
+}
+
+function editEvent(id) {
+  const e = S.events.find((x) => x.id === id);
+  if (!e) return;
+  const t = EVENT_TYPES[e.type] || { label: e.type, icon: '' };
+  openSheet(`<form class="form"><h2>${t.icon} ${t.label}</h2>
+    <label>Время <input type="time" name="time" required value="${fmtTime(e.at)}"></label>
+    ${t.subs ? `<label>Что было <select name="sub">${Object.entries(SUBS).map(([k, v]) => `<option value="${k}"${e.sub === k ? ' selected' : ''}>${v}</option>`).join('')}</select></label>` : ''}
+    <label>${t.text ? 'Текст заметки' : 'Комментарий'} <textarea name="text" rows="3" maxlength="2000">${escapeHtml(e.text)}</textarea></label>
+    <p class="muted small">Записал${e.name ? `: ${escapeHtml(e.name)}` : 'и'}</p>
+    <div class="form-actions"><button type="button" class="btn" data-action="sheet-close">Отмена</button><button class="btn primary">Сохранить</button></div>
+    <button type="button" class="btn danger-outline wide" data-action="ev-delete" data-id="${e.id}">Удалить запись</button>
+  </form>`, (fd) => {
+    const patch = { text: String(fd.get('text') || '').trim() };
+    const hm = String(fd.get('time') || '');
+    if (/^\d\d:\d\d$/.test(hm)) patch.at = moscowDate(e.day, hm);
+    if (t.subs) patch.sub = String(fd.get('sub'));
+    store.updateEvent(e.id, patch);
+  });
+}
+
 function move(list, id, dir) {
   const i = list.findIndex((x) => x.id === id);
   const j = i + dir;
@@ -547,6 +815,65 @@ const actions = {
     S.defaultPlan = buildDefaultPlan();
     savePlan((p) => { p.schedule = S.defaultPlan.schedule; p.focus = []; });
   },
+  // Журнал
+  'ev-add': (el) => addEventFlow(el.dataset.type),
+  'ev-sub': (el) => { closeSheet(); saveEvent(el.dataset.type, { sub: el.dataset.sub }); },
+  'ev-edit': (el) => editEvent(el.dataset.id),
+  'ev-delete': (el) => {
+    if (!confirm('Удалить запись?')) return;
+    store.deleteEvent(el.dataset.id);
+    closeSheet();
+  },
+  // Редактор карточек
+  'ed-add-block': (el) => { editorAction(S.editor.form, 'ed-add-block', el.dataset); render(true); },
+  'ed-add-step': (el) => { editorAction(S.editor.form, 'ed-add-step', el.dataset); render(true); },
+  'ed-move': (el) => { editorAction(S.editor.form, 'ed-move', el.dataset); render(true); },
+  'ed-remove': (el) => {
+    const what = el.dataset.kind === 'block' ? 'блок' : 'шаг';
+    if (!confirm(`Удалить ${what}?`)) return;
+    editorAction(S.editor.form, 'ed-remove', el.dataset);
+    render(true);
+  },
+  'ed-cancel': () => {
+    const e = S.editor;
+    S.editor = null;
+    location.hash = e && e.id ? `#/${e.tab}/${e.id}` : `#/${e ? e.tab : ''}`;
+  },
+  'ed-delete': () => {
+    const e = S.editor;
+    if (!confirm('Удалить карточку? Отметки «Освоено» по ней сохранятся, но карточка исчезнет из списка.')) return;
+    if (e.source === 'new') store.removeCard(e.tab, e.id);
+    else store.saveCard(e.tab, e.id, { deleted: true, md: '', group: (groupOf(e.tab, e.id) || {}).title || '' });
+    S.editor = null;
+    location.hash = `#/${e.tab}`;
+    toast(e.source === 'new' ? 'Карточка удалена.' : 'Карточка удалена. Вернуть её можно в настройках.');
+  },
+  'ed-reset': () => {
+    const e = S.editor;
+    if (!confirm('Вернуть карточку как в файле? Ваши правки в приложении пропадут.')) return;
+    store.removeCard(e.tab, e.id);
+    S.editor = null;
+    location.hash = `#/${e.tab}/${e.id}`;
+  },
+  'card-restore': (el) => { store.removeCard(el.dataset.tab, el.dataset.id); toast('Карточка вернулась.'); },
+  // Резервная копия
+  'backup-md': (el) => {
+    const tab = el.dataset.tab;
+    if (!S.catalogs[tab]) return;
+    download(`batonchik-${({ k: 'komandy', g: 'igry', t: 'sovety' })[tab]}-${S.day}.md`, catalogMd(tab), 'text/markdown;charset=utf-8');
+  },
+  'backup-json': async () => {
+    try {
+      const data = await store.exportAll();
+      if (!data) return;
+      download(`batonchik-dannye-${S.day}.json`, JSON.stringify({ exportedAt: new Date().toISOString(), ...data }, null, 2), 'application/json');
+    } catch (err) {
+      console.error(err);
+      toast('Не удалось собрать резервную копию. Проверьте интернет.');
+    }
+  },
+  'diary-more': () => loadDiary(true),
+  'toast-action': () => { const fn = toastAction; hideToast(); if (fn) fn(); },
   'clear-time': () => { sheet.querySelector('input[name=time]').value = ''; },
   'sheet-close': () => closeSheet(),
   'sign-in': () => store.signIn(),
@@ -561,6 +888,20 @@ document.addEventListener('click', (e) => {
   if (!el || el.disabled) return;
   const fn = actions[el.dataset.action];
   if (fn) { e.preventDefault(); fn(el); }
+});
+
+// Поля редактора карточки пишут прямо в черновик формы
+function onEditorInput(e) {
+  const el = e.target;
+  if (!S.editor || !el.dataset || !el.dataset.path || !el.closest('[data-editor]')) return;
+  setPath(S.editor.form, el.dataset.path, el.type === 'checkbox' ? el.checked : el.value);
+}
+view.addEventListener('input', onEditorInput);
+view.addEventListener('change', onEditorInput);
+view.addEventListener('submit', (e) => {
+  if (!e.target.matches('[data-editor]')) return;
+  e.preventDefault();
+  saveEditor();
 });
 
 sheet.addEventListener('submit', (e) => {
@@ -589,12 +930,18 @@ function applyTheme() {
 // ---------- Уведомления ----------
 
 let toastTimer = null;
-function toast(text) {
+let toastAction = null;
+function toast(text, action) {
   const t = $('#toast');
-  t.textContent = text;
+  toastAction = action ? action.onClick : null;
+  t.innerHTML = `<span>${escapeHtml(text)}</span>${action ? `<button class="toast-btn" data-action="toast-action">${escapeHtml(action.label)}</button>` : ''}`;
   t.hidden = false;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { t.hidden = true; }, 5000);
+  toastTimer = setTimeout(hideToast, action ? 7000 : 5000);
+}
+function hideToast() {
+  $('#toast').hidden = true;
+  toastAction = null;
 }
 
 // ---------- Запуск ----------
@@ -604,6 +951,8 @@ function checkDay() {
   if (k !== S.day) {
     S.day = k;
     S.checks = {};
+    S.yesterday = S.events;
+    S.events = [];
     store.setDay(k);
     render();
   }
