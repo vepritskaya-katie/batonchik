@@ -11,12 +11,17 @@ export const SUGGESTED_BLOCKS = {
 };
 
 const isStepsTitle = (t) => /^шаги/i.test(t.trim());
+export const DEFAULT_REPS = 5;
+const REPS_TITLE = 'Повторов в день';
+// Число повторов в день: только цифры, от 1 до 50
+const cleanReps = (v) => { const n = parseInt(String(v || '').replace(/\D/g, ''), 10); return n ? Math.min(50, Math.max(1, n)) : ''; };
 
 export function emptyForm(tab, group) {
   return {
     group: group || '',
     name: '',
     subtitle: '',
+    reps: tab === 'k' ? DEFAULT_REPS : '',
     lead: '',
     result: tab !== 't',
     blocks: SUGGESTED_BLOCKS[tab].map((title) => (isStepsTitle(title)
@@ -26,16 +31,18 @@ export function emptyForm(tab, group) {
 }
 
 // Разобранная карточка (из md.js) → форма
-export function cardToForm(card, group) {
+export function cardToForm(card, group, tab) {
   const form = {
     group: group || '',
     name: card.name,
     subtitle: card.subtitle,
+    reps: card.reps || (tab === 'k' ? DEFAULT_REPS : ''),
     lead: card.subtitleFromLead ? '' : card.leadRaw,
     result: false,
     blocks: [],
   };
   for (const b of card.blocks) {
+    if (b.kind === 'reps') continue; // это поле формы, а не блок
     if (b.kind === 'result' && isSingleResult(b)) { form.result = true; continue; }
     const steps = b.kind === 'steps' ? stepsFromBlock(b) : null;
     if (steps) form.blocks.push({ title: b.title, type: 'steps', steps });
@@ -80,6 +87,7 @@ export function formToMd(form) {
   if (oneLine(form.subtitle)) out.push(oneLine(form.subtitle));
   out.push('');
   if (clean(form.lead)) out.push(clean(form.lead), '');
+  if (cleanReps(form.reps)) out.push(`### ${REPS_TITLE}`, String(cleanReps(form.reps)), '');
   for (const b of form.blocks) {
     const title = oneLine(b.title);
     if (!title) continue;
@@ -144,6 +152,8 @@ export function editorHtml({ tab, form, isNew, groups, canReset, title }) {
       `<option${g === form.group ? ' selected' : ''}>${escapeHtml(g)}</option>`).join('')}</select></label>` : ''}
     <label>Название ${field('name', form.name, { ph: 'Например: «Место»' })}</label>
     <label>Подпись <span class="muted">(необязательно, коротко)</span> ${field('subtitle', form.subtitle, { max: 100, ph: 'Например: с ~6 месяцев' })}</label>
+    ${tab === 'k' ? `<label class="reps-field">Повторов в день <span class="muted">(цель на главном экране)</span>
+      <input type="number" inputmode="numeric" pattern="[0-9]*" min="1" max="50" step="1" data-path="reps" value="${escapeHtml(String(form.reps || DEFAULT_REPS))}"></label>` : ''}
     <label>Вступление <span class="muted">(необязательно)</span> ${field('lead', form.lead, { area: true, rows: 2 })}</label>
     <p class="muted small">В тексте блоков: строка, начинающаяся с «- », — пункт списка; **слово** — жирный шрифт.</p>
     ${blocks}
