@@ -23,10 +23,13 @@ const TZ = 'Europe/Moscow';
 const DIARY_STEP = 28; // дневник подгружает историю по 4 недели
 const MIN_REPS = 5;   // цель по умолчанию для тренировки на сегодня: не меньше 5 повторов
 const MAX_REPS = 50;
-const PLAN_VERSION = 2; // v у пункта: 2 — цель уже поднята до MIN_REPS
+// Версия списка тренировок (v у пункта): 2 — цели подняты до MIN_REPS, 3 — добавлены ежедневные
+// «Протокол расслабления» и «Спокойно, пока мы едим»
+const PLAN_VERSION = 3;
+const ADDED_IN_V3 = ['k/protokol-rasslableniya', 'k/spokoyno-poka-my-edim'];
 const TABS = {
-  k: { title: 'Тренировки', heading: 'Каталог тренировок', files: ['komandy.md'] },
-  g: { title: 'Игры', files: ['igry.md'] },
+  k: { title: 'Тренировки', heading: 'Каталог тренировок', files: ['komandy.md'], sorted: true },
+  g: { title: 'Игры', files: ['igry.md'], sorted: true },
   t: { title: 'Советы', files: ['sovety.md'] },
 };
 
@@ -123,12 +126,26 @@ function migratePlan() {
     savePlan((p) => { p.schedule = []; p.focus = S.defaultPlan.focus; });
     return;
   }
-  // Раньше цели были по 1–3 подхода; теперь не меньше MIN_REPS повторов. Поднимаем один раз
+  // Обновления списка, по одному разу: цели не меньше MIN_REPS (v2), новые ежедневные тренировки (v3)
   if (S.plan.focus.some((f) => f.v < PLAN_VERSION)) {
     S.migrated = true;
-    savePlan((p) => p.focus.forEach((f) => {
-      if (f.v < PLAN_VERSION) { f.target = Math.max(MIN_REPS, f.target); f.v = PLAN_VERSION; }
-    }));
+    const needsV3 = S.plan.focus.some((f) => f.v < 3);
+    savePlan((p) => {
+      p.focus.forEach((f) => {
+        if (f.v < 2) f.target = Math.max(MIN_REPS, f.target);
+        f.v = PLAN_VERSION;
+      });
+      if (!needsV3) return;
+      for (const ref of ADDED_IN_V3) {
+        const item = S.defaultPlan.focus.find((f) => f.card === ref);
+        if (!item || p.focus.some((f) => f.card === ref)) continue;
+        // На то же место, что в памятке: после предыдущего пункта списка по умолчанию, если он есть
+        const order = S.defaultPlan.focus.map((f) => f.card);
+        const before = order.slice(0, order.indexOf(ref)).reverse().find((c) => p.focus.some((f) => f.card === c));
+        const at = before ? p.focus.findIndex((f) => f.card === before) + 1 : p.focus.length;
+        p.focus.splice(at, 0, { ...item, id: rid(), v: PLAN_VERSION });
+      }
+    });
   }
 }
 
@@ -211,6 +228,11 @@ function rebuildCatalogs() {
       if (!g) { g = { title: '', intro: [], introRaw: '', cards: [] }; groups.push(g); }
       g.cards.push({ ...card, source: 'new' });
     });
+    // Тренировки и игры — по алфавиту внутри каждого раздела, без учёта кавычек
+    if (TABS[tab].sorted) {
+      const key = (c) => c.name.replace(/[«»„“"']/g, '').trim();
+      groups.forEach((g) => g.cards.sort((a, b) => key(a).localeCompare(key(b), 'ru')));
+    }
     S.catalogs[tab] = { ...base, groups };
   }
 }
@@ -264,7 +286,7 @@ function buildDefaultPlan() {
     schedule: [],
     focus: defaults.map((d) => {
       const found = findCardByName(d.name);
-      return found ? { id: rid(), card: `${found.tab}/${found.card.id}`, target: Math.max(MIN_REPS, d.target), note: d.note, v: PLAN_VERSION } : null;
+      return found ? { id: rid(), card: `${found.tab}/${found.card.id}`, target: d.target, note: d.note, v: PLAN_VERSION } : null;
     }).filter(Boolean),
   };
 }
