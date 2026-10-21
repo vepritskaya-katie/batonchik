@@ -294,7 +294,7 @@ function firebaseStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onE
     },
 
     // Журнал: {type, sub, text, card, at: Date, day}; возвращает id записи (для «Отменить»).
-    // card — карточка тренировки или игры («k/ko-mne»), только у подходов (type 'train')
+    // card — карточка тренировки или игры («k/ko-mne»), только у повторов тренировок (type 'train')
     addEvent(ev) {
       if (!ready()) return null;
       const { doc, collection, setDoc, serverTimestamp, Timestamp } = fb.fs;
