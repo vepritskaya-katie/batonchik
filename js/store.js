@@ -117,7 +117,10 @@ function firebaseStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onE
   const toMark = (v) => ({ uid: v.uid, name: v.name || '', at: toDate(v.at) });
   const toEvent = (d) => {
     const v = d.data({ serverTimestamps: 'estimate' });
-    return { id: d.id, type: v.type, sub: v.sub || '', text: v.text || '', at: toDate(v.at) || new Date(), day: v.day, uid: v.uid, name: v.name || '' };
+    return {
+      id: d.id, type: v.type, sub: v.sub || '', text: v.text || '', card: v.card || '',
+      at: toDate(v.at) || new Date(), day: v.day, uid: v.uid, name: v.name || '',
+    };
   };
 
   function stopListeners() {
@@ -290,15 +293,18 @@ function firebaseStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onE
       } catch (err) { fail(err); }
     },
 
-    // Журнал: {type, sub, text, at: Date, day}; возвращает id записи (для «Отменить»)
+    // Журнал: {type, sub, text, card, at: Date, day}; возвращает id записи (для «Отменить»).
+    // card — карточка тренировки или игры («k/ko-mne»), только у подходов (type 'train')
     addEvent(ev) {
       if (!ready()) return null;
       const { doc, collection, setDoc, serverTimestamp, Timestamp } = fb.fs;
       const ref = doc(collection(db, 'events'));
-      setDoc(ref, {
+      const data = {
         type: ev.type, sub: ev.sub || '', text: ev.text || '', at: Timestamp.fromDate(ev.at), day: ev.day,
         uid: state.user.uid, name: state.user.name, createdAt: serverTimestamp(),
-      }).catch(fail);
+      };
+      if (ev.card) data.card = ev.card;
+      setDoc(ref, data).catch(fail);
       return ref.id;
     },
 
