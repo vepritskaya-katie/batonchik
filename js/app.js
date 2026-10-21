@@ -217,6 +217,11 @@ function rebuildCatalogs() {
         const d = byId.get(c.id);
         if (!d) return [{ ...c, source: 'file' }];
         if (d.deleted) return [];
+        const repsOnly = repsOnlyValue(d.md);
+        if (repsOnly) {
+          const raw = c.raw.replace(/(### Повторов в день\n)\d+/, `$1${repsOnly}`);
+          return [{ ...c, raw, reps: repsOnly, source: 'file' }];
+        }
         const edited = d.md && safeParseCard(d.md, c.id);
         return edited ? [{ ...edited, source: 'edited' }] : [{ ...c, source: 'file' }];
       }),
@@ -244,6 +249,26 @@ function movedDocs(base, kDocs) {
   const kIds = new Set(base.groups.flatMap((g) => g.cards.map((c) => c.id)));
   const tIds = new Set(S.base.t ? S.base.t.groups.flatMap((g) => g.cards.map((c) => c.id)) : []);
   return Object.values(S.cardDocs).filter((d) => d && d.tab === MOVED_FROM && kIds.has(d.cardId) && !tIds.has(d.cardId) && !have.has(d.cardId));
+}
+
+// Правка только числа «Повторов в день» кнопками «−» / «+» на главном экране хранится короткой пометкой,
+// чтобы текст карточки по-прежнему брался из файла и получал обновления
+const REPS_ONLY = /^<!-- reps:(\d{1,2}) -->$/;
+const repsOnlyValue = (md) => { const m = String(md || '').trim().match(REPS_ONLY); return m ? +m[1] : null; };
+
+function setCardReps(ref, value) {
+  const { tab, id, card } = cardByRef(ref);
+  if (!card) return;
+  const n = Math.min(MAX_REPS, Math.max(1, value));
+  const group = (groupOf(tab, id) || {}).title || '';
+  if (card.source === 'file') {
+    store.saveCard(tab, id, { group, md: `<!-- reps:${n} -->` });
+  } else {
+    // Карточка уже исправлена в приложении — меняем число в её тексте
+    const form = cardToForm(card, group, tab);
+    form.reps = n;
+    store.saveCard(tab, id, { group, md: formToMd(form) });
+  }
 }
 
 function safeParseCard(md, id) {
@@ -444,10 +469,9 @@ function trainingsHtml() {
         ${card && tab === 'k' ? `<div class="tr-step">${escapeHtml(currentStep(tab, card))}</div>` : ''}
         ${it.note ? `<div class="muted small">${inline(it.note)}</div>` : ''}
         <div class="tr-progress">${segs}<span class="tr-count">${n} из ${target}</span></div>
-        ${edit && tab === 'k' && card ? `<p class="muted small">Повторов в день меняется в карточке: <a href="#/edit/k/${id}">изменить</a></p>` : ''}
         ${edit ? `<div class="edit-row">
-          ${tab === 'k' ? '' : `<button class="icon-btn" data-action="tr-target" data-id="${it.id}" data-dir="-1" aria-label="Меньше повторов"${it.target <= 1 ? ' disabled' : ''}>−</button>
-          <button class="icon-btn" data-action="tr-target" data-id="${it.id}" data-dir="1" aria-label="Больше повторов"${it.target >= MAX_REPS ? ' disabled' : ''}>+</button>`}
+          <button class="icon-btn" data-action="tr-target" data-id="${it.id}" data-dir="-1" aria-label="Меньше повторов"${target <= 1 ? ' disabled' : ''}>−</button>
+          <button class="icon-btn" data-action="tr-target" data-id="${it.id}" data-dir="1" aria-label="Больше повторов"${target >= MAX_REPS ? ' disabled' : ''}>+</button>
           <button class="icon-btn" data-action="tr-move" data-id="${it.id}" data-dir="-1" aria-label="Выше"${i === 0 ? ' disabled' : ''}>↑</button>
           <button class="icon-btn" data-action="tr-move" data-id="${it.id}" data-dir="1" aria-label="Ниже"${i === plan.focus.length - 1 ? ' disabled' : ''}>↓</button>
           <button class="btn small danger" data-action="tr-remove" data-id="${it.id}">Убрать</button>
@@ -968,10 +992,17 @@ const actions = {
   },
   // Тренировки на сегодня
   'tr-tap': (el) => saveTrain(el.dataset.card),
-  'tr-target': (el) => savePlan((p) => {
-    const it = p.focus.find((x) => x.id === el.dataset.id);
-    if (it) it.target = Math.min(MAX_REPS, Math.max(1, it.target + +el.dataset.dir));
-  }),
+  'tr-target': (el) => {
+    const item = currentPlan().focus.find((x) => x.id === el.dataset.id);
+    if (!item) return;
+    const { tab, card } = cardByRef(item.card);
+    // У тренировки число хранится в карточке («Повторов в день»), у игры — в списке
+    if (tab === 'k' && card) setCardReps(item.card, targetOf(item) + +el.dataset.dir);
+    else savePlan((p) => {
+      const it = p.focus.find((x) => x.id === el.dataset.id);
+      if (it) it.target = Math.min(MAX_REPS, Math.max(1, it.target + +el.dataset.dir));
+    });
+  },
   'tr-move': (el) => savePlan((p) => move(p.focus, el.dataset.id, +el.dataset.dir)),
   'tr-remove': (el) => {
     const it = currentPlan().focus.find((x) => x.id === el.dataset.id);
