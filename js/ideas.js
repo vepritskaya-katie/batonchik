@@ -5,7 +5,8 @@ import { hash, plainText } from './md.js';
 
 const DAY = 86400000;
 
-// Карточки из «Готовность: …» в блоке «Понадобится» — по словам в «ёлочках»
+// Карточки из «Готовность: …» в блоке «Понадобится»: по словам в «ёлочках» («Отдай»)
+// или по полному названию карточки («намордник-корзинка освоен», «шаги 1–4 тренировки «Трамвай: …»»)
 function readinessRefs(card, trainings) {
   const need = card.blocks.find((b) => b.kind === 'need');
   if (!need) return [];
@@ -14,7 +15,16 @@ function readinessRefs(card, trainings) {
   if (i < 0) return [];
   const sentence = text.slice(i).split(/(?<=\.)\s/)[0];
   const quoted = sentence.match(/«[^»]+»/g) || [];
-  return trainings.filter((c) => (c.name.match(/«[^»]+»/g) || []).some((q) => quoted.includes(q)));
+  const plain = sentence.toLowerCase().replace(/[«»]/g, '');
+  return trainings.filter((c) => c !== card && (
+    (c.name.match(/«[^»]+»/g) || []).some((q) => quoted.includes(q)) || nameRe(c.name).test(plain)));
+}
+
+// Название в любом падеже: «Протокол расслабления» находится и в «Протокола расслабления»
+function nameRe(name) {
+  const esc = (t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const words = name.toLowerCase().replace(/[«»]/g, '').split(/[\s,:;—]+/).filter(Boolean);
+  return new RegExp(words.map((w) => esc(w.length > 5 ? w.slice(0, -1) : w) + '\\S*').join('[\\s,:;—]+'));
 }
 
 // ctx: { day, games, trainings, inPlan(ref), events (журнал за ~2 недели и сегодня),

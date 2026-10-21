@@ -21,9 +21,15 @@ try {
 
 const TZ = 'Europe/Moscow';
 const DIARY_STEP = 28; // дневник подгружает историю по 4 недели
+const MIN_REPS = 5;   // цель по умолчанию для тренировки на сегодня: не меньше 5 повторов
+const MAX_REPS = 50;
+// Версия списка тренировок (v у пункта): 2 — цели подняты до MIN_REPS, 3 — добавлены ежедневные
+// «Протокол расслабления» и «Спокойно, пока мы едим»
+const PLAN_VERSION = 3;
+const ADDED_IN_V3 = ['k/protokol-rasslableniya', 'k/spokoyno-poka-my-edim'];
 const TABS = {
-  k: { title: 'Тренировки', heading: 'Каталог тренировок', files: ['komandy.md'] },
-  g: { title: 'Игры', files: ['igry.md'] },
+  k: { title: 'Тренировки', heading: 'Каталог тренировок', files: ['komandy.md'], sorted: true },
+  g: { title: 'Игры', files: ['igry.md'], sorted: true },
   t: { title: 'Советы', files: ['sovety.md'] },
 };
 
@@ -98,14 +104,15 @@ function cleanPlan(p) {
   const list = (v) => (Array.isArray(v) ? v.filter((x) => x && typeof x === 'object') : []);
   return {
     schedule: list(p.schedule).slice(0, 60), // старое расписание: нужно только, чтобы понять, что пора перейти на тренировки
-    // Тренировки на сегодня: карточка («k/ko-mne»), сколько подходов в день, пояснение
+    // Тренировки на сегодня: карточка («k/ko-mne»), сколько повторов в день, пояснение
     focus: list(p.focus).map((x) => {
       const card = str(x.card, 120);
       return {
         id: str(x.id, 20) || rid(),
         card: card.includes('/') ? card : 'k/' + card,
-        target: Math.min(20, Math.max(1, parseInt(x.target, 10) || 1)),
+        target: Math.min(MAX_REPS, Math.max(1, parseInt(x.target, 10) || 1)),
         note: str(x.note, 300),
+        v: parseInt(x.v, 10) || 1,
       };
     }).filter((x) => x.card.length > 2),
   };
@@ -117,6 +124,28 @@ function migratePlan() {
   if (!S.plan.focus.length && S.plan.schedule.length && S.defaultPlan.focus.length) {
     S.migrated = true;
     savePlan((p) => { p.schedule = []; p.focus = S.defaultPlan.focus; });
+    return;
+  }
+  // Обновления списка, по одному разу: цели не меньше MIN_REPS (v2), новые ежедневные тренировки (v3)
+  if (S.plan.focus.some((f) => f.v < PLAN_VERSION)) {
+    S.migrated = true;
+    const needsV3 = S.plan.focus.some((f) => f.v < 3);
+    savePlan((p) => {
+      p.focus.forEach((f) => {
+        if (f.v < 2) f.target = Math.max(MIN_REPS, f.target);
+        f.v = PLAN_VERSION;
+      });
+      if (!needsV3) return;
+      for (const ref of ADDED_IN_V3) {
+        const item = S.defaultPlan.focus.find((f) => f.card === ref);
+        if (!item || p.focus.some((f) => f.card === ref)) continue;
+        // На то же место, что в памятке: после предыдущего пункта списка по умолчанию, если он есть
+        const order = S.defaultPlan.focus.map((f) => f.card);
+        const before = order.slice(0, order.indexOf(ref)).reverse().find((c) => p.focus.some((f) => f.card === c));
+        const at = before ? p.focus.findIndex((f) => f.card === before) + 1 : p.focus.length;
+        p.focus.splice(at, 0, { ...item, id: rid(), v: PLAN_VERSION });
+      }
+    });
   }
 }
 
@@ -199,6 +228,11 @@ function rebuildCatalogs() {
       if (!g) { g = { title: '', intro: [], introRaw: '', cards: [] }; groups.push(g); }
       g.cards.push({ ...card, source: 'new' });
     });
+    // Тренировки и игры — по алфавиту внутри каждого раздела, без учёта кавычек
+    if (TABS[tab].sorted) {
+      const key = (c) => c.name.replace(/[«»„“"']/g, '').trim();
+      groups.forEach((g) => g.cards.sort((a, b) => key(a).localeCompare(key(b), 'ru')));
+    }
     S.catalogs[tab] = { ...base, groups };
   }
 }
@@ -252,7 +286,7 @@ function buildDefaultPlan() {
     schedule: [],
     focus: defaults.map((d) => {
       const found = findCardByName(d.name);
-      return found ? { id: rid(), card: `${found.tab}/${found.card.id}`, target: d.target, note: d.note } : null;
+      return found ? { id: rid(), card: `${found.tab}/${found.card.id}`, target: d.target, note: d.note, v: PLAN_VERSION } : null;
     }).filter(Boolean),
   };
 }
@@ -396,7 +430,7 @@ function trainingsHtml() {
       : `<span class="mini-bar"><span style="width:${Math.min(100, Math.round(n / it.target * 100))}%"></span></span>`;
     return `<li class="item tr${done ? ' done' : ''}">
       ${edit ? '' : `<button class="tr-tap${done ? ' on' : ''}" data-action="tr-tap" data-card="${it.card}"${can && card ? '' : ' disabled'}
-        aria-label="Отметить подход: ${escapeHtml(name)}, сделано ${n} из ${it.target}">
+        aria-label="Отметить повтор: ${escapeHtml(name)}, сделано ${n} из ${it.target}">
         ${done ? '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>' : `<span class="tr-plus">+1</span>`}</button>`}
       <div class="item-body">
         <div class="item-head">${card ? `<a class="item-title link" href="#/${tab}/${id}">${escapeHtml(name)}</a>` : `<span class="item-title muted">${name}</span>`}</div>
@@ -404,8 +438,8 @@ function trainingsHtml() {
         ${it.note ? `<div class="muted small">${inline(it.note)}</div>` : ''}
         <div class="tr-progress">${segs}<span class="tr-count">${n} из ${it.target}</span></div>
         ${edit ? `<div class="edit-row">
-          <button class="icon-btn" data-action="tr-target" data-id="${it.id}" data-dir="-1" aria-label="Меньше подходов"${it.target <= 1 ? ' disabled' : ''}>−</button>
-          <button class="icon-btn" data-action="tr-target" data-id="${it.id}" data-dir="1" aria-label="Больше подходов"${it.target >= 20 ? ' disabled' : ''}>+</button>
+          <button class="icon-btn" data-action="tr-target" data-id="${it.id}" data-dir="-1" aria-label="Меньше повторов"${it.target <= 1 ? ' disabled' : ''}>−</button>
+          <button class="icon-btn" data-action="tr-target" data-id="${it.id}" data-dir="1" aria-label="Больше повторов"${it.target >= MAX_REPS ? ' disabled' : ''}>+</button>
           <button class="icon-btn" data-action="tr-move" data-id="${it.id}" data-dir="-1" aria-label="Выше"${i === 0 ? ' disabled' : ''}>↑</button>
           <button class="icon-btn" data-action="tr-move" data-id="${it.id}" data-dir="1" aria-label="Ниже"${i === plan.focus.length - 1 ? ' disabled' : ''}>↓</button>
           <button class="btn small danger" data-action="tr-remove" data-id="${it.id}">Убрать</button>
@@ -417,7 +451,7 @@ function trainingsHtml() {
   return `<section class="section">
     <div class="section-head"><h2>${escapeHtml(t.title || 'Тренировки на сегодня')}</h2>${editBtn}</div>
     ${t.intro && t.intro.length ? `<details class="intro"><summary>Как устроены занятия</summary><div class="prose">${renderBlocks(t.intro)}</div></details>` : ''}
-    <p class="muted small">Одно нажатие на «+1» — один подход. Набрали все подходы — строка станет зелёной.</p>
+    <p class="muted small">Одно нажатие на «+1» — один повтор. Сделали все повторы — строка станет зелёной.</p>
     <ul class="list">${items || '<li class="empty">Список пуст. Нажмите «Изменить», чтобы добавить тренировки.</li>'}</ul>
     ${edit ? `<div class="edit-actions">
       <button class="btn" data-action="tr-add">+ Добавить тренировку или игру</button>
@@ -442,7 +476,7 @@ function ideasHtml() {
     return `<div class="idea">
       <div class="idea-head"><span class="idea-kind">${icon} ${label}</span>
         <a class="idea-name" href="#/${idea.tab}/${idea.card.id}">${escapeHtml(idea.card.name)}</a></div>
-      <div class="muted small">${escapeHtml(idea.reason)}${n ? ` · сегодня ${n} ${plural(n, 'раз', 'раза', 'раз')}` : ''}</div>
+      <div class="muted small">${escapeHtml(idea.reason)}${n ? ` · сегодня ${n} ${plural(n, 'повтор', 'повтора', 'повторов')}` : ''}</div>
       <div class="idea-actions">
         <button class="btn small primary" data-action="tr-tap" data-card="${idea.ref}">${kind === 'game' ? 'Сыграли' : 'Сделали'}</button>
         ${kind === 'training' ? `<button class="btn small" data-action="idea-plan" data-card="${idea.ref}">В план</button>` : ''}
@@ -471,7 +505,7 @@ function renderToday() {
     <div class="dayhead">
       <h1>${todayTitle()}</h1>
       ${total ? `<div class="progress" role="img" aria-label="Подходов ${done} из ${total}"><span style="width:${Math.round(done / total * 100)}%"></span></div>
-      <p class="muted">Тренировки: ${done} из ${total} ${plural(total, 'подхода', 'подходов', 'подходов')}. Счёт обнуляется в полночь по Москве.</p>` : ''}
+      <p class="muted">Тренировки: ${done} из ${total} ${plural(total, 'повтора', 'повторов', 'повторов')}. Счёт обнуляется в полночь по Москве.</p>` : ''}
     </div>
     ${statusBanner()}
     ${journalHtml()}
@@ -523,7 +557,12 @@ function renderCatalog(tab) {
 
 function renderCard(tab, id) {
   const card = findCard(tab, id);
-  const back = `<a class="back" href="#/${tab}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>${TABS[tab].title}</a>`;
+  // «Назад» ведёт туда, откуда пришли (например, на «Сегодня» к тому же месту), иначе — в каталог
+  const arrow = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>';
+  const from = prevHash && pageTitle(prevHash);
+  const back = from
+    ? `<a class="back" href="${prevHash}" data-action="back">${arrow}${escapeHtml(from)}</a>`
+    : `<a class="back" href="#/${tab}">${arrow}${TABS[tab].title}</a>`;
   if (!card) {
     return `${back}<h1>Не найдено</h1><p class="muted">${S.catalogs[tab] ? 'Возможно, карточку переименовали в памятке.' : 'Загружаем…'}</p>`;
   }
@@ -734,6 +773,31 @@ function route() {
 
 let lastRouteKey = '';
 
+// Место на странице: при уходе запоминаем прокрутку, при возврате восстанавливаем.
+// Карточки открываются сверху.
+const scrollMemory = {};
+let currentHash = location.hash || '#/';
+let prevHash = null;
+let pendingScroll = null; // { y, until } — дождаться, пока страница дорисуется до нужной высоты
+
+function onHashChange() {
+  scrollMemory[currentHash] = window.scrollY;
+  prevHash = currentHash;
+  currentHash = location.hash || '#/';
+  render();
+}
+
+// Название страницы для кнопки «Назад»; для правки карточки — нет (туда не возвращаемся)
+function pageTitle(hash) {
+  const parts = hash.replace(/^#\/?/, '').split('/').filter(Boolean);
+  if (!parts.length || parts[0] === 'today') return 'Сегодня';
+  if (parts[0] === 'edit') return null;
+  if (parts[0] === 'd') return 'Дневник';
+  if (parts[0] === 'me') return 'Настройки';
+  if (TABS[parts[0]]) return parts[1] ? 'Назад' : TABS[parts[0]].title;
+  return null;
+}
+
 function render(force) {
   const r = route();
   if (r.page !== 'edit') S.editor = null;
@@ -750,8 +814,15 @@ function render(force) {
   const routeKey = r.page + '/' + (r.tab || '') + '/' + (r.id || '');
   if (routeKey !== lastRouteKey) {
     lastRouteKey = routeKey;
-    window.scrollTo(0, 0);
+    const saved = scrollMemory[currentHash];
+    const isCard = !!(TABS[r.tab] && r.id);
+    pendingScroll = !isCard && saved ? { y: saved, until: Date.now() + 2000 } : null;
+    window.scrollTo(0, pendingScroll ? saved : 0);
+  } else if (pendingScroll && Date.now() < pendingScroll.until) {
+    // Страница дорисовалась (например, подгрузились данные) — дотягиваем до запомненного места
+    window.scrollTo(0, pendingScroll.y);
   }
+  if (pendingScroll && (Math.abs(window.scrollY - pendingScroll.y) < 2 || Date.now() >= pendingScroll.until)) pendingScroll = null;
   document.querySelectorAll('.tabbar a').forEach((a) => {
     const current = r.page === 'edit' ? r.tab : (TABS[r.tab] || r.page === 'me' || r.page === 'd' ? r.page : 'today');
     const on = a.dataset.tab === current;
@@ -799,9 +870,9 @@ function saveEvent(type, extra = {}) {
 
 function saveTrain(ref) {
   const at = new Date();
+  const n = (todayTrains()[ref] || 0) + 1; // считаем до записи: хранилище может обновить журнал сразу
   const id = store.addEvent({ type: 'train', card: ref, at, day: dayKey(at) });
   const it = currentPlan().focus.find((f) => f.card === ref);
-  const n = (todayTrains()[ref] || 0) + 1;
   toast(`${TRAIN.label}: ${cardName(ref)}${it ? ` — ${Math.min(n, 99)} из ${it.target}` : ''}`, {
     label: 'Отменить', onClick: () => { if (id) store.deleteEvent(id); },
   });
@@ -882,7 +953,7 @@ const actions = {
   },
   'edit-toggle': (el) => { S.edit[el.dataset.section] = !S.edit[el.dataset.section]; render(); },
   'reset-plan': () => {
-    if (!confirm('Вернуть список тренировок как в памятке? Ваши правки списка пропадут, сделанные подходы останутся.')) return;
+    if (!confirm('Вернуть список тренировок как в памятке? Ваши правки списка пропадут, сделанные повторы останутся.')) return;
     S.defaultPlan = buildDefaultPlan();
     savePlan((p) => { p.schedule = []; p.focus = S.defaultPlan.focus; });
   },
@@ -890,7 +961,7 @@ const actions = {
   'tr-tap': (el) => saveTrain(el.dataset.card),
   'tr-target': (el) => savePlan((p) => {
     const it = p.focus.find((x) => x.id === el.dataset.id);
-    if (it) it.target = Math.min(20, Math.max(1, it.target + +el.dataset.dir));
+    if (it) it.target = Math.min(MAX_REPS, Math.max(1, it.target + +el.dataset.dir));
   }),
   'tr-move': (el) => savePlan((p) => move(p.focus, el.dataset.id, +el.dataset.dir)),
   'tr-remove': (el) => {
@@ -900,12 +971,12 @@ const actions = {
   'tr-add': () => addTrainingSheet(),
   'tr-pick': (el) => {
     const ref = el.dataset.card;
-    if (!currentPlan().focus.some((f) => f.card === ref)) savePlan((p) => p.focus.push({ id: rid(), card: ref, target: 1, note: '' }));
+    if (!currentPlan().focus.some((f) => f.card === ref)) savePlan((p) => p.focus.push({ id: rid(), card: ref, target: MIN_REPS, note: '', v: PLAN_VERSION }));
     closeSheet();
   },
   'idea-plan': (el) => {
     const ref = el.dataset.card;
-    if (!currentPlan().focus.some((f) => f.card === ref)) savePlan((p) => p.focus.push({ id: rid(), card: ref, target: 1, note: '' }));
+    if (!currentPlan().focus.some((f) => f.card === ref)) savePlan((p) => p.focus.push({ id: rid(), card: ref, target: MIN_REPS, note: '', v: PLAN_VERSION }));
     toast(`${cardName(ref)} — в тренировках на сегодня.`);
   },
   'idea-next': (el) => { S.ideaShift[el.dataset.kind] = (S.ideaShift[el.dataset.kind] || 0) + 1; render(); },
@@ -968,6 +1039,7 @@ const actions = {
     }
   },
   'diary-more': () => loadDiary(true),
+  'back': () => history.back(),
   'toast-action': () => { const fn = toastAction; hideToast(); if (fn) fn(); },
   'sheet-close': () => closeSheet(),
   'sign-in': () => store.signIn(),
@@ -1054,7 +1126,10 @@ function checkDay() {
 }
 
 applyTheme();
-window.addEventListener('hashchange', render);
+window.addEventListener('hashchange', onHashChange);
+// Пользователь сам прокрутил страницу — больше не тянем её к запомненному месту
+window.addEventListener('touchstart', () => { pendingScroll = null; }, { passive: true });
+window.addEventListener('wheel', () => { pendingScroll = null; }, { passive: true });
 window.addEventListener('online', updateNet);
 window.addEventListener('offline', updateNet);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) checkDay(); });

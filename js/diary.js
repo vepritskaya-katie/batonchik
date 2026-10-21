@@ -15,8 +15,8 @@ export const EVENT_TYPES = {
   note: { icon: '✏️', label: 'Заметка', text: true },
 };
 export const SUBS = { pee: 'пописал', poo: 'покакал', both: 'пописал и покакал' };
-// Подход к тренировке или игре: записывается кнопками «Тренировки на сегодня», в ленте журнала не показывается
-export const TRAIN = { icon: '🎯', label: 'Подход' };
+// Повтор тренировки или игры: записывается кнопками «Тренировки на сегодня», в ленте журнала не показывается
+export const TRAIN = { icon: '🎯', label: 'Повтор' };
 
 // ---------- Время по Москве ----------
 
@@ -112,7 +112,7 @@ export function weekSummary(thisWeek, prevWeek) {
   const wCur = avg(cur.map((d) => d.walk));
   if (wCur) lines.push(`Прогулок: в среднем ${num(wCur)} в день${cmp(wCur, prev.length ? avg(prev.map((d) => d.walk)) : null)}.`);
   const trCur = avg(cur.map((d) => d.trains));
-  if (trCur) lines.push(`Подходов к тренировкам: в среднем ${num(trCur)} в день${cmp(trCur, prev.length ? avg(prev.map((d) => d.trains)) : null)}.`);
+  if (trCur) lines.push(`Повторов на тренировках: в среднем ${num(trCur)} в день${cmp(trCur, prev.length ? avg(prev.map((d) => d.trains)) : null)}.`);
   const nights = thisWeek.map((d) => d.night && d.night.ms).filter(Boolean);
   if (nights.length) lines.push(`Ночной перерыв: в среднем ${fmtDuration(avg(nights))} (записано ночей: ${nights.length}).`);
   return lines;
@@ -176,7 +176,7 @@ function trainsLine(st, cardName) {
   if (!st.trains) return '';
   const parts = Object.entries(st.trainsByCard).sort((a, b) => b[1] - a[1])
     .map(([card, n]) => `${escapeHtml(cardName(card))} ${n}`);
-  return `<p class="trains">${TRAIN.icon} Тренировки: <b>${st.trains}</b> ${plural(st.trains, 'подход', 'подхода', 'подходов')} — ${parts.join(', ')}</p>`;
+  return `<p class="trains">${TRAIN.icon} Тренировки: <b>${st.trains}</b> ${plural(st.trains, 'повтор', 'повтора', 'повторов')} — ${parts.join(', ')}</p>`;
 }
 
 export function plural(n, one, few, many) {
@@ -212,7 +212,7 @@ export function diaryHtml({ days, prevWeek, markLabels, hasMore, loading, cardNa
         ${miniChart('🌳 Туалет на улице', week, 'toilet')}
         ${miniChart('💦 Аварии дома', week, 'accident')}
         ${miniChart('🦮 Прогулки', week, 'walk')}
-        ${miniChart('🎯 Подходы к тренировкам', week, 'trains')}
+        ${miniChart('🎯 Повторы на тренировках', week, 'trains')}
       </div>` : ''}
     </section>
     <section class="section">
