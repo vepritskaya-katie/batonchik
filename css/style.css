@@ -433,3 +433,37 @@ button.ev-row { cursor: pointer; }
 .ed-danger { display: grid; gap: 10px; margin-top: 18px; }
 .plain-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
 .plain-list li { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+
+/* ---------- Тренировки на сегодня ---------- */
+.tr-tap {
+  flex: none; width: 56px; height: 56px; border-radius: 50%;
+  border: 2.5px solid var(--accent); background: var(--accent-soft); color: var(--accent);
+  display: grid; place-items: center; cursor: pointer; padding: 0; font: inherit;
+}
+.tr-tap:active { transform: scale(.94); }
+.tr-tap:disabled { opacity: .5; }
+.tr-plus { font-weight: 800; font-size: 18px; }
+.tr-tap svg { width: 30px; height: 30px; stroke-width: 3; }
+.tr-tap.on { background: var(--ok); border-color: var(--ok); color: var(--surface); }
+.tr-step { margin-top: 4px; font-size: 15px; color: var(--accent); font-weight: 600; }
+.item.done .tr-step { color: var(--ok); }
+.tr-progress { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
+.tr-progress .mini-bar { flex: 1; height: 8px; }
+.segs { display: flex; gap: 4px; flex-wrap: wrap; }
+.seg-dot { width: 22px; height: 8px; border-radius: 4px; background: var(--surface-2); border: 1px solid var(--border); }
+.seg-dot.on { background: var(--ok); border-color: var(--ok); }
+.tr-count { font-size: 14px; font-weight: 700; color: var(--muted); font-variant-numeric: tabular-nums; }
+.item.done .tr-count { color: var(--ok); }
+
+/* ---------- Идея на сегодня ---------- */
+.ideas { display: grid; gap: 10px; }
+.idea { padding: 14px; border-radius: 18px; background: var(--accent-soft); }
+.idea-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+.idea-kind { font-size: 14px; font-weight: 700; color: var(--muted); }
+.idea-name { font-size: 18px; font-weight: 700; color: var(--text); text-decoration: none; }
+.idea-name::after { content: " ›"; color: var(--muted); }
+.idea .muted { margin-top: 4px; }
+.idea-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+
+/* ---------- Дневник: тренировки ---------- */
+.trains { margin: 10px 0 0; font-size: 15.5px; }

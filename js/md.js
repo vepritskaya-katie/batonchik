@@ -410,42 +410,18 @@ export function stepKey(text) {
   return hash(base);
 }
 
-// Расписание дня. Устройство файла:
-//   # Расписание дня          — пункты с отметками; текст под заголовком — вступление
-//   ## Утренняя прогулка      — пункт; строка под ним — ярлычок длительности
+// Главный экран (файл rasporyadok.md):
+//   # Тренировки на сегодня   — текст под заголовком — «Как устроены занятия»;
+//                               строки «- Название × 2 — пояснение» — список тренировок по умолчанию
+//   # В течение дня           — пункты без отметок:
+//   ## На прогулке            — пункт; строка под ним — ярлычок
 //   ### Что делаем / ### Подсказка
-//   # В течение дня            — следующие группы показываются без отметок
-// Старый формат (одна таблица «Когда | Сколько | Что тренируем») тоже понимаем.
-export function parseSchedule(text) {
-  const clean = stripComments(text);
-  if (/^##\s/m.test(clean)) return parseScheduleSections(clean);
-
-  const blocks = parseBlocks(clean);
-  const ti = blocks.findIndex((b) => b.type === 'table');
-  if (ti < 0) return null;
-  const t = blocks[ti];
-  const col = (re, fallback) => {
-    const i = t.head.findIndex((h) => re.test(h.toLowerCase()));
-    return i >= 0 ? i : fallback;
-  };
-  const cWhen = col(/когда|время/, 0);
-  const cLong = col(/сколько|длит/, 1);
-  const cWhat = col(/что|трениру/, 2);
-  return {
-    title: '',
-    intro: blocks.slice(0, ti).filter((b) => !(b.type === 'heading' && b.level === 1)),
-    footer: blocks.slice(ti + 1),
-    rows: t.rows.map((r) => ({ title: r[cWhen] || '', duration: r[cLong] || '', note: r[cWhat] || '', tip: '' })),
-    extra: [],
-  };
-}
-
-function parseScheduleSections(clean) {
+export function parseToday(source) {
   const groups = [];
   let group = null;
   let item = null;
   let block = null;
-  for (const line of clean.split('\n')) {
+  for (const line of stripComments(source).split('\n')) {
     const h = line.match(/^(#{1,3})\s+(.*?)\s*$/);
     if (h && h[1].length === 1) {
       group = { title: h[2], intro: [], items: [] };
@@ -475,12 +451,18 @@ function parseScheduleSections(clean) {
     }
     return { title: it.title, duration: text(it.lead).split('\n')[0].trim(), note: note.filter(Boolean).join('\n\n'), tip };
   };
-  const [main, ...rest] = groups;
+  const tg = groups.find((g) => /трениров/i.test(g.title));
+  const defaults = [];
+  const introLines = [];
+  for (const line of tg ? tg.intro : []) {
+    const m = line.match(/^\s*[-*]\s+(.+?)\s+[×x]\s*(\d{1,2})(?:\s+—\s+(.*))?\s*$/);
+    if (m) defaults.push({ name: m[1].trim(), target: +m[2], note: (m[3] || '').trim() });
+    else introLines.push(line);
+  }
   return {
-    title: main ? main.title : '',
-    intro: main ? parseBlocks(text(main.intro)) : [],
-    footer: [],
-    rows: main ? main.items.map(toRow) : [],
-    extra: rest.map((g) => ({ title: g.title, intro: parseBlocks(text(g.intro)), items: g.items.map(toRow) })),
+    title: tg ? tg.title : 'Тренировки на сегодня',
+    intro: parseBlocks(text(introLines)),
+    defaults,
+    sections: groups.filter((g) => g !== tg).map((g) => ({ title: g.title, intro: parseBlocks(text(g.intro)), items: g.items.map(toRow) })),
   };
 }

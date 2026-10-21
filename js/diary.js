@@ -15,6 +15,8 @@ export const EVENT_TYPES = {
   note: { icon: '✏️', label: 'Заметка', text: true },
 };
 export const SUBS = { pee: 'пописал', poo: 'покакал', both: 'пописал и покакал' };
+// Подход к тренировке или игре: записывается кнопками «Тренировки на сегодня», в ленте журнала не показывается
+export const TRAIN = { icon: '🎯', label: 'Подход' };
 
 // ---------- Время по Москве ----------
 
@@ -64,7 +66,11 @@ export function nightFor(key, events) {
 }
 
 export function dayStats(key, events, checks, scheduleTotal) {
-  const list = events.filter((e) => e.day === key).sort(byTime);
+  const all = events.filter((e) => e.day === key).sort(byTime);
+  const list = all.filter((e) => e.type !== 'train');
+  const trains = all.filter((e) => e.type === 'train');
+  const trainsByCard = {};
+  trains.forEach((e) => { trainsByCard[e.card] = (trainsByCard[e.card] || 0) + 1; });
   const count = (type, sub) => list.filter((e) => e.type === type && (!sub || e.sub === sub || e.sub === 'both')).length;
   const done = Object.keys(checks || {}).filter((k) => k.startsWith('s_')).length;
   return {
@@ -75,8 +81,9 @@ export function dayStats(key, events, checks, scheduleTotal) {
     walk: count('walk'), meal: count('meal'),
     notes: list.filter((e) => e.text),
     night: nightFor(key, events),
+    trains: trains.length, trainsByCard,
     done, total: scheduleTotal,
-    empty: !list.length && !done,
+    empty: !all.length && !done,
   };
 }
 
@@ -85,7 +92,7 @@ const num = (x) => (Math.round(x * 10) / 10).toLocaleString('ru-RU');
 
 // Сводка: последние 7 дней против 7 дней до них. Средние — только по дням, когда что-то записывали.
 export function weekSummary(thisWeek, prevWeek) {
-  const logged = (w) => w.filter((d) => d.list.length);
+  const logged = (w) => w.filter((d) => d.list.length || d.trains);
   const cur = logged(thisWeek);
   const prev = logged(prevWeek);
   const lines = [];
@@ -104,10 +111,10 @@ export function weekSummary(thisWeek, prevWeek) {
   lines.push(aCur ? `Аварий дома: ${aCur} за неделю${aPrev != null ? ` (неделей раньше — ${aPrev})` : ''}.` : 'Аварий дома не было.');
   const wCur = avg(cur.map((d) => d.walk));
   if (wCur) lines.push(`Прогулок: в среднем ${num(wCur)} в день${cmp(wCur, prev.length ? avg(prev.map((d) => d.walk)) : null)}.`);
+  const trCur = avg(cur.map((d) => d.trains));
+  if (trCur) lines.push(`Подходов к тренировкам: в среднем ${num(trCur)} в день${cmp(trCur, prev.length ? avg(prev.map((d) => d.trains)) : null)}.`);
   const nights = thisWeek.map((d) => d.night && d.night.ms).filter(Boolean);
   if (nights.length) lines.push(`Ночной перерыв: в среднем ${fmtDuration(avg(nights))} (записано ночей: ${nights.length}).`);
-  const sched = thisWeek.filter((d) => d.total && d.done).map((d) => d.done / d.total);
-  if (sched.length) lines.push(`Расписание выполнено в среднем на ${Math.round(avg(sched) * 100)}% (дней с отметками: ${sched.length}).`);
   return lines;
 }
 
@@ -165,7 +172,21 @@ function miniChart(title, days, field) {
   return `<figure class="mini-chart"><figcaption>${title}</figcaption><div class="bars">${bars}</div></figure>`;
 }
 
-export function diaryHtml({ days, prevWeek, markLabels, hasMore, loading }) {
+function trainsLine(st, cardName) {
+  if (!st.trains) return '';
+  const parts = Object.entries(st.trainsByCard).sort((a, b) => b[1] - a[1])
+    .map(([card, n]) => `${escapeHtml(cardName(card))} ${n}`);
+  return `<p class="trains">${TRAIN.icon} Тренировки: <b>${st.trains}</b> ${plural(st.trains, 'подход', 'подхода', 'подходов')} — ${parts.join(', ')}</p>`;
+}
+
+export function plural(n, one, few, many) {
+  const m10 = n % 10, m100 = n % 100;
+  if (m10 === 1 && m100 !== 11) return one;
+  if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return few;
+  return many;
+}
+
+export function diaryHtml({ days, prevWeek, markLabels, hasMore, loading, cardName }) {
   const week = days.slice(0, 7).reverse(); // слева направо — от старых к новым
   const summary = weekSummary(days.slice(0, 7), prevWeek);
   const dayCards = days.filter((d) => !d.empty || (markLabels[d.key] || []).length).map((d) => {
@@ -174,7 +195,7 @@ export function diaryHtml({ days, prevWeek, markLabels, hasMore, loading }) {
       <h3>${dayTitle(d.key)}</h3>
       ${chips(d) ? `<div class="stats">${chips(d)}</div>` : ''}
       ${nightLine(d.night)}
-      ${d.total && d.done ? `<p class="muted">Расписание: ${d.done} из ${d.total}</p>` : ''}
+      ${trainsLine(d, cardName)}
       ${mastered.length ? `<p class="mastered">✓ Освоено: ${mastered.map(escapeHtml).join('; ')}</p>` : ''}
       ${d.notes.length ? `<ul class="ev-list notes">${d.notes.map((e) => eventRow(e)).join('')}</ul>` : ''}
       ${d.list.length ? `<details class="intro"><summary>Все записи (${d.list.length})</summary>
@@ -191,6 +212,7 @@ export function diaryHtml({ days, prevWeek, markLabels, hasMore, loading }) {
         ${miniChart('🌳 Туалет на улице', week, 'toilet')}
         ${miniChart('💦 Аварии дома', week, 'accident')}
         ${miniChart('🦮 Прогулки', week, 'walk')}
+        ${miniChart('🎯 Подходы к тренировкам', week, 'trains')}
       </div>` : ''}
     </section>
     <section class="section">

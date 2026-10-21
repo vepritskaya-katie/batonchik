@@ -66,10 +66,11 @@ service cloud.firestore {
       allow delete: if false;
     }
 
-    // Журнал: туалет, прогулки, кормления, подъём, отбой, заметки
+    // Журнал: туалет, прогулки, кормления, подъём, отбой, заметки и подходы к тренировкам (train)
     function validEvent(d) {
-      return d.keys().hasOnly(['type', 'sub', 'text', 'at', 'day', 'uid', 'name', 'createdAt'])
-        && d.type in ['toilet', 'accident', 'walk', 'meal', 'wake', 'bed', 'note']
+      return d.keys().hasOnly(['type', 'sub', 'text', 'at', 'day', 'uid', 'name', 'createdAt', 'card'])
+        && d.type in ['toilet', 'accident', 'walk', 'meal', 'wake', 'bed', 'note', 'train']
+        && (!('card' in d) || (d.card is string && d.card.size() <= 120))
         && d.sub in ['', 'pee', 'poo', 'both']
         && d.text is string && d.text.size() <= 2000
         && d.at is timestamp
