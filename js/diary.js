@@ -5,14 +5,16 @@ import { escapeHtml, inline } from './md.js';
 export const TZ = 'Europe/Moscow';
 const MSK_OFFSET_H = 3; // Москва круглый год UTC+3, без перехода на летнее время
 
+// form: запись обычно делают после события — сначала окно со временем и комментарием;
+// без form («Авария дома», «Кормление») запись сохраняется сразу с текущим временем
 export const EVENT_TYPES = {
-  toilet: { icon: '🌳', label: 'Туалет на улице', subs: true },
+  toilet: { icon: '🌳', label: 'Туалет на улице', subs: true, form: true },
   accident: { icon: '💦', label: 'Авария дома', subs: true },
-  walk: { icon: '🦮', label: 'Прогулка' },
+  walk: { icon: '🦮', label: 'Прогулка', form: true },
   meal: { icon: '🍽', label: 'Кормление' },
-  wake: { icon: '☀️', label: 'Встали утром' },
-  bed: { icon: '🌙', label: 'Легли вечером' },
-  note: { icon: '✏️', label: 'Заметка', text: true },
+  wake: { icon: '☀️', label: 'Встали утром', form: true },
+  bed: { icon: '🌙', label: 'Легли вечером', form: true },
+  note: { icon: '✏️', label: 'Заметка', text: true, form: true },
 };
 export const SUBS = { pee: 'пописал', poo: 'покакал', both: 'пописал и покакал' };
 // Повтор тренировки или игры: записывается кнопками «Тренировки на сегодня», в ленте журнала не показывается

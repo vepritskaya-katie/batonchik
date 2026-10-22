@@ -1025,13 +1025,26 @@ function closeSheet() {
   document.body.classList.remove('no-scroll');
 }
 
-function saveEvent(type, extra = {}) {
-  const at = new Date();
-  const id = store.addEvent({ type, sub: '', text: '', ...extra, at, day: dayKey(at) });
+function saveEvent(type, extra = {}, at = new Date(), day = dayKey(at)) {
+  const id = store.addEvent({ type, sub: '', text: '', ...extra, at, day });
   const t = EVENT_TYPES[type];
-  toast(`Записано: ${t.label.toLowerCase()}${extra.sub ? ` — ${SUBS[extra.sub]}` : ''}, ${fmtTime(at)}`, {
-    label: 'Отменить', onClick: () => { if (id) store.deleteEvent(id); },
+  // Запись за вчера (сделали после полуночи) в сегодняшний журнал не попадает — обновляем историю
+  const past = day !== dayKey(new Date());
+  if (past) loadRecent();
+  toast(`Записано: ${t.label.toLowerCase()}${extra.sub ? ` — ${SUBS[extra.sub]}` : ''}, ${past ? 'вчера ' : ''}${fmtTime(at)}`, {
+    label: 'Отменить', onClick: () => { if (id) store.deleteEvent(id); if (past) loadRecent(); },
   });
+}
+
+// Время, указанное в окне записи: сегодня, а если оно ещё не наступило — вчера (записали после полуночи)
+function pastTime(hm) {
+  const now = new Date();
+  const today = dayKey(now);
+  if (!/^\d\d:\d\d$/.test(hm)) return { at: now, day: today };
+  const at = moscowDate(today, hm);
+  if (at - now <= 5 * 60000) return { at, day: today };
+  const day = addDays(today, -1);
+  return { at: moscowDate(day, hm), day };
 }
 
 function saveTrain(ref) {
@@ -1067,22 +1080,45 @@ function addTrainingSheet() {
 function addEventFlow(type) {
   const t = EVENT_TYPES[type];
   if (!t) return;
-  if (t.subs) {
+  if (t.form) {
+    eventFormSheet(type);
+  } else if (t.subs) {
     openSheet(`<div class="form"><h2>${t.icon} ${t.label}</h2>
       ${Object.entries(SUBS).map(([k, v]) => `<button type="button" class="pick big" data-action="ev-sub" data-type="${type}" data-sub="${k}">${v.charAt(0).toUpperCase() + v.slice(1)}</button>`).join('')}
       <div class="form-actions"><button type="button" class="btn" data-action="sheet-close">Отмена</button></div></div>`, null);
-  } else if (t.text) {
-    openSheet(`<form class="form"><h2>${t.icon} ${t.label}</h2>
-      <label>Что произошло <textarea name="text" rows="4" maxlength="2000" required placeholder="Например: «Буп» на выходе из лифта получился 4 раза из 5"></textarea></label>
-      <div class="form-actions"><button type="button" class="btn" data-action="sheet-close">Отмена</button><button class="btn primary">Записать</button></div>
-    </form>`, (fd) => {
-      const text = String(fd.get('text')).trim();
-      if (text) saveEvent(type, { text });
-    });
-    setTimeout(() => { const ta = sheet.querySelector('textarea'); if (ta) ta.focus(); }, 50);
   } else {
     saveEvent(type);
   }
+}
+
+// Окно новой записи: что было (для туалета), время (по умолчанию сейчас), комментарий; в журнал — по «Сохранить»
+function eventFormSheet(type) {
+  const t = EVENT_TYPES[type];
+  const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+  openSheet(`<form class="form"><h2>${t.icon} ${t.label}</h2>
+    ${t.subs ? `<fieldset><legend>Что было</legend><div class="choices">${Object.entries(SUBS).map(([k, v]) =>
+      `<label class="choice"><input type="radio" name="sub" value="${k}" required>${cap(v)}</label>`).join('')}</div></fieldset>` : ''}
+    <label>Время <input type="time" name="time" required value="${fmtTime(new Date())}"></label>
+    <p class="muted small ev-when" hidden></p>
+    <label>${t.text ? 'Что произошло' : 'Комментарий'} <textarea name="text" rows="${t.text ? 4 : 2}" maxlength="2000"${t.text
+      ? ' required placeholder="Например: «Буп» на выходе из лифта получился 4 раза из 5"' : ' placeholder="Необязательно"'}></textarea></label>
+    <div class="form-actions"><button type="button" class="btn" data-action="sheet-close">Отмена</button><button class="btn primary">Сохранить</button></div>
+  </form>`, (fd) => {
+    const text = String(fd.get('text') || '').trim();
+    if (t.text && !text) return;
+    const sub = t.subs && SUBS[fd.get('sub')] ? String(fd.get('sub')) : '';
+    const { at, day } = pastTime(String(fd.get('time') || ''));
+    saveEvent(type, { sub, text }, at, day);
+  });
+  // Подсказка, если время ещё не наступило: запись уйдёт во вчерашний день
+  const time = sheet.querySelector('input[name=time]');
+  const when = sheet.querySelector('.ev-when');
+  time.addEventListener('input', () => {
+    const { day } = pastTime(time.value);
+    when.hidden = day === dayKey(new Date());
+    when.textContent = when.hidden ? '' : `Запишется на вчера, ${dayTitle(day, { day: 'numeric', month: 'long' })}.`;
+  });
+  if (t.text) setTimeout(() => { const ta = sheet.querySelector('textarea'); if (ta) ta.focus(); }, 50);
 }
 
 function editEvent(id) {
