@@ -55,9 +55,13 @@ function isSingleResult(b) {
   return b.content.length === 1 && b.content[0].type === 'list' && b.content[0].items.length === 1;
 }
 
-// Шаги разбираем на поля, только если в блоке нет ничего, кроме списка; иначе блок правится как текст
+// Шаги разбираем на поля, только если в блоке нет ничего, кроме списка, а под шагами — ничего, кроме подсказки;
+// иначе блок правится как текст, чтобы не потерять вложенные пункты
+const HINT_ITEM_RE = /^((?:Дальше|Переход),?\s+когда)\s*:?\s*/i;
+const onlyHintChildren = (it) => it.children.every((ch) => ch.type === 'list' && ch.items.every((s) => HINT_ITEM_RE.test(s.text)));
 function stepsFromBlock(b) {
   if (!b.content.length || b.content.some((x) => x.type !== 'list')) return null;
+  if (b.content.some((list) => list.items.some((it) => !onlyHintChildren(it)))) return null;
   return b.content.flatMap((list) => list.items.map((it) => {
     let text = it.text;
     let name = '';
@@ -71,7 +75,7 @@ function stepsFromBlock(b) {
     for (const child of it.children) {
       if (child.type !== 'list') continue;
       for (const sub of child.items) {
-        const m = sub.text.match(/^((?:Дальше|Переход),?\s+когда)\s*:?\s*/i);
+        const m = sub.text.match(HINT_ITEM_RE);
         if (m && !hint) { hint = sub.text.slice(m[0].length); label = m[1]; }
       }
     }

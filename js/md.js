@@ -175,6 +175,9 @@ export function splitHint(text) {
 
 const hintHtml = (label, hint) => `<div class="hint-box"><strong>${escapeHtml(label)}:</strong> ${inline(hint)}</div>`;
 
+// Подсказка отдельной строкой после вложенных пунктов шага: «**Дальше, когда:** …»
+const CHILD_HINT_RE = /^\*\*((?:Дальше|Переход),?\s+когда)\s*:?\s*\*\*\s*:?\s*(.*)$/i;
+
 // opts.task(text) → {key, html} — разметка общей галочки вместо «[ ]»
 // opts.step(item, index) → html — кнопка «Освоено» у пункта нумерованного списка верхнего уровня
 export function renderBlocks(blocks, opts = {}, depth = 0) {
@@ -205,10 +208,14 @@ function renderSteps(b, opts, depth) {
       num = +nm[1];
       text = ('**' + text.slice(nm[0].length)).replace(/^\*\*\*\*\s*/, '');
     }
-    const { main, hint, label } = splitHint(text);
+    let { main, hint, label } = splitHint(text);
+    let children = it.children;
+    const last = children[children.length - 1];
+    const m = !hint && last && last.type === 'para' && last.text.match(CHILD_HINT_RE);
+    if (m) { label = m[1]; hint = m[2]; children = children.slice(0, -1); }
     return `<li class="step"><span class="num">${num}</span><div class="step-body">
-      <div class="li-text">${inline(main)}</div>${hint ? hintHtml(label, hint) : ''}
-      ${renderBlocks(it.children, opts, depth + 1)}${opts.step(it, idx)}</div></li>`;
+      <div class="li-text">${inline(main)}</div>${renderBlocks(children, opts, depth + 1)}
+      ${hint ? hintHtml(label, hint) : ''}${opts.step(it, idx)}</div></li>`;
   }).join('');
   return `<ol class="steps">${items}</ol>`;
 }
