@@ -24,9 +24,24 @@ const DIARY_STEP = 28; // дневник подгружает историю п�
 const MIN_REPS = 5;   // цель по умолчанию для тренировки на сегодня: не меньше 5 повторов
 const MAX_REPS = 50;
 // Версия списка тренировок (v у пункта): 2 — цели подняты до MIN_REPS, 3 — добавлены ежедневные
-// «Протокол расслабления» и «Спокойно, пока мы едим»
-const PLAN_VERSION = 3;
+// «Протокол расслабления» и «Спокойно, пока мы едим», 4 — пояснения из памятки с охраной ресурсов
+const PLAN_VERSION = 4;
 const ADDED_IN_V3 = ['k/protokol-rasslableniya', 'k/spokoyno-poka-my-edim'];
+// Карточки, переименованные в файлах: старая ссылка → новая (план, журнал, дневник)
+const RENAMED = {
+  'k/otday': 'k/menyaemsya', // «Отдай» → «Меняемся»
+  'k/naydi': 'k/ischi', // «Найди!» → «Ищи»
+  'k/namordnik-korzinka': 'k/korzinochnyy-namordnik',
+  'g/tyagalka-beri-i-otday': 'g/tyagalka-beri-i-menyaemsya',
+  'g/naydi-v-treh-korobkah': 'g/ischi-v-treh-korobkah',
+};
+// В этих играх поменялось только слово, шаги прежние — отметки читаем и под старым id
+const MARKS_FROM = {
+  'g/tyagalka-beri-i-menyaemsya': 'g/tyagalka-beri-i-otday',
+  'g/ischi-v-treh-korobkah': 'g/naydi-v-treh-korobkah',
+};
+const newRef = (ref) => RENAMED[ref] || ref;
+const withNewRefs = (events) => (events || []).map((e) => (RENAMED[e.card] ? { ...e, card: RENAMED[e.card] } : e));
 const WEEK_SIZE = 10; // столько тренировок предлагается выбрать на неделю
 const TABS = {
   k: { title: 'Тренировки', heading: 'Каталог тренировок', files: ['komandy.md'], sorted: true },
@@ -89,7 +104,7 @@ const store = createStore({
   },
   onDay(checks) { S.checks = checks || {}; render(); },
   onMarks(marks) { S.marks = marks || {}; render(); },
-  onEvents(list) { S.events = list || []; render(); },
+  onEvents(list) { S.events = withNewRefs(list); render(); },
   onCards(docs) { S.cardDocs = docs || {}; rebuildCatalogs(); render(); },
   onError(message) { toast(message); },
 }, firebaseConfig);
@@ -97,7 +112,7 @@ const store = createStore({
 const canWrite = () => S.store.status === 'ready';
 
 function loadRecent() {
-  store.loadHistory(addDays(S.day, -14), addDays(S.day, -1)).then((d) => { S.recent = d.events; render(); }).catch(() => {});
+  store.loadHistory(addDays(S.day, -14), addDays(S.day, -1)).then((d) => { S.recent = withNewRefs(d.events); render(); }).catch(() => {});
 }
 
 function cleanPlan(p) {
@@ -110,7 +125,7 @@ function cleanPlan(p) {
       const card = str(x.card, 120);
       return {
         id: str(x.id, 20) || rid(),
-        card: card.includes('/') ? card : 'k/' + card,
+        card: newRef(card.includes('/') ? card : 'k/' + card),
         target: Math.min(MAX_REPS, Math.max(1, parseInt(x.target, 10) || 1)),
         note: str(x.note, 300),
         v: parseInt(x.v, 10) || 1,
@@ -118,7 +133,9 @@ function cleanPlan(p) {
         week: /^\d{4}-\d\d-\d\d$/.test(x.week) ? x.week : '',
         day: /^\d{4}-\d\d-\d\d$/.test(x.day) ? x.day : '',
       };
-    }).filter((x) => x.card.length > 2),
+    }).filter((x) => x.card.length > 2)
+      // После переименования карточки в списке мог оказаться повтор — оставляем первый
+      .filter((x, i, all) => all.findIndex((y) => y.card === x.card && y.week === x.week && y.day === x.day) === i),
   };
 }
 
@@ -130,13 +147,16 @@ function migratePlan() {
     savePlan((p) => { p.schedule = []; p.focus = S.defaultPlan.focus; });
     return;
   }
-  // Обновления списка, по одному разу: цели не меньше MIN_REPS (v2), новые ежедневные тренировки (v3)
+  // Обновления списка, по одному разу: цели не меньше MIN_REPS (v2), новые ежедневные тренировки (v3),
+  // пояснения из обновлённой памятки (v4)
   if (S.plan.focus.some((f) => f.v < PLAN_VERSION)) {
     S.migrated = true;
     const needsV3 = S.plan.focus.some((f) => f.v < 3);
+    const notes = new Map(S.defaultPlan.focus.map((f) => [f.card, f.note]));
     savePlan((p) => {
       p.focus.forEach((f) => {
         if (f.v < 2) f.target = Math.max(MIN_REPS, f.target);
+        if (f.v < 4 && !f.day && notes.has(f.card)) f.note = notes.get(f.card);
         f.v = PLAN_VERSION;
       });
       if (!needsV3) return;
@@ -230,7 +250,8 @@ function rebuildCatalogs() {
         return edited ? [{ ...edited, source: 'edited' }] : [{ ...c, source: 'file' }];
       }),
     }));
-    docs.filter((d) => !baseIds.has(d.cardId) && !d.deleted).sort((a, b) => (a.cardId < b.cardId ? -1 : 1)).forEach((d) => {
+    // Правки старых карточек, переименованных в файлах, не показываем отдельными карточками
+    docs.filter((d) => !baseIds.has(d.cardId) && !d.deleted && !RENAMED[`${tab}/${d.cardId}`]).sort((a, b) => (a.cardId < b.cardId ? -1 : 1)).forEach((d) => {
       const card = safeParseCard(d.md, d.cardId);
       if (!card) return;
       let g = groups.find((x) => x.title === d.group) || groups[0];
@@ -294,7 +315,7 @@ const findCard = (tab, id) => (S.catalogs[tab] ? S.catalogs[tab].groups.flatMap(
 
 // «k/ko-mne» → { tab, id, card }
 function cardByRef(ref) {
-  const [tab, id] = String(ref).split('/');
+  const [tab, id] = newRef(String(ref)).split('/');
   return { tab, id, card: findCard(tab, id) };
 }
 const cardName = (ref) => { const r = cardByRef(ref); return r.card ? r.card.name : ref; };
@@ -328,8 +349,15 @@ function byLine(m, withDate) {
   return [m.name, when].filter(Boolean).map(escapeHtml).join(' · ');
 }
 
-// Отметки карточек, перенесённых из «Советов», раньше хранились с вкладкой t — читаем и их
-const legacyId = (id) => (/^(step|task|card)_k_/.test(id) ? id.replace(/^(step|task|card)_k_/, `$1_${MOVED_FROM}_`) : null);
+// Отметки под прежним id: игры, где поменялось только слово (MARKS_FROM), и карточки,
+// перенесённые из «Советов», — их отметки раньше хранились с вкладкой t
+function legacyId(id) {
+  const m = id.match(/^(step|task|card)_([kgt])_([^_]+)(.*)$/);
+  if (!m) return null;
+  const from = MARKS_FROM[`${m[2]}/${m[3]}`];
+  if (from) return `${m[1]}_${from.replace('/', '_')}${m[4]}`;
+  return m[2] === 'k' ? `${m[1]}_${MOVED_FROM}_${m[3]}${m[4]}` : null;
+}
 function getMark(id) {
   const old = legacyId(id);
   return S.marks[id] || (old && S.marks[old]) || null;
@@ -785,7 +813,7 @@ async function loadDiary(more) {
   render();
   try {
     const data = await store.loadHistory(from, today);
-    S.diary = { from, events: data.events, days: data.days, loading: false, loadedAt: Date.now() };
+    S.diary = { from, events: withNewRefs(data.events), days: data.days, loading: false, loadedAt: Date.now() };
   } catch (err) {
     console.error(err);
     S.diary.loading = false;
