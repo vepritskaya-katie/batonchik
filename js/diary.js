@@ -33,6 +33,13 @@ const keyToUTC = (key) => {
 export function addDays(key, n) {
   return dayKey(new Date(keyToUTC(key) + n * 86400000));
 }
+// Понедельник недели, в которую входит день key
+export function mondayOf(key) {
+  const [y, m, d] = key.split('-').map(Number);
+  const weekday = new Date(Date.UTC(y, m - 1, d)).getUTCDay(); // 0 — воскресенье
+  return addDays(key, -((weekday + 6) % 7));
+}
+
 // «2026-10-21» + «07:30» по Москве → Date
 export function moscowDate(key, hm) {
   const [y, m, d] = key.split('-').map(Number);
