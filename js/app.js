@@ -4,7 +4,7 @@ import { parseBlocks, parseCatalog, parseCardMd, parseToday, renderBlocks, inlin
 import { createStore } from './store.js';
 import { cardToForm, emptyForm, formToMd, editorHtml, editorAction, setPath } from './editor.js';
 import {
-  EVENT_TYPES, SUBS, TRAIN, dayKey, fmtTime, fmtDate, addDays, moscowDate, dayStats, eventRow, todaySummary, nightLine, nightFor, diaryHtml, plural,
+  EVENT_TYPES, SUBS, TRAIN, dayKey, fmtTime, fmtDate, addDays, moscowDate, dayStats, eventRow, todaySummary, nightLine, nightFor, diaryHtml, plural, mondayOf, dayTitle,
 } from './diary.js';
 import { pickIdeas } from './ideas.js';
 
@@ -27,10 +27,11 @@ const MAX_REPS = 50;
 // «Протокол расслабления» и «Спокойно, пока мы едим»
 const PLAN_VERSION = 3;
 const ADDED_IN_V3 = ['k/protokol-rasslableniya', 'k/spokoyno-poka-my-edim'];
+const WEEK_SIZE = 10; // столько тренировок предлагается выбрать на неделю
 const TABS = {
   k: { title: 'Тренировки', heading: 'Каталог тренировок', files: ['komandy.md'], sorted: true },
   g: { title: 'Игры', files: ['igry.md'], sorted: true },
-  t: { title: 'Советы', files: ['sovety.md'] },
+  t: { title: 'Советы', files: ['sovety.md'], sorted: true },
 };
 
 const S = {
@@ -113,6 +114,9 @@ function cleanPlan(p) {
         target: Math.min(MAX_REPS, Math.max(1, parseInt(x.target, 10) || 1)),
         note: str(x.note, 300),
         v: parseInt(x.v, 10) || 1,
+        // week — понедельник недели, на которую выбрана тренировка; day — добавлена только на этот день
+        week: /^\d{4}-\d\d-\d\d$/.test(x.week) ? x.week : '',
+        day: /^\d{4}-\d\d-\d\d$/.test(x.day) ? x.day : '',
       };
     }).filter((x) => x.card.length > 2),
   };
@@ -446,56 +450,157 @@ function currentStep(tab, card) {
   return i >= 0 ? `шаг ${i + 1}: ${card.stepTitles[card.steps[i]] || ''}` : '';
 }
 
+// Что на главной сегодня: тренировки, выбранные на эту неделю, и добавленные только на сегодня.
+// Пока выбор на неделю не сделан, показывается прежний список (без пометки недели).
+function todayItems(plan = currentPlan()) {
+  const week = mondayOf(S.day);
+  // Новая неделя ещё не выбрана — показываем последнюю выбранную, а если её нет — прежний список
+  const shown = plan.focus.some((f) => f.week === week) ? week
+    : plan.focus.map((f) => f.week).filter((w) => w && w < week).sort().pop() || '';
+  const isBase = (f) => (shown ? f.week === shown : !f.week && !f.day);
+  return plan.focus.filter((f) => isBase(f) || f.day === S.day); // в сохранённом порядке
+}
+const weekChosen = (plan = currentPlan()) => plan.focus.some((f) => f.week === mondayOf(S.day));
+
 function trainingsHtml() {
   const plan = currentPlan();
   const edit = S.edit.trainings;
   const can = canWrite();
   const counts = todayTrains();
-  const items = plan.focus.map((it, i) => {
+  const visible = todayItems(plan);
+  const rows = visible.map((it, i) => {
     const { tab, id, card } = cardByRef(it.card);
     const n = counts[it.card] || 0;
     const target = targetOf(it);
-    const done = n >= target;
+    return { it, i, tab, id, card, n, target, done: n >= target };
+  });
+  // Выполненные — вниз (в режиме правки — в своём порядке, чтобы работали стрелки)
+  if (!edit) rows.sort((a, b) => a.done - b.done || a.i - b.i);
+  const items = rows.map(({ it, i, tab, id, card, n, target, done }) => {
     const name = card ? card.name : 'Карточка не найдена';
     const segs = target <= 10
       ? `<span class="segs">${Array.from({ length: target }, (_, j) => `<span class="seg-dot${j < n ? ' on' : ''}"></span>`).join('')}</span>`
       : `<span class="mini-bar"><span style="width:${Math.min(100, Math.round(n / target * 100))}%"></span></span>`;
+    const progress = `${segs}<span class="tr-count">${n} из ${target}</span>`;
     return `<li class="item tr${done ? ' done' : ''}">
       ${edit ? '' : `<button class="tr-tap${done ? ' on' : ''}" data-action="tr-tap" data-card="${it.card}"${can && card ? '' : ' disabled'}
         aria-label="Отметить повтор: ${escapeHtml(name)}, сделано ${n} из ${target}">
         ${done ? '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>' : `<span class="tr-plus">+1</span>`}</button>`}
       <div class="item-body">
-        <div class="item-head">${card ? `<a class="item-title link" href="#/${tab}/${id}">${escapeHtml(name)}</a>` : `<span class="item-title muted">${name}</span>`}</div>
+        <div class="item-head">${card ? `<a class="item-title link" href="#/${tab}/${id}">${escapeHtml(name)}</a>` : `<span class="item-title muted">${name}</span>`}
+          ${it.day ? '<span class="chip today-only">только сегодня</span>' : ''}</div>
         ${card && tab === 'k' ? `<div class="tr-step">${escapeHtml(currentStep(tab, card))}</div>` : ''}
         ${it.note ? `<div class="muted small">${inline(it.note)}</div>` : ''}
-        <div class="tr-progress">${segs}<span class="tr-count">${n} из ${target}</span></div>
+        ${n && can && !edit
+          ? `<button class="tr-progress tr-progress-btn" data-action="tr-reps" data-card="${it.card}" aria-label="Повторы за сегодня: ${n}. Нажмите, чтобы убрать лишний">${progress}</button>`
+          : `<div class="tr-progress">${progress}</div>`}
         ${edit ? `<div class="edit-row">
           <button class="icon-btn" data-action="tr-target" data-id="${it.id}" data-dir="-1" aria-label="Меньше повторов"${target <= 1 ? ' disabled' : ''}>−</button>
           <button class="icon-btn" data-action="tr-target" data-id="${it.id}" data-dir="1" aria-label="Больше повторов"${target >= MAX_REPS ? ' disabled' : ''}>+</button>
           <button class="icon-btn" data-action="tr-move" data-id="${it.id}" data-dir="-1" aria-label="Выше"${i === 0 ? ' disabled' : ''}>↑</button>
-          <button class="icon-btn" data-action="tr-move" data-id="${it.id}" data-dir="1" aria-label="Ниже"${i === plan.focus.length - 1 ? ' disabled' : ''}>↓</button>
+          <button class="icon-btn" data-action="tr-move" data-id="${it.id}" data-dir="1" aria-label="Ниже"${i === visible.length - 1 ? ' disabled' : ''}>↓</button>
           <button class="btn small danger" data-action="tr-remove" data-id="${it.id}">Убрать</button>
         </div>` : ''}
       </div></li>`;
   }).join('');
   const t = S.today || {};
+  const week = mondayOf(S.day);
+  const chosen = weekChosen(plan);
   const editBtn = can ? `<button class="btn small${edit ? ' primary' : ''}" data-action="edit-toggle" data-section="trainings">${edit ? 'Готово' : 'Изменить'}</button>` : '';
+  const weekBanner = can && !chosen && S.contentReady
+    ? `<div class="banner week-banner"><span>${week === S.day ? 'Понедельник — ' : ''}выберите ${WEEK_SIZE} тренировок на эту неделю. Они будут на главной до воскресенья.</span>
+        <button class="btn primary" data-action="week-pick">Выбрать</button></div>` : '';
   return `<section class="section">
     <div class="section-head"><h2>${escapeHtml(t.title || 'Тренировки на сегодня')}</h2>${editBtn}</div>
+    ${weekBanner}
+    ${chosen ? `<p class="muted small">Неделя с ${dayTitle(week, { day: 'numeric', month: 'long' })}.</p>` : ''}
     ${t.intro && t.intro.length ? `<details class="intro"><summary>Как устроены занятия</summary><div class="prose">${renderBlocks(t.intro)}</div></details>` : ''}
-    <p class="muted small">Одно нажатие на «+1» — один повтор. Сделали все повторы — строка станет зелёной.</p>
+    <p class="muted small">Одно нажатие на «+1» — один повтор. Сделали все повторы — строка станет зелёной и уйдёт вниз. Ошиблись — нажмите на счёт «2 из 5», чтобы убрать лишний повтор.</p>
     <ul class="list">${items || '<li class="empty">Список пуст. Нажмите «Изменить», чтобы добавить тренировки.</li>'}</ul>
     ${edit ? `<div class="edit-actions">
-      <button class="btn" data-action="tr-add">+ Добавить тренировку или игру</button>
-      <button class="btn danger-outline" data-action="reset-plan">Вернуть как в памятке</button>
+      <button class="btn" data-action="tr-add">+ Добавить на сегодня</button>
+      <button class="btn" data-action="week-pick">${chosen ? 'Изменить выбор на неделю' : 'Выбрать на неделю'}</button>
     </div>` : ''}
   </section>`;
+}
+
+// Тренировки для выбора на неделю: сначала незаконченные с прошлой недели, потом из памятки, потом начатые
+function weekRanking() {
+  const plan = currentPlan();
+  const week = mondayOf(S.day);
+  const prev = new Set(plan.focus.filter((f) => f.week !== week && !f.day).map((f) => f.card));
+  const defaults = S.defaultPlan.focus.map((f) => f.card);
+  return commandCards().map((c) => {
+    const ref = `k/${c.id}`;
+    const p = cardProgress('k', c);
+    const mastered = p.mastered || (p.total > 0 && p.done === p.total);
+    let rank = 4;
+    if (mastered) rank = 5;
+    else if (prev.has(ref)) rank = 0;
+    else if (defaults.includes(ref)) rank = 1;
+    else if (p.done > 0) rank = 2;
+    const di = defaults.indexOf(ref);
+    return { ref, card: c, rank, order: di < 0 ? 999 : di, p, mastered };
+  }).sort((a, b) => a.rank - b.rank || a.order - b.order || a.card.name.localeCompare(b.card.name, 'ru'));
+}
+
+function weekPickSheet() {
+  const plan = currentPlan();
+  const week = mondayOf(S.day);
+  const ranking = weekRanking();
+  const current = plan.focus.filter((f) => f.week === week).map((f) => f.card);
+  const selected = new Set(current.length ? current : ranking.filter((x) => !x.mastered).slice(0, WEEK_SIZE).map((x) => x.ref));
+  const info = new Map(ranking.map((x) => [x.ref, x]));
+  const groups = S.catalogs.k.groups.map((g) => `<h3>${escapeHtml(g.title)}</h3>${g.cards.map((c) => {
+    const x = info.get(`k/${c.id}`);
+    const status = x.mastered ? 'освоено' : x.p.done ? `освоено шагов ${x.p.done} из ${x.p.total}` : 'ещё не начинали';
+    return `<label class="choice-row"><input type="checkbox" name="cards" value="k/${c.id}"${selected.has(`k/${c.id}`) ? ' checked' : ''}>
+      <span><span class="choice-name">${escapeHtml(c.name)}</span><span class="muted small">${status}</span></span></label>`;
+  }).join('')}`).join('');
+  openSheet(`<form class="form week-pick">
+    <h2>Тренировки на неделю</h2>
+    <p class="muted">Неделя с ${dayTitle(week, { day: 'numeric', month: 'long' })}. Отметьте ${WEEK_SIZE} тренировок — они будут на главной до воскресенья.
+      Заранее отмечены незаконченные с прошлой недели и из памятки. Добавить что-то на один день можно в любой момент.</p>
+    <p class="pick-count" aria-live="polite">Выбрано: <b>${selected.size}</b> из ${WEEK_SIZE}</p>
+    ${groups}
+    <div class="form-actions sticky"><button type="button" class="btn" data-action="sheet-close">Отмена</button><button class="btn primary">Сохранить на неделю</button></div>
+  </form>`, (fd) => {
+    const chosen = new Set(fd.getAll('cards'));
+    if (!chosen.size) { toast('Отметьте хотя бы одну тренировку.'); return; }
+    const notes = new Map(S.defaultPlan.focus.map((f) => [f.card, f.note]));
+    const order = ranking.map((x) => x.ref).filter((ref) => chosen.has(ref));
+    savePlan((p) => {
+      const old = new Map(p.focus.filter((f) => f.week === week).map((f) => [f.card, f]));
+      // Оставляем только добавленное на сегодня и позже; прошлые недели и старый список больше не нужны
+      const keepDays = p.focus.filter((f) => f.day && f.day >= S.day && !chosen.has(f.card));
+      p.schedule = [];
+      p.focus = [
+        ...order.map((ref) => old.get(ref) || { id: rid(), card: ref, target: MIN_REPS, note: notes.get(ref) || '', v: PLAN_VERSION, week, day: '' }),
+        ...keepDays,
+      ];
+    });
+    toast(`На неделю выбрано: ${order.length}.`);
+  });
+  const count = () => { sheet.querySelector('.pick-count b').textContent = sheet.querySelectorAll('input[name=cards]:checked').length; };
+  sheet.querySelector('.week-pick').addEventListener('change', count);
+}
+
+// Повторы за сегодня по одной тренировке — чтобы убрать ошибочный, даже если «Отменить» уже пропало
+function repsSheet(ref) {
+  const list = S.events.filter((e) => e.type === 'train' && e.card === ref).sort((a, b) => b.at - a.at);
+  if (!list.length) return;
+  openSheet(`<div class="form"><h2>${escapeHtml(cardName(ref))}</h2>
+    <p class="muted">Повторы за сегодня. Лишний можно убрать — например, если отметили уже после полуночи.</p>
+    <ul class="ev-list">${list.map((e) => `<li><div class="ev-row"><span class="ev-time">${fmtTime(e.at)}</span>
+      <span class="ev-main"><span class="ev-label">Повтор</span>${e.name ? `<span class="ev-by">${escapeHtml(e.name)}</span>` : ''}</span>
+      <button class="btn small danger" data-action="tr-rep-del" data-id="${e.id}">Убрать</button></div></li>`).join('')}</ul>
+    <div class="form-actions"><button type="button" class="btn" data-action="sheet-close">Закрыть</button></div></div>`, null);
 }
 
 function ideasHtml() {
   if (!canWrite() || !S.catalogs.k || !S.catalogs.g) return '';
   const plan = currentPlan();
-  const refs = new Set(plan.focus.map((f) => f.card));
+  const refs = new Set(todayItems(plan).map((f) => f.card));
   const all = (tab) => S.catalogs[tab].groups.flatMap((g) => g.cards);
   const ideas = pickIdeas({
     day: S.day, games: all('g'), trainings: all('k'), inPlan: (ref) => refs.has(ref),
@@ -511,7 +616,7 @@ function ideasHtml() {
       <div class="muted small">${escapeHtml(idea.reason)}${n ? ` · сегодня ${n} ${plural(n, 'повтор', 'повтора', 'повторов')}` : ''}</div>
       <div class="idea-actions">
         <button class="btn small primary" data-action="tr-tap" data-card="${idea.ref}">${kind === 'game' ? 'Сыграли' : 'Сделали'}</button>
-        ${kind === 'training' ? `<button class="btn small" data-action="idea-plan" data-card="${idea.ref}">В план</button>` : ''}
+        ${kind === 'training' ? `<button class="btn small" data-action="idea-plan" data-card="${idea.ref}">В план на сегодня</button>` : ''}
         ${count > 1 ? `<button class="btn small" data-action="idea-next" data-kind="${kind}">Другая</button>` : ''}
       </div></div>`;
   };
@@ -520,10 +625,10 @@ function ideasHtml() {
 }
 
 function renderToday() {
-  const plan = currentPlan();
+  const items = todayItems();
   const counts = todayTrains();
-  const total = plan.focus.reduce((a, f) => a + targetOf(f), 0);
-  const done = plan.focus.reduce((a, f) => a + Math.min(targetOf(f), counts[f.card] || 0), 0);
+  const total = items.reduce((a, f) => a + targetOf(f), 0);
+  const done = items.reduce((a, f) => a + Math.min(targetOf(f), counts[f.card] || 0), 0);
   const t = S.today || {};
 
   // «В течение дня» — из файла, без отметок
@@ -905,21 +1010,29 @@ function saveTrain(ref) {
   const at = new Date();
   const n = (todayTrains()[ref] || 0) + 1; // считаем до записи: хранилище может обновить журнал сразу
   const id = store.addEvent({ type: 'train', card: ref, at, day: dayKey(at) });
-  const it = currentPlan().focus.find((f) => f.card === ref);
+  const it = todayItems().find((f) => f.card === ref);
   toast(`${TRAIN.label}: ${cardName(ref)}${it ? ` — ${Math.min(n, 99)} из ${targetOf(it)}` : ''}`, {
     label: 'Отменить', onClick: () => { if (id) store.deleteEvent(id); },
   });
 }
 
+// Добавить тренировку или игру только на сегодня
+function addForToday(ref) {
+  if (todayItems().some((f) => f.card === ref)) return;
+  savePlan((p) => p.focus.push({ id: rid(), card: ref, target: MIN_REPS, note: '', v: PLAN_VERSION, week: '', day: S.day }));
+}
+
 function addTrainingSheet() {
-  const used = new Set(currentPlan().focus.map((f) => f.card));
+  const used = new Set(todayItems().map((f) => f.card));
   const groups = ['k', 'g'].flatMap((tab) => (S.catalogs[tab] ? S.catalogs[tab].groups : []).map((g) => {
     const cards = g.cards.filter((c) => !used.has(`${tab}/${c.id}`));
     if (!cards.length) return '';
     return `<h3>${escapeHtml(g.title || TABS[tab].title)}</h3>${cards.map((c) =>
       `<button type="button" class="pick" data-action="tr-pick" data-card="${tab}/${c.id}">${escapeHtml(c.name)}${c.subtitle ? `<span class="muted">${escapeHtml(c.subtitle)}</span>` : ''}</button>`).join('')}`;
   })).join('');
-  openSheet(`<div class="form"><h2>Добавить в тренировки на сегодня</h2>${groups || '<p class="muted">Всё уже в списке.</p>'}
+  openSheet(`<div class="form"><h2>Добавить на сегодня</h2>
+    <p class="muted">Тренировка или игра появится на главной только сегодня. Чтобы заниматься ею всю неделю, выберите её в «Изменить выбор на неделю».</p>
+    ${groups || '<p class="muted">Всё уже в списке.</p>'}
     <div class="form-actions"><button type="button" class="btn" data-action="sheet-close">Закрыть</button></div></div>`, null);
 }
 
@@ -985,11 +1098,6 @@ const actions = {
     } else store.setMark(id, true);
   },
   'edit-toggle': (el) => { S.edit[el.dataset.section] = !S.edit[el.dataset.section]; render(); },
-  'reset-plan': () => {
-    if (!confirm('Вернуть список тренировок как в памятке? Ваши правки списка пропадут, сделанные повторы останутся.')) return;
-    S.defaultPlan = buildDefaultPlan();
-    savePlan((p) => { p.schedule = []; p.focus = S.defaultPlan.focus; });
-  },
   // Тренировки на сегодня
   'tr-tap': (el) => saveTrain(el.dataset.card),
   'tr-target': (el) => {
@@ -1003,21 +1111,35 @@ const actions = {
       if (it) it.target = Math.min(MAX_REPS, Math.max(1, it.target + +el.dataset.dir));
     });
   },
-  'tr-move': (el) => savePlan((p) => move(p.focus, el.dataset.id, +el.dataset.dir)),
+  // Стрелки двигают пункт среди тех, что видны сегодня
+  'tr-move': (el) => savePlan((p) => {
+    const ids = todayItems(p).map((f) => f.id);
+    const i = ids.indexOf(el.dataset.id);
+    const j = i + +el.dataset.dir;
+    if (i < 0 || j < 0 || j >= ids.length) return;
+    const a = p.focus.findIndex((f) => f.id === ids[i]);
+    const b = p.focus.findIndex((f) => f.id === ids[j]);
+    [p.focus[a], p.focus[b]] = [p.focus[b], p.focus[a]];
+  }),
   'tr-remove': (el) => {
     const it = currentPlan().focus.find((x) => x.id === el.dataset.id);
-    if (it && confirm(`Убрать «${cardName(it.card).replace(/[«»]/g, '')}» из тренировок на сегодня?`)) savePlan((p) => { p.focus = p.focus.filter((x) => x.id !== it.id); });
+    if (!it) return;
+    const name = cardName(it.card).replace(/[«»]/g, '');
+    const where = it.day ? 'из тренировок на сегодня' : it.week ? 'из плана на неделю' : 'из списка';
+    if (confirm(`Убрать «${name}» ${where}?`)) savePlan((p) => { p.focus = p.focus.filter((x) => x.id !== it.id); });
+  },
+  'week-pick': () => weekPickSheet(),
+  'tr-reps': (el) => repsSheet(el.dataset.card),
+  'tr-rep-del': (el) => {
+    store.deleteEvent(el.dataset.id);
+    closeSheet();
+    toast('Повтор убран.');
   },
   'tr-add': () => addTrainingSheet(),
-  'tr-pick': (el) => {
-    const ref = el.dataset.card;
-    if (!currentPlan().focus.some((f) => f.card === ref)) savePlan((p) => p.focus.push({ id: rid(), card: ref, target: MIN_REPS, note: '', v: PLAN_VERSION }));
-    closeSheet();
-  },
+  'tr-pick': (el) => { addForToday(el.dataset.card); closeSheet(); },
   'idea-plan': (el) => {
-    const ref = el.dataset.card;
-    if (!currentPlan().focus.some((f) => f.card === ref)) savePlan((p) => p.focus.push({ id: rid(), card: ref, target: MIN_REPS, note: '', v: PLAN_VERSION }));
-    toast(`${cardName(ref)} — в тренировках на сегодня.`);
+    addForToday(el.dataset.card);
+    toast(`${cardName(el.dataset.card)} — в тренировках на сегодня.`);
   },
   'idea-next': (el) => { S.ideaShift[el.dataset.kind] = (S.ideaShift[el.dataset.kind] || 0) + 1; render(); },
   // Журнал
