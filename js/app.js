@@ -2,11 +2,12 @@
 
 import { parseBlocks, parseCatalog, parseCardMd, parseToday, renderBlocks, inline, escapeHtml, hash, plainText, stepKey as stepKeyFor } from './md.js';
 import { createStore } from './store.js';
-import { cardToForm, emptyForm, formToMd, editorHtml, editorAction, setPath } from './editor.js';
+import { cardToForm, emptyForm, formToMd, editorHtml, editorAction, setPath, formatText } from './editor.js';
 import {
   EVENT_TYPES, SUBS, TRAIN, dayKey, fmtTime, fmtDate, addDays, moscowDate, dayStats, eventRow, todaySummary, nightLine, nightFor, diaryHtml, plural, mondayOf, dayTitle,
 } from './diary.js';
 import { pickIdeas } from './ideas.js';
+import { parseNotes, notesListHtml, noteHtml, noteMatches, countText } from './notes.js';
 
 // Настройки Firebase читаем отдельно: если в файле ошибка, приложение всё равно откроется
 let firebaseConfig = null;
@@ -34,11 +35,13 @@ const RENAMED = {
   'k/namordnik-korzinka': 'k/korzinochnyy-namordnik',
   'g/tyagalka-beri-i-otday': 'g/tyagalka-beri-i-menyaemsya',
   'g/naydi-v-treh-korobkah': 'g/ischi-v-treh-korobkah',
+  'k/zhdi': 'k/zhdat', // «Жди» → «Ждать»
 };
-// В этих играх поменялось только слово, шаги прежние — отметки читаем и под старым id
+// Здесь поменялось только слово, шаги прежние — отметки читаем и под старым id
 const MARKS_FROM = {
   'g/tyagalka-beri-i-menyaemsya': 'g/tyagalka-beri-i-otday',
   'g/ischi-v-treh-korobkah': 'g/naydi-v-treh-korobkah',
+  'k/zhdat': 'k/zhdi',
 };
 const newRef = (ref) => RENAMED[ref] || ref;
 const withNewRefs = (events) => (events || []).map((e) => (RENAMED[e.card] ? { ...e, card: RENAMED[e.card] } : e));
@@ -69,7 +72,13 @@ const S = {
   store: { mode: 'local', status: 'loading' },
   day: dayKey(),
   edit: { trainings: false },
+  notes: null,        // вкладка «Каналы»: заметки из Telegram-каналов (только чтение)
+  notesFilter: { q: '', now: false, future: false, sci: false, exp: false },
+  tipShift: 0,        // «Ещё совет» в «Совете дня»
 };
+
+// Карточка в «Советах» со списком для окошка «Совет дня»: в общем списке советов её не показываем
+const DAILY_TIPS_ID = 'sovety-dnya';
 
 const $ = (sel) => document.querySelector(sel);
 const view = $('#view');
@@ -212,6 +221,9 @@ async function loadContent() {
     }
     S.base[key] = cat;
   });
+  tasks.push(loadText('kanaly.md').then((t) => {
+    try { S.notes = parseNotes(t); } catch (err) { console.error(err); S.notes = { error: true }; }
+  }).catch(() => { S.notes = { error: true }; }));
   tasks.push(loadText('rasporyadok.md').then((t) => {
     try { S.today = parseToday(t); } catch { S.today = { raw: t }; }
   }).catch(() => { S.today = { error: true }; }));
@@ -231,6 +243,13 @@ function rebuildCatalogs() {
     const base = S.base[tab];
     if (!base) continue;
     let docs = Object.values(S.cardDocs).filter((d) => d && d.tab === tab);
+    // Число «Повторов в день», заданное до переименования карточки, переходит к ней под новым id
+    const have = new Set(docs.map((d) => d.cardId));
+    docs.forEach((d) => {
+      const to = RENAMED[`${tab}/${d.cardId}`];
+      const id = to && to.split('/')[1];
+      if (id && !have.has(id) && repsOnlyValue(d.md)) { docs.push({ ...d, cardId: id }); have.add(id); }
+    });
     if (tab === 'k') docs = docs.concat(movedDocs(base, docs));
     const byId = new Map(docs.map((d) => [d.cardId, d]));
     const baseIds = new Set();
@@ -680,6 +699,72 @@ function renderToday() {
     ${sections}`;
 }
 
+// ---------- Каналы ----------
+
+function renderNotes() {
+  if (!S.notes) return '<h1>Каналы</h1><p class="muted">Загружаем…</p>';
+  if (S.notes.error) return '<h1>Каналы</h1><div class="banner warn">Не удалось загрузить заметки. Проверьте интернет.</div>';
+  return notesListHtml(S.notes, S.notesFilter);
+}
+
+function renderNote(id) {
+  const arrow = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>';
+  const from = prevHash && pageTitle(prevHash);
+  const back = from ? `<a class="back" href="${prevHash}" data-action="back">${arrow}${escapeHtml(from)}</a>`
+    : `<a class="back" href="#/c">${arrow}Каналы</a>`;
+  if (!S.notes) return `${back}<p class="muted">Загружаем…</p>`;
+  const n = S.notes.byId && S.notes.byId.get(id);
+  return n ? noteHtml(n, back) : `${back}<h1>Не найдено</h1><p class="muted">Возможно, заметку переименовали.</p>`;
+}
+
+// Поиск и фильтры прячут лишние заметки прямо на странице, без перерисовки: поле поиска не теряет курсор
+function applyNotesFilter() {
+  if (!S.notes || !S.notes.byId) return;
+  let shown = 0;
+  view.querySelectorAll('[data-note]').forEach((li) => {
+    const ok = noteMatches(S.notes.byId.get(li.dataset.note), S.notesFilter);
+    li.hidden = !ok;
+    if (ok) shown++;
+  });
+  view.querySelectorAll('[data-topic]').forEach((el) => { el.hidden = !el.querySelector('[data-note]:not([hidden])'); });
+  view.querySelectorAll('[data-section]').forEach((el) => { el.hidden = !el.querySelector('[data-note]:not([hidden])'); });
+  const count = view.querySelector('.notes-count');
+  if (count) count.textContent = countText(shown, S.notes.all.length);
+  const empty = view.querySelector('.notes-empty');
+  if (empty) empty.hidden = shown > 0;
+}
+
+view.addEventListener('input', (e) => {
+  if (!e.target.matches('.notes-search')) return;
+  S.notesFilter.q = e.target.value;
+  applyNotesFilter();
+});
+
+// ---------- Совет дня ----------
+
+function dailyTips() {
+  const card = findCard('t', DAILY_TIPS_ID);
+  if (!card) return [];
+  const items = (blocks) => blocks.flatMap((b) => (b.type === 'list' ? b.items.map((it) => it.text) : []));
+  return [...items(card.lead), ...card.blocks.flatMap((b) => items(b.content))].filter((s) => s.trim());
+}
+
+function dailyTipHtml() {
+  const tips = dailyTips();
+  if (!tips.length) return '';
+  // Новый совет каждый день по порядку списка; «Ещё совет» листает дальше
+  const dayNum = Math.floor(Date.parse(`${S.day}T00:00:00Z`) / 86400000);
+  const tip = tips[(((dayNum + S.tipShift) % tips.length) + tips.length) % tips.length];
+  return `<section class="daily-tip" aria-label="Совет дня">
+    <p class="daily-head"><span aria-hidden="true">💡</span> Совет дня</p>
+    <p class="daily-text">${inline(tip)}</p>
+    <div class="daily-actions">
+      <button type="button" class="btn small" data-action="tip-next">Ещё совет</button>
+      <a class="btn small" href="#/t/${DAILY_TIPS_ID}">Все советы</a>
+    </div>
+  </section>`;
+}
+
 // ---------- Каталоги ----------
 
 function renderCatalog(tab) {
@@ -692,7 +777,7 @@ function renderCatalog(tab) {
   const loose = cat.loose.length ? `<div class="prose">${blocksHtml(cat.loose, tab, null)}</div>` : '';
   const groups = cat.groups.map((g) => {
     if (g.raw) return `<section class="group"><div class="raw">${escapeHtml(g.raw)}</div></section>`;
-    const cards = g.cards.map((c) => {
+    const cards = g.cards.filter((c) => !(tab === 't' && c.id === DAILY_TIPS_ID)).map((c) => {
       const p = cardProgress(tab, c);
       let prog = '';
       if (p.mastered) prog = '<span class="card-prog ok">✓ Освоено</span>';
@@ -717,7 +802,7 @@ function renderCatalog(tab) {
     </section>`;
   }).join('');
   const addBtn = canWrite() ? `<a class="btn small" href="#/edit/${tab}/new">+ Новая карточка</a>` : '';
-  return `<div class="page-head"><h1>${single ? inline(cat.groups[0].title) : escapeHtml(TABS[tab].heading || title)}</h1>${addBtn}</div>${errors}${loose}${groups}`;
+  return `<div class="page-head"><h1>${single ? inline(cat.groups[0].title) : escapeHtml(TABS[tab].heading || title)}</h1>${addBtn}</div>${errors}${tab === 't' ? dailyTipHtml() : ''}${loose}${groups}`;
 }
 
 function renderCard(tab, id) {
@@ -732,7 +817,7 @@ function renderCard(tab, id) {
     return `${back}<h1>Не найдено</h1><p class="muted">${S.catalogs[tab] ? 'Возможно, карточку переименовали в памятке.' : 'Загружаем…'}</p>`;
   }
   const body = safe(() => {
-    const lead = card.lead.length ? `<div class="prose">${blocksHtml(card.lead, tab, card)}</div>` : '';
+    const lead = card.lead.length ? `<section class="blk blk-lead"><div class="prose">${blocksHtml(card.lead, tab, card)}</div></section>` : '';
     return lead + card.blocks.filter((b) => b.content.length && b.kind !== 'reps').map((b) => {
       if (b.kind === 'result') return resultHtml(tab, card, b);
       const opts = b.kind === 'steps' || b.kind === 'how'
@@ -960,6 +1045,7 @@ function pageTitle(hash) {
   if (parts[0] === 'edit') return null;
   if (parts[0] === 'd') return 'Дневник';
   if (parts[0] === 'me') return 'Настройки';
+  if (parts[0] === 'c') return parts[1] ? 'Назад' : 'Каналы';
   if (TABS[parts[0]]) return parts[1] ? 'Назад' : TABS[parts[0]].title;
   return null;
 }
@@ -969,10 +1055,13 @@ function render(force) {
   if (r.page !== 'edit') S.editor = null;
   // Открытую форму правки не перерисовываем от обновлений с сервера, чтобы не стереть набранный текст
   if (r.page === 'edit' && !force && S.editor && S.editor.key === editorKey(r) && view.querySelector('[data-editor]')) return;
+  // То же для поиска в «Каналах», пока в нём печатают
+  if (r.page === 'c' && !r.id && !force && document.activeElement && document.activeElement.matches('.notes-search')) return;
   let html;
   if (r.page === 'me') html = renderMe();
   else if (r.page === 'edit') html = renderEditor(r);
   else if (r.page === 'd') html = renderDiary();
+  else if (r.page === 'c') html = r.id ? renderNote(r.id) : renderNotes();
   else if (TABS[r.tab]) html = r.id ? renderCard(r.tab, r.id) : renderCatalog(r.tab);
   else html = renderToday();
   view.innerHTML = html;
@@ -981,7 +1070,7 @@ function render(force) {
   if (routeKey !== lastRouteKey) {
     lastRouteKey = routeKey;
     const saved = scrollMemory[currentHash];
-    const isCard = !!(TABS[r.tab] && r.id);
+    const isCard = !!((TABS[r.tab] || r.page === 'c') && r.id);
     pendingScroll = !isCard && saved ? { y: saved, until: Date.now() + 2000 } : null;
     window.scrollTo(0, pendingScroll ? saved : 0);
   } else if (pendingScroll && Date.now() < pendingScroll.until) {
@@ -990,7 +1079,7 @@ function render(force) {
   }
   if (pendingScroll && (Math.abs(window.scrollY - pendingScroll.y) < 2 || Date.now() >= pendingScroll.until)) pendingScroll = null;
   document.querySelectorAll('.tabbar a').forEach((a) => {
-    const current = r.page === 'edit' ? r.tab : (TABS[r.tab] || r.page === 'me' || r.page === 'd' ? r.page : 'today');
+    const current = r.page === 'edit' ? r.tab : (TABS[r.tab] || r.page === 'me' || r.page === 'd' || r.page === 'c' ? r.page : 'today');
     const on = a.dataset.tab === current;
     a.classList.toggle('on', on);
     if (on) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
@@ -1030,7 +1119,7 @@ function saveEvent(type, extra = {}, at = new Date(), day = dayKey(at)) {
   const t = EVENT_TYPES[type];
   // Запись за вчера (сделали после полуночи) в сегодняшний журнал не попадает — обновляем историю
   const past = day !== dayKey(new Date());
-  if (past) loadRecent();
+  if (past || type === 'wake') loadRecent(); // для ночного перерыва нужна вчерашняя запись «Легли»
   toast(`Записано: ${t.label.toLowerCase()}${extra.sub ? ` — ${SUBS[extra.sub]}` : ''}, ${past ? 'вчера ' : ''}${fmtTime(at)}`, {
     label: 'Отменить', onClick: () => { if (id) store.deleteEvent(id); if (past) loadRecent(); },
   });
@@ -1091,6 +1180,18 @@ function addEventFlow(type) {
   }
 }
 
+// Подсказка в окне записи, если время ещё не наступило: запись уйдёт во вчерашний день
+function watchPastTime() {
+  const time = sheet.querySelector('input[name=time]');
+  const when = sheet.querySelector('.ev-when');
+  if (!time || !when) return;
+  time.addEventListener('input', () => {
+    const { day } = pastTime(time.value);
+    when.hidden = day === dayKey(new Date());
+    when.textContent = when.hidden ? '' : `Запишется на вчера, ${dayTitle(day, { day: 'numeric', month: 'long' })}.`;
+  });
+}
+
 // Окно новой записи: что было (для туалета), время (по умолчанию сейчас), комментарий; в журнал — по «Сохранить»
 function eventFormSheet(type) {
   const t = EVENT_TYPES[type];
@@ -1110,14 +1211,7 @@ function eventFormSheet(type) {
     const { at, day } = pastTime(String(fd.get('time') || ''));
     saveEvent(type, { sub, text }, at, day);
   });
-  // Подсказка, если время ещё не наступило: запись уйдёт во вчерашний день
-  const time = sheet.querySelector('input[name=time]');
-  const when = sheet.querySelector('.ev-when');
-  time.addEventListener('input', () => {
-    const { day } = pastTime(time.value);
-    when.hidden = day === dayKey(new Date());
-    when.textContent = when.hidden ? '' : `Запишется на вчера, ${dayTitle(day, { day: 'numeric', month: 'long' })}.`;
-  });
+  watchPastTime();
   if (t.text) setTimeout(() => { const ta = sheet.querySelector('textarea'); if (ta) ta.focus(); }, 50);
 }
 
@@ -1127,6 +1221,7 @@ function editEvent(id) {
   const t = EVENT_TYPES[e.type] || { label: e.type, icon: '' };
   openSheet(`<form class="form"><h2>${t.icon} ${t.label}</h2>
     <label>Время <input type="time" name="time" required value="${fmtTime(e.at)}"></label>
+    ${e.day === dayKey(new Date()) ? '<p class="muted small ev-when" hidden></p>' : ''}
     ${t.subs ? `<label>Что было <select name="sub">${Object.entries(SUBS).map(([k, v]) => `<option value="${k}"${e.sub === k ? ' selected' : ''}>${v}</option>`).join('')}</select></label>` : ''}
     <label>${t.text ? 'Текст заметки' : 'Комментарий'} <textarea name="text" rows="3" maxlength="2000">${escapeHtml(e.text)}</textarea></label>
     <p class="muted small">Записал${e.name ? `: ${escapeHtml(e.name)}` : 'и'}</p>
@@ -1135,10 +1230,17 @@ function editEvent(id) {
   </form>`, (fd) => {
     const patch = { text: String(fd.get('text') || '').trim() };
     const hm = String(fd.get('time') || '');
-    if (/^\d\d:\d\d$/.test(hm)) patch.at = moscowDate(e.day, hm);
+    if (/^\d\d:\d\d$/.test(hm)) {
+      // У сегодняшней записи время, которое ещё не наступило, — это вчера (например, «Легли» в 23:30, исправленное утром)
+      const when = e.day === dayKey(new Date()) ? pastTime(hm) : { at: moscowDate(e.day, hm), day: e.day };
+      patch.at = when.at;
+      if (when.day !== e.day) patch.day = when.day;
+    }
     if (t.subs) patch.sub = String(fd.get('sub'));
     store.updateEvent(e.id, patch);
+    if (patch.day) { loadRecent(); toast(`Запись перенесена на вчера, ${fmtTime(patch.at)}.`); }
   });
+  watchPastTime();
 }
 
 function move(list, id, dir) {
@@ -1216,6 +1318,23 @@ const actions = {
     closeSheet();
   },
   // Редактор карточек
+  'notes-filter': (el) => {
+    const key = el.dataset.f;
+    S.notesFilter[key] = !S.notesFilter[key];
+    el.setAttribute('aria-pressed', String(S.notesFilter[key]));
+    applyNotesFilter();
+  },
+  'tip-next': () => { S.tipShift++; render(); },
+  // Оформление текста совета: подзаголовок, список, жирный
+  'ed-fmt': (el) => {
+    const ta = view.querySelector('[data-editor] textarea[data-path="text"]');
+    if (!ta) return;
+    const r = formatText(ta.value, ta.selectionStart, ta.selectionEnd, el.dataset.fmt);
+    ta.value = r.value;
+    ta.focus();
+    ta.setSelectionRange(r.start, r.end);
+    ta.dispatchEvent(new Event('input', { bubbles: true }));
+  },
   'ed-add-block': (el) => { editorAction(S.editor.form, 'ed-add-block', el.dataset); render(true); },
   'ed-add-step': (el) => { editorAction(S.editor.form, 'ed-add-step', el.dataset); render(true); },
   'ed-move': (el) => { editorAction(S.editor.form, 'ed-move', el.dataset); render(true); },
@@ -1347,6 +1466,7 @@ function checkDay() {
     S.recent = [...S.recent, ...S.events];
     S.events = [];
     S.ideaShift = { game: 0, training: 0 };
+    S.tipShift = 0;
     store.setDay(k);
     render();
   }
@@ -1359,7 +1479,13 @@ window.addEventListener('touchstart', () => { pendingScroll = null; }, { passive
 window.addEventListener('wheel', () => { pendingScroll = null; }, { passive: true });
 window.addEventListener('online', updateNet);
 window.addEventListener('offline', updateNet);
-document.addEventListener('visibilitychange', () => { if (!document.hidden) checkDay(); });
+let recentAt = Date.now();
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) return;
+  checkDay();
+  // «Легли» за вчера могли записать с другого телефона уже после полуночи — подгружаем вчерашние записи снова
+  if (canWrite() && Date.now() - recentAt > 60000) { recentAt = Date.now(); loadRecent(); }
+});
 setInterval(checkDay, 30000);
 updateNet();
 renderHeader();

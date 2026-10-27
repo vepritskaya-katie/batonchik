@@ -364,17 +364,21 @@ function finishCard(c, usedIds) {
   let n = 2;
   while (usedIds.has(id)) id = `${slug(name)}-${n++}`;
   usedIds.add(id);
+  // Короткая строка сразу под заголовком (без пустой строки между ними) — это подпись;
+  // текст после пустой строки — вступление, например статья в «Советах»
+  const leadLines = c.leadLines.slice();
+  let subtitleFromLead = false;
+  const first = leadLines[0] || '';
+  if (!subtitle && first.trim() && first.trim().length <= 100 && !ITEM_RE.test(first) && !/^\s*[>|]/.test(first) &&
+      (leadLines.length === 1 || !leadLines[1].trim())) {
+    leadLines.shift();
+    subtitleFromLead = true;
+  }
   const card = {
-    id, title: c.title, name, subtitle, subtitleFromLead: false,
-    raw: raw(c.rawLines), leadRaw: raw(c.leadLines), lead: parseBlocks(raw(c.leadLines)),
+    id, title: c.title, name, subtitle: subtitleFromLead ? first.trim() : subtitle, subtitleFromLead,
+    raw: raw(c.rawLines), leadRaw: raw(leadLines), lead: parseBlocks(raw(leadLines)),
     blocks: c.blocks.map((b) => ({ title: b.title, kind: blockKind(b.title), raw: raw(b.lines), content: parseBlocks(raw(b.lines)) })),
   };
-  // Короткая строка сразу под заголовком карточки — это подпись
-  if (!card.subtitle && card.lead.length === 1 && card.lead[0].type === 'para' && card.lead[0].text.length <= 100) {
-    card.subtitle = card.lead[0].text;
-    card.subtitleFromLead = true;
-    card.lead = [];
-  }
   card.steps = [];
   card.stepTitles = {};
   for (const blk of card.blocks) {
