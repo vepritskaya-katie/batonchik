@@ -16,7 +16,11 @@ const REPS_TITLE = 'Повторов в день';
 // Число повторов в день: только цифры, от 1 до 50
 const cleanReps = (v) => { const n = parseInt(String(v || '').replace(/\D/g, ''), 10); return n ? Math.min(50, Math.max(1, n)) : ''; };
 
+// «Советы» правятся свободно: название, подпись и один текст; блоки — подзаголовки «## …» внутри текста
+const isFree = (tab) => tab === 't';
+
 export function emptyForm(tab, group) {
+  if (isFree(tab)) return { group: group || '', name: '', subtitle: '', free: true, text: '', lead: '', reps: '', result: false, blocks: [] };
   return {
     group: group || '',
     name: '',
@@ -32,6 +36,10 @@ export function emptyForm(tab, group) {
 
 // Разобранная карточка (из md.js) → форма
 export function cardToForm(card, group, tab) {
+  if (isFree(tab)) {
+    const parts = [card.leadRaw, ...card.blocks.map((b) => `## ${b.title}\n${b.raw}`.trim())].filter(Boolean);
+    return { group: group || '', name: card.name, subtitle: card.subtitle, free: true, text: parts.join('\n\n'), lead: '', reps: '', result: false, blocks: [] };
+  }
   const form = {
     group: group || '',
     name: card.name,
@@ -90,6 +98,16 @@ export function formToMd(form) {
   const out = [`## ${oneLine(form.name) || 'Без названия'}`];
   if (oneLine(form.subtitle)) out.push(oneLine(form.subtitle));
   out.push('');
+  if (form.free) {
+    // Подзаголовок в тексте («# …», «## …» или «### …») — это блок карточки «### …»
+    const body = String(form.text || '').replace(/\r/g, '').split('\n')
+      .map((line) => {
+        const m = line.match(/^\s{0,3}#{1,3}(?:\s+(.*?))?\s*#*\s*$/);
+        return m ? (m[1] ? `### ${m[1]}` : '') : line; // пустой «##» без текста просто убираем
+      }).join('\n').trim();
+    if (body) out.push(body);
+    return out.join('\n').replace(/\n{3,}/g, '\n\n').trim() + '\n';
+  }
   if (clean(form.lead)) out.push(clean(form.lead), '');
   if (cleanReps(form.reps)) out.push(`### ${REPS_TITLE}`, String(cleanReps(form.reps)), '');
   for (const b of form.blocks) {
@@ -128,7 +146,67 @@ const moveBtns = (kind, i, n, extra = '') => `
   <button type="button" class="icon-btn" data-action="ed-move" data-kind="${kind}" data-i="${i}" data-dir="1"${extra} aria-label="Ниже"${i === n - 1 ? ' disabled' : ''}>↓</button>
   <button type="button" class="icon-btn danger" data-action="ed-remove" data-kind="${kind}" data-i="${i}"${extra} aria-label="Удалить">✕</button>`;
 
+// Кнопки внизу формы: сохранить, вернуть как в файле, удалить
+function actionsHtml(isNew, canReset) {
+  return `<div class="form-actions"><button type="button" class="btn" data-action="ed-cancel">Отмена</button><button class="btn primary">Сохранить</button></div>
+    ${isNew ? '' : `<div class="ed-danger">
+      ${canReset ? '<button type="button" class="btn danger-outline wide" data-action="ed-reset">Вернуть как в файле</button>' : ''}
+      <button type="button" class="btn danger-outline wide" data-action="ed-delete">Удалить карточку</button></div>`}`;
+}
+
+const groupSelect = (form, isNew, groups) => (isNew && groups.length > 1 ? `<label>Раздел <select data-path="group">${groups.map((g) =>
+  `<option${g === form.group ? ' selected' : ''}>${escapeHtml(g)}</option>`).join('')}</select></label>` : '');
+
+// Совет — свободный текст: название, подпись и одно поле с кнопками оформления
+function freeEditorHtml({ form, isNew, groups, canReset, title }) {
+  return `<form class="form editor" data-editor="1">
+    <h1>${escapeHtml(title)}</h1>
+    ${groupSelect(form, isNew, groups)}
+    <label>Название ${field('name', form.name, { ph: 'Например: Первая прогулка в новом месте' })}</label>
+    <label>Подпись <span class="muted">(необязательно, коротко)</span> ${field('subtitle', form.subtitle, { max: 100, ph: 'Одна строка под названием' })}</label>
+    <div class="ed-article">
+      <span class="ed-label">Текст</span>
+      <div class="ed-toolbar" role="toolbar" aria-label="Оформление текста">
+        <button type="button" class="btn small" data-action="ed-fmt" data-fmt="h">Подзаголовок</button>
+        <button type="button" class="btn small" data-action="ed-fmt" data-fmt="list">• Список</button>
+        <button type="button" class="btn small" data-action="ed-fmt" data-fmt="bold"><b>Ж</b>ирный</button>
+      </div>
+      <textarea data-path="text" rows="16" maxlength="28000" aria-label="Текст совета" placeholder="Пишите как обычный текст. Абзацы — через пустую строку.">${escapeHtml(form.text || '')}</textarea>
+    </div>
+    <p class="muted small">Подзаголовок — строка, которая начинается с «## », пункт списка — с «- », **слово** — жирный шрифт.
+      Подзаголовки «Почему так», «Что делать», «Чего не делать», «Получается, если», «Подсказка», «Когда к ветеринару» выделяются цветом, как раньше.</p>
+    ${actionsHtml(isNew, canReset)}
+  </form>`;
+}
+
+// Кнопка оформления в тексте совета: «Подзаголовок» и «Список» — для строк под курсором, «Жирный» — для выделения.
+// Возвращает новый текст и где поставить курсор.
+export function formatText(value, start, end, fmt) {
+  if (fmt === 'bold') {
+    const sel = value.slice(start, end);
+    const text = `${value.slice(0, start)}**${sel}**${value.slice(end)}`;
+    return sel ? { value: text, start, end: end + 4 } : { value: text, start: start + 2, end: start + 2 };
+  }
+  const from = value.lastIndexOf('\n', start - 1) + 1;
+  let to = value.indexOf('\n', end > start && value[end - 1] === '\n' ? end - 1 : end);
+  if (to < 0) to = value.length;
+  const lines = value.slice(from, to).split('\n');
+  let out;
+  if (fmt === 'h') {
+    // Повторное нажатие на подзаголовке убирает «## »
+    out = [/^##\s/.test(lines[0]) ? lines[0].replace(/^##\s+/, '') : `## ${lines[0].replace(/^#+\s*/, '')}`, ...lines.slice(1)];
+  } else {
+    const filled = lines.filter((l) => l.trim());
+    const allList = filled.length && filled.every((l) => /^- /.test(l));
+    out = !filled.length ? ['- '] : lines.map((l) => (!l.trim() ? l : allList ? l.replace(/^- /, '') : (/^- /.test(l) ? l : `- ${l}`)));
+  }
+  const block = out.join('\n');
+  const pos = from + block.length;
+  return { value: value.slice(0, from) + block + value.slice(to), start: pos, end: pos };
+}
+
 export function editorHtml({ tab, form, isNew, groups, canReset, title }) {
+  if (form.free) return freeEditorHtml({ form, isNew, groups, canReset, title });
   const blocks = form.blocks.map((b, i) => {
     const body = b.type === 'steps'
       ? `<ol class="ed-steps">${b.steps.map((st, j) => `<li class="ed-step">
@@ -152,8 +230,7 @@ export function editorHtml({ tab, form, isNew, groups, canReset, title }) {
 
   return `<form class="form editor" data-editor="1">
     <h1>${escapeHtml(title)}</h1>
-    ${isNew && groups.length > 1 ? `<label>Раздел <select data-path="group">${groups.map((g) =>
-      `<option${g === form.group ? ' selected' : ''}>${escapeHtml(g)}</option>`).join('')}</select></label>` : ''}
+    ${groupSelect(form, isNew, groups)}
     <label>Название ${field('name', form.name, { ph: 'Например: «Место»' })}</label>
     <label>Подпись <span class="muted">(необязательно, коротко)</span> ${field('subtitle', form.subtitle, { max: 100, ph: 'Например: с ~6 месяцев' })}</label>
     ${tab === 'k' ? `<label class="reps-field">Повторов в день <span class="muted">(цель на главном экране)</span>
@@ -163,10 +240,7 @@ export function editorHtml({ tab, form, isNew, groups, canReset, title }) {
     ${blocks}
     <div class="ed-add">${suggestions}<button type="button" class="btn small" data-action="ed-add-block" data-title="">+ Свой блок</button></div>
     <label class="check-row"><input type="checkbox" data-path="result"${form.result ? ' checked' : ''}> Кнопка «Освоено» для всей карточки</label>
-    <div class="form-actions"><button type="button" class="btn" data-action="ed-cancel">Отмена</button><button class="btn primary">Сохранить</button></div>
-    ${isNew ? '' : `<div class="ed-danger">
-      ${canReset ? '<button type="button" class="btn danger-outline wide" data-action="ed-reset">Вернуть как в файле</button>' : ''}
-      <button type="button" class="btn danger-outline wide" data-action="ed-delete">Удалить карточку</button></div>`}
+    ${actionsHtml(isNew, canReset)}
   </form>`;
 }
 

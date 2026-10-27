@@ -99,8 +99,8 @@ svg { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; 
 
 .tabbar {
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 10;
-  display: grid; grid-template-columns: repeat(5, 1fr);
-  padding: 4px 4px calc(env(safe-area-inset-bottom) + 4px);
+  display: grid; grid-template-columns: repeat(6, 1fr);
+  padding: 4px 2px calc(env(safe-area-inset-bottom) + 4px);
   background: var(--surface);
   background: color-mix(in srgb, var(--surface) 94%, transparent);
   backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
@@ -108,7 +108,8 @@ svg { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; 
 }
 .tabbar a {
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
-  min-height: 58px; color: var(--muted); text-decoration: none; font-size: 11.5px; font-weight: 600; border-radius: 12px;
+  min-height: 58px; min-width: 0; color: var(--muted); text-decoration: none; font-size: clamp(10px, 2.9vw, 11px); font-weight: 600; border-radius: 12px;
+  letter-spacing: -.01em; white-space: nowrap;
 }
 .tabbar a svg { width: 27px; height: 27px; }
 .tabbar a.on { color: var(--accent); }
@@ -307,6 +308,7 @@ li.task { margin: 8px 0; }
   background: rgba(0, 0, 0, .45);
 }
 .sheet[hidden] { display: none; }
+[hidden] { display: none !important; }
 .sheet-body {
   width: 100%; max-width: 640px; max-height: 92vh; overflow: auto; -webkit-overflow-scrolling: touch;
   padding: 20px 16px calc(env(safe-area-inset-bottom) + 20px);
@@ -493,3 +495,49 @@ button.ev-row { cursor: pointer; }
 
 /* Отступ между вступлением раздела и первой карточкой */
 .group > .prose, .group > details.intro { margin-bottom: 16px; }
+
+/* ---------- Совет дня ---------- */
+.daily-tip {
+  margin: 4px 0 22px; padding: 16px 16px 14px; border-radius: 20px;
+  background: linear-gradient(135deg, var(--accent-soft), var(--hint));
+  border: 1px solid var(--hint-border);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 9%, transparent), 0 10px 30px color-mix(in srgb, var(--accent) 24%, transparent);
+}
+.daily-head { margin: 0 0 6px; font-size: 14px; font-weight: 750; letter-spacing: .02em; text-transform: uppercase; color: var(--accent); }
+.daily-text { margin: 0; font-size: 18px; line-height: 1.45; }
+.daily-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.daily-actions .btn { background: color-mix(in srgb, var(--surface) 80%, transparent); }
+
+/* ---------- Каналы ---------- */
+.notes-intro { margin-bottom: 14px; }
+.notes-tools { display: grid; gap: 10px; margin-bottom: 8px; }
+.notes-search {
+  width: 100%; min-height: 48px; padding: 10px 14px; border-radius: 14px; border: 1px solid var(--border);
+  background: var(--surface); color: var(--text); font: inherit; font-size: 17px;
+}
+.filter-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.filter-chip {
+  min-height: 40px; padding: 6px 14px; border-radius: 99px; border: 1px solid var(--border);
+  background: var(--surface); color: var(--text); font: inherit; font-size: 15px; font-weight: 600; cursor: pointer;
+}
+.filter-chip[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.notes-count { margin: 0; }
+.note-topic h3 { margin: 18px 0 10px; font-size: 16px; color: var(--muted); }
+.note-section > h2 { margin-bottom: 0; }
+.note-link .card-name { font-size: 17px; }
+.note-badges { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 4px; }
+.note-badges.big { margin: 0 0 14px; }
+.badge { display: inline-block; padding: 2px 9px; border-radius: 10px; font-size: 13px; font-weight: 600; line-height: 1.5; background: var(--surface-2); color: var(--text); }
+.badge.sci { background: var(--ok-soft); color: var(--ok); }
+.badge.exp { background: var(--hint); color: var(--text); border: 1px solid var(--hint-border); }
+.badge.when { color: var(--muted); }
+.badge.video { background: var(--accent-soft); color: var(--accent); }
+.note-path { margin: -6px 0 10px; font-size: 15px; }
+.blk-comment { border-left: 5px solid var(--accent); }
+.sources { margin: 0; padding-left: 20px; display: grid; gap: 6px; }
+
+/* ---------- Свободный текст совета ---------- */
+.ed-article { display: grid; gap: 8px; }
+.ed-label { font-weight: 600; font-size: 15px; }
+.ed-toolbar { display: flex; flex-wrap: wrap; gap: 8px; }
+.ed-article textarea { min-height: 320px; line-height: 1.5; }
