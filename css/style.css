@@ -525,6 +525,8 @@ button.ev-row { cursor: pointer; }
 .note-topic h3 { margin: 18px 0 10px; font-size: 16px; color: var(--muted); }
 .note-section > h2 { margin-bottom: 0; }
 .note-link .card-name { font-size: 17px; }
+.note-mark { font-size: 14px; font-weight: 600; line-height: 1.35; color: var(--muted); }
+.note-mark.sci { color: var(--ok); }
 .note-badges { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 4px; }
 .note-badges.big { margin: 0 0 14px; }
 .badge { display: inline-block; padding: 2px 9px; border-radius: 10px; font-size: 13px; font-weight: 600; line-height: 1.5; background: var(--surface-2); color: var(--text); }

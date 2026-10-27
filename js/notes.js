@@ -90,6 +90,8 @@ export function noteMatches(n, f) {
 }
 
 const markBadge = (n) => (n.markText ? `<span class="badge ${n.mark}">${escapeHtml(n.markText)}</span>` : '');
+// В списке пометка — строкой без рамки: «💬 Опыт автора — подходит не всем собакам» в рамку на телефоне не помещается
+const markLine = (n) => (n.markText ? `<span class="note-mark ${n.mark}">${escapeHtml(n.markText)}</span>` : '');
 const whenBadges = (n) => n.when.map((w) => `<span class="badge when">${escapeHtml(w)}</span>`).join('');
 
 const FILTERS = [['now', 'Актуально сейчас'], ['future', 'На будущее'], ['sci', '✅ Наука'], ['exp', '💬 Опыт']];
@@ -106,7 +108,7 @@ export function notesListHtml(data, f) {
         if (ok) topicShown++;
         return `<li data-note="${n.id}"${ok ? '' : ' hidden'}><a class="card-link note-link" href="#/c/${n.id}">
           <span class="card-name">${inline(n.title)}</span>
-          <span class="note-badges">${markBadge(n)}${whenBadges(n)}</span>${chev}</a></li>`;
+          ${markLine(n)}${n.when.length ? `<span class="note-badges">${whenBadges(n)}</span>` : ''}${chev}</a></li>`;
       }).join('');
       sectionShown += topicShown;
       return `<div class="note-topic" data-topic${topicShown ? '' : ' hidden'}>${t.title ? `<h3>${inline(t.title)}</h3>` : ''}<ul class="cards">${items}</ul></div>`;
