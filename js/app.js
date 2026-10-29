@@ -7,7 +7,7 @@ import {
   EVENT_TYPES, SUBS, TRAIN, dayKey, fmtTime, fmtDate, addDays, moscowDate, dayStats, eventRow, todaySummary, nightLine, nightFor, plural, mondayOf, dayTitle,
   rhythmHtml, weekStatsHtml, dayFeedHtml,
 } from './diary.js';
-import { HEALTH_KINDS, NEXT_OPTIONS, nextDate, suggestNext, dueText, ageText, upcoming, doneRecords, googleCalendarUrl, icsText, healthRowHtml } from './passport.js';
+import { HEALTH_KINDS, NEXT_OPTIONS, nextDate, suggestNext, dueText, ageText, upcoming, doneRecords, googleCalendarUrl, icsText, healthRowHtml, daysBetween } from './passport.js';
 import { pickPhoto, compressPhoto } from './photo.js';
 import { pickIdeas } from './ideas.js';
 import { parseNotes, notesListHtml, noteHtml, noteMatches, countText } from './notes.js';
@@ -729,7 +729,10 @@ function ideasHtml() {
       </div></div>`;
   };
   const html = row('game', '🎲', 'Игра', ideas.game, ideas.gameCount) + row('training', '🎯', 'Тренировка', ideas.training, ideas.trainingCount);
-  return html ? `<div class="ideas-block"><h3>Идеи на сегодня</h3><div class="ideas">${html}</div></div>` : '';
+  return html ? `<section class="section">
+    <div class="section-head"><h2>Идеи на сегодня</h2></div>
+    <p class="muted small">Игра и тренировка вне плана — если есть время и настроение.</p>
+    <div class="ideas">${html}</div></section>` : '';
 }
 
 // Прогресс тренировок за день: сколько тренировок выполнено и сколько повторов сделано
@@ -765,83 +768,106 @@ function heroHtml() {
     ${!S.photo && canWrite() ? '<button class="hero-photo-btn" data-action="photo-pick">Добавить фото</button>' : ''}
     <div class="hero-copy">
       <h2>${headline}</h2>
-      <p>${p.total ? `Повторы: ${p.done} из ${p.total}.` : 'Выберите тренировки на неделю — и здесь появится прогресс.'} Новый день начнётся после «Легли вечером».</p>
+      <p>${p.total ? `Повторы: ${p.done} из ${p.total}` : 'Выберите тренировки на неделю — и здесь появится прогресс.'}</p>
       <div class="hero-meta"><span>Прогресс дня</span><strong>${pct}%</strong></div>
       <div class="hero-track" role="img" aria-label="Прогресс дня ${pct}%"><span style="width:${pct}%"></span></div>
     </div>
   </section>`;
 }
 
-// Тренировки дня на главной: коротко, с «+1»; полный план — во вкладке «Тренировки»
+// Тренировки дня на главной: три первые несделанные с «+1»; весь план — во вкладке «Тренировки»
+const HOME_TRAININGS = 3;
 function homeTrainingsHtml() {
   if (S.today && (S.today.raw || S.today.error)) return '';
   const can = canWrite();
   const p = dayProgress();
-  const rows = p.items.map((it, i) => {
+  const left = p.items.filter((it) => (p.counts[it.card] || 0) < targetOf(it));
+  const list = left.slice(0, HOME_TRAININGS).map((it) => {
     const { tab, id, card } = cardByRef(it.card);
     const n = p.counts[it.card] || 0;
     const target = targetOf(it);
-    return { it, i, tab, id, card, n, target, done: n >= target };
-  }).sort((a, b) => a.done - b.done || a.i - b.i);
-  const list = rows.map(({ it, tab, id, card, n, target, done }) => {
     const name = card ? card.name : 'Карточка не найдена';
-    return `<li class="mini-row${done ? ' done' : ''}">
+    return `<li class="mini-row">
       ${card ? `<a class="mini-name" href="#/${tab}/${id}">${escapeHtml(name)}</a>` : `<span class="mini-name muted">${name}</span>`}
       ${n && can ? `<button class="mini-count" data-action="tr-reps" data-card="${it.card}" aria-label="Повторы за сегодня: ${n}. Нажмите, чтобы убрать лишний">${n} из ${target}</button>`
         : `<span class="mini-count">${n} из ${target}</span>`}
-      <button class="mini-tap${done ? ' on' : ''}" data-action="tr-tap" data-card="${it.card}"${can && card ? '' : ' disabled'} aria-label="Отметить повтор: ${escapeHtml(name)}">
-        ${done ? '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>' : '+1'}</button>
+      <button class="mini-tap" data-action="tr-tap" data-card="${it.card}"${can && card ? '' : ' disabled'} aria-label="Отметить повтор: ${escapeHtml(name)}">+1</button>
     </li>`;
   }).join('');
+  const more = left.length - HOME_TRAININGS;
   const chosen = weekChosen();
   const banner = can && !chosen && S.contentReady
     ? `<div class="banner week-banner"><span>Выберите ${WEEK_SIZE} тренировок на эту неделю.</span><button class="btn small primary" data-action="week-pick">Выбрать</button></div>` : '';
+  let body;
+  if (list) body = `<ul class="mini-list">${list}</ul>`;
+  else if (p.items.length) body = '<p class="muted">Все тренировки на сегодня сделаны.</p>';
+  else body = '<p class="muted">На сегодня тренировок нет. Выберите их во вкладке «Тренировки».</p>';
   return `<section class="card">
-    <div class="card-head"><h2>Тренировки дня</h2><a class="text-link" href="#/k">Весь план ›</a></div>
+    <div class="card-head"><h2>Тренировки дня</h2></div>
     ${banner}
-    ${list ? `<ul class="mini-list">${list}</ul>` : '<p class="muted">На сегодня тренировок нет. Выберите их во вкладке «Тренировки».</p>'}
-    ${ideasHtml()}
+    ${body}
+    <a class="text-link more" href="#/k">${more > 0 ? `Ещё ${more} — весь план` : 'Весь план'} ›</a>
   </section>`;
 }
 
-// Журнал на главной: значки записи и последние 5 записей
+// «1 ч 40 мин назад»
+function agoText(at, now = new Date()) {
+  const m = Math.max(0, Math.floor((now - at) / 60000));
+  if (m < 1) return 'только что';
+  if (m < 60) return `${m} мин назад`;
+  const h = Math.floor(m / 60);
+  if (h >= 24) return 'больше суток назад';
+  return `${h} ч${m % 60 ? ` ${m % 60} мин` : ''} назад`;
+}
+// «в 20:51», «вчера в 23:05»
+function atText(at, now = new Date()) {
+  const k = dayKey(at);
+  if (k === dayKey(now)) return `в ${fmtTime(at)}`;
+  if (k === addDays(dayKey(now), -1)) return `вчера в ${fmtTime(at)}`;
+  return `${dayTitle(k, { day: 'numeric', month: 'long' })} в ${fmtTime(at)}`;
+}
+// Время «назад» на главной обновляется само, без перерисовки экрана
+function updateSince() {
+  document.querySelectorAll('[data-since]').forEach((el) => { el.textContent = agoText(new Date(el.dataset.since)); });
+}
+
+// Журнал на главной: значки записи и сколько прошло с последнего туалета и еды
 function homeJournalHtml() {
-  const can = canWrite();
-  const st = dayStats(S.day, S.events, S.checks, 0);
-  const last = [...st.list].reverse().slice(0, 5);
+  const all = [...S.recent, ...S.events];
+  const last = (types) => all.filter((e) => types.includes(e.type)).sort((a, b) => new Date(b.at) - new Date(a.at))[0];
+  const toilet = last(['toilet', 'accident']);
+  const meal = last(['meal']);
+  const home = toilet && toilet.type === 'accident';
+  const cell = (label, value) => `<div class="since-cell"><span>${label}</span><strong${value.at ? ` data-since="${new Date(value.at).toISOString()}"` : ''}>${value.text}</strong></div>`;
   return `<section class="card">
     <div class="card-head"><h2>Журнал</h2><a class="text-link" href="#/day">Весь день ›</a></div>
     ${evIconsHtml()}
-    ${last.length ? `<ul class="ev-list">${last.map((e) => eventRow(e, { editable: can })).join('')}</ul>`
-      : '<p class="muted">Сегодня ещё ничего не записано.</p>'}
-    ${st.list.length > 5 ? `<a class="text-link more" href="#/day">Ещё ${st.list.length - 5} ${plural(st.list.length - 5, 'запись', 'записи', 'записей')} ›</a>` : ''}
+    <div class="since">
+      ${cell(`${home ? EVENT_TYPES.accident.icon : EVENT_TYPES.toilet.icon} Туалет${home ? ' дома' : ''}`,
+        toilet ? { at: toilet.at, text: agoText(new Date(toilet.at)) } : { text: 'ещё не было' })}
+      ${cell(`${EVENT_TYPES.meal.icon} Еда`, meal ? { text: atText(new Date(meal.at)) } : { text: 'ещё не было' })}
+    </div>
   </section>`;
 }
 
-// Здоровье на главной: только ближайшие запланированные события из паспорта
+// Здоровье на главной: только если до события неделя или меньше (или оно просрочено)
 function homeHealthHtml() {
-  const next = upcoming(S.health).slice(0, 3);
-  if (!next.length) {
-    return `<section class="health-strip">
-      <div class="health-symbol" aria-hidden="true">🩺</div>
-      <div><p class="eyebrow">Здоровье</p><strong>Запланированных событий нет</strong>
-        <p>Прививки, обработки и таблетки — в паспорте.</p></div>
-      <a class="btn small wide" href="#/pass">Открыть паспорт ›</a></section>`;
-  }
+  const soon = upcoming(S.health).filter((r) => daysBetween(S.day, r.date) <= 7).slice(0, 3);
+  if (!soon.length) return '';
   return `<section class="health-strip">
     <div class="health-symbol" aria-hidden="true">🩺</div>
-    <div><p class="eyebrow">Здоровье</p><strong>Ближайшее</strong></div>
-    <ul class="health-list">${next.map((r) => healthRowHtml(r, S.day)).join('')}</ul>
+    <div><p class="eyebrow">Здоровье</p><strong>Скоро</strong></div>
+    <ul class="health-list">${soon.map((r) => healthRowHtml(r, S.day)).join('')}</ul>
     <a class="btn small wide" href="#/pass">Открыть паспорт ›</a></section>`;
 }
 
 function renderHome() {
-  return `${pageHead({ eyebrow: cap(dayTitle(S.day)), title: greeting(), sub: `Вот что сегодня у ${escapeHtml(DOG() === 'Батончик' ? 'Батончика' : DOG())}`, plus: { action: 'ev-menu', label: 'Новая запись' } })}
+  return `${pageHead({ eyebrow: cap(dayTitle(S.day)), title: greeting() })}
     ${statusBanner()}
     ${heroHtml()}
+    ${homeJournalHtml()}
     ${dailyTipHtml()}
     ${homeTrainingsHtml()}
-    ${homeJournalHtml()}
     ${homeHealthHtml()}`;
 }
 
@@ -881,6 +907,7 @@ function renderTrainingsPage() {
     ${statusBanner()}
     ${t.raw ? `<div class="prose">${safe(() => renderBlocks(parseBlocks(t.raw)), t.raw)}</div>` : trainingsHtml('План на неделю')}
     ${t.error ? '<p class="empty">Не удалось загрузить план. Проверьте интернет.</p>' : ''}
+    ${ideasHtml()}
     ${daySectionsHtml()}
     <h2 class="lib-title">Библиотека</h2>
     ${catalogBody('k')}
@@ -1955,6 +1982,7 @@ document.addEventListener('visibilitychange', () => {
   if (canWrite() && Date.now() - recentAt > 60000) { recentAt = Date.now(); loadRecent(); }
 });
 setInterval(checkDay, 30000);
+setInterval(updateSince, 30000);
 updateNet();
 renderHeader();
 render();

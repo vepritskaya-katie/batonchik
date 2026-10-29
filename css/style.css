@@ -607,14 +607,14 @@ button.ev-row { cursor: pointer; }
 
 /* ---------- Фото и прогресс дня ---------- */
 .hero {
-  position: relative; overflow: hidden; margin: 0 0 16px; min-height: 380px; border-radius: 24px;
+  position: relative; overflow: hidden; margin: 0 0 16px; min-height: 280px; border-radius: 24px;
   background: var(--hero); color: #fff; box-shadow: var(--shadow); display: flex; align-items: flex-end;
 }
 .hero-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: center 35%; }
-.hero-empty { position: absolute; inset: 0; display: grid; place-items: center; padding-bottom: 150px; color: rgba(255, 255, 255, .18); }
-.hero-empty svg { width: 120px; height: 120px; }
+.hero-empty { position: absolute; inset: 0; display: grid; place-items: center; padding-bottom: 110px; color: rgba(255, 255, 255, .18); }
+.hero-empty svg { width: 96px; height: 96px; }
 .hero-copy {
-  position: relative; z-index: 1; width: 100%; padding: 70px 20px 20px;
+  position: relative; z-index: 1; width: 100%; padding: 56px 20px 20px;
   background: linear-gradient(180deg, transparent 0%, rgba(38, 52, 29, .55) 35%, rgba(46, 58, 34, .94) 75%);
 }
 .hero.no-photo .hero-copy { background: none; }
@@ -640,7 +640,6 @@ button.ev-row { cursor: pointer; }
 .mini-row { display: flex; align-items: center; gap: 10px; min-height: 60px; border-top: 1px solid var(--border); }
 .mini-row:first-child { border-top: 0; }
 .mini-name { flex: 1; min-width: 0; color: var(--text); text-decoration: none; font-weight: 650; font-size: 16.5px; line-height: 1.3; }
-.mini-row.done .mini-name { color: var(--muted); }
 .mini-count {
   flex: none; min-height: 40px; padding: 0 4px; border: 0; background: none; color: var(--muted); font: inherit; font-size: 14px;
   font-weight: 700; font-variant-numeric: tabular-nums; display: inline-flex; align-items: center;
@@ -650,12 +649,15 @@ button.mini-count { text-decoration: underline dotted; text-underline-offset: 3p
   flex: none; width: 48px; height: 48px; border-radius: 50%; border: 2px solid var(--accent); background: var(--accent-soft);
   color: var(--accent-text); font: inherit; font-weight: 800; font-size: 16px; display: grid; place-items: center; cursor: pointer; padding: 0;
 }
-.mini-tap svg { width: 24px; height: 24px; stroke-width: 3; }
-.mini-tap.on { background: var(--ok); border-color: var(--ok); color: var(--surface); }
 .mini-tap:disabled { opacity: .5; }
 .mini-tap:active { transform: scale(.94); }
-.ideas-block { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border); }
-.ideas-block h3 { margin: 0 0 10px; }
+
+/* ---------- Журнал: сколько прошло ---------- */
+.since { margin-top: 10px; padding: 2px 14px; border-radius: 14px; background: var(--accent-soft); }
+.since-cell { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 10px 0; }
+.since-cell + .since-cell { border-top: 1px solid color-mix(in srgb, var(--accent) 18%, transparent); }
+.since-cell span { color: var(--muted); font-size: 15px; font-weight: 600; }
+.since-cell strong { font-size: 16px; text-align: right; font-variant-numeric: tabular-nums; }
 
 /* ---------- Журнал: строка значков ---------- */
 .ev-icons { display: grid; grid-template-columns: repeat(auto-fill, minmax(72px, 1fr)); gap: 8px; margin: 0 0 4px; }
