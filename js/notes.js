@@ -118,8 +118,7 @@ export function notesListHtml(data, f) {
   }).join('');
   const chips = FILTERS.map(([key, label]) =>
     `<button type="button" class="filter-chip" data-action="notes-filter" data-f="${key}" aria-pressed="${!!f[key]}">${label}</button>`).join('');
-  return `<div class="page-head"><h1>Каналы</h1></div>
-    ${data.intro.length ? `<div class="prose notes-intro">${renderBlocks(data.intro)}</div>` : ''}
+  return `${data.intro.length ? `<div class="prose notes-intro">${renderBlocks(data.intro)}</div>` : ''}
     <div class="notes-tools">
       <input class="notes-search" type="search" enterkeyhint="search" placeholder="Поиск: страх, поводок, клещ…" aria-label="Поиск по заметкам" value="${escapeHtml(f.q || '')}">
       <div class="filter-chips">${chips}</div>

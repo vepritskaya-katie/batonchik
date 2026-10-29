@@ -7,14 +7,15 @@ const MSK_OFFSET_H = 3; // Москва круглый год UTC+3, без пе
 
 // form: запись обычно делают после события — сначала окно со временем и комментарием;
 // без form («Авария дома», «Кормление») запись сохраняется сразу с текущим временем
+// short — подпись под значком в строке быстрых кнопок на главной
 export const EVENT_TYPES = {
-  toilet: { icon: '🌳', label: 'Туалет на улице', subs: true, form: true },
-  accident: { icon: '💦', label: 'Авария дома', subs: true },
-  walk: { icon: '🦮', label: 'Прогулка', form: true },
-  meal: { icon: '🍽', label: 'Кормление' },
-  wake: { icon: '☀️', label: 'Встали утром', form: true },
-  bed: { icon: '🌙', label: 'Легли вечером', form: true },
-  note: { icon: '✏️', label: 'Заметка', text: true, form: true },
+  toilet: { icon: '🌳', label: 'Туалет на улице', short: 'Туалет', subs: true, form: true },
+  accident: { icon: '💦', label: 'Авария дома', short: 'Авария', subs: true },
+  walk: { icon: '🦮', label: 'Прогулка', short: 'Прогулка', form: true },
+  meal: { icon: '🍽', label: 'Кормление', short: 'Еда' },
+  wake: { icon: '☀️', label: 'Встали утром', short: 'Встали', form: true },
+  bed: { icon: '🌙', label: 'Легли вечером', short: 'Легли', form: true },
+  note: { icon: '✏️', label: 'Заметка', short: 'Заметка', text: true, form: true },
 };
 export const SUBS = { pee: 'пописал', poo: 'покакал', both: 'пописал и покакал' };
 // Повтор тренировки или игры: записывается кнопками «Тренировки на сегодня», в ленте журнала не показывается
@@ -195,38 +196,91 @@ export function plural(n, one, few, many) {
   return many;
 }
 
-export function diaryHtml({ days, prevWeek, markLabels, hasMore, loading, cardName }) {
+// Короткая строка о дне: «🌳 6 · 💦 1 · 🦮 3 · 🍽 4 · 🎯 24 · 🌙 8 ч 10 мин»
+export function daySummaryLine(st) {
+  const parts = [
+    st.toilet && `🌳 ${st.toilet}`, st.accident && `💦 ${st.accident}`, st.walk && `🦮 ${st.walk}`,
+    st.meal && `🍽 ${st.meal}`, st.trains && `🎯 ${st.trains}`, st.night && st.night.ms && `🌙 ${fmtDuration(st.night.ms)}`,
+  ].filter(Boolean);
+  return parts.join(' · ');
+}
+
+// «Ритм дня» на вкладке «День»: кольцо — какая доля туалета сегодня на улице, ниже — строки
+export function rhythmHtml(st, { trainsDone, trainsTotal }) {
+  const all = st.toilet + st.accident;
+  const pct = all ? Math.round((st.toilet / all) * 100) : null;
+  const row = (label, value) => `<div class="stat-row"><span>${label}</span><strong>${value}</strong></div>`;
+  const sleep = st.night && st.night.ms ? fmtDuration(st.night.ms) : '—';
+  return `<section class="card rhythm">
+    <div class="ring" style="--p:${pct || 0}" role="img" aria-label="${pct == null ? 'Туалет сегодня ещё не отмечали' : `На улице ${pct}% туалета`}"><span>${pct == null ? '—' : `${pct}%`}</span></div>
+    <h2>Ритм дня</h2>
+    <p class="muted">${all ? `Туалет на улице: ${st.toilet} из ${all}${st.accident ? `, дома ${st.accident}` : ''}.` : 'Сегодня туалет ещё не отмечали.'}</p>
+    ${row('🌳 Туалет на улице', st.toilet)}
+    ${row('💦 Аварии дома', st.accident)}
+    ${row('🦮 Прогулки', st.walk)}
+    ${row('🍽 Кормления', st.meal)}
+    ${row('🌙 Ночной сон', sleep)}
+    ${row('🎯 Повторы тренировок', trainsTotal ? `${trainsDone} из ${trainsTotal}` : st.trains)}
+  </section>`;
+}
+
+// Неделя на вкладке «День»: сводка в сравнении с прошлой неделей и столбики по дням
+export function weekStatsHtml({ days, prevWeek, loading }) {
   const week = days.slice(0, 7).reverse(); // слева направо — от старых к новым
   const summary = weekSummary(days.slice(0, 7), prevWeek);
-  const dayCards = days.filter((d) => !d.empty || (markLabels[d.key] || []).length).map((d) => {
-    const mastered = markLabels[d.key] || [];
-    return `<article class="day-card">
-      <h3>${dayTitle(d.key)}</h3>
-      ${chips(d) ? `<div class="stats">${chips(d)}</div>` : ''}
-      ${nightLine(d.night)}
-      ${trainsLine(d, cardName)}
-      ${mastered.length ? `<p class="mastered">✓ Освоено: ${mastered.map(escapeHtml).join('; ')}</p>` : ''}
-      ${d.notes.length ? `<ul class="ev-list notes">${d.notes.map((e) => eventRow(e)).join('')}</ul>` : ''}
-      ${d.list.length ? `<details class="intro"><summary>Все записи (${d.list.length})</summary>
-        <ul class="ev-list">${d.list.map((e) => eventRow(e)).join('')}</ul></details>` : ''}
-    </article>`;
-  }).join('');
-
-  return `<h1>Дневник</h1>
-    <section class="section panel">
+  return `<section class="card week-card">
       <h2>Последние 7 дней</h2>
       ${summary.length ? `<ul class="summary">${summary.map((l) => `<li>${escapeHtml(l)}</li>`).join('')}</ul>`
-        : `<p class="muted">${loading ? 'Загружаем…' : 'Записей пока нет. Отмечайте туалет, прогулки и кормления кнопками на вкладке «Сегодня» — здесь появится сводка.'}</p>`}
+        : `<p class="muted">${loading ? 'Загружаем…' : 'Записей пока нет. Отмечайте туалет, прогулки и кормления — здесь появится сводка.'}</p>`}
       ${summary.length ? `<div class="charts">
         ${miniChart('🌳 Туалет на улице', week, 'toilet')}
         ${miniChart('💦 Аварии дома', week, 'accident')}
         ${miniChart('🦮 Прогулки', week, 'walk')}
         ${miniChart('🎯 Повторы на тренировках', week, 'trains')}
       </div>` : ''}
-    </section>
+    </section>`;
+}
+
+// Дневник: лента дней. У каждого дня — короткая строка из журнала, освоенное и, если написана, заметка о дне.
+// Последний день с заметкой — большой карточкой сверху.
+export function dayFeedHtml({ days, markLabels, hasMore, loading, cardName, stories, editable }) {
+  const featured = days.find((d) => stories[d.key] && (stories[d.key].text || stories[d.key].title));
+  const storyBtn = (key, has) => (editable ? `<button class="btn small" data-action="story-edit" data-day="${key}">${has ? 'Изменить заметку' : 'Написать о дне'}</button>` : '');
+  const feature = featured ? (() => {
+    const s = stories[featured.key];
+    const [, m, d] = featured.key.split('-').map(Number);
+    return `<article class="story-feature">
+      <div class="story-date"><strong>${d}</strong><span>${MONTHS_SHORT[m - 1]}</span></div>
+      <div class="story-body">
+        <p class="eyebrow">День, который хочется помнить</p>
+        ${s.title ? `<h2>${escapeHtml(s.title)}</h2>` : ''}
+        ${s.photo ? `<img class="story-photo" src="${escapeHtml(s.photo)}" alt="">` : ''}
+        <div class="story-text">${inline(s.text || '').replace(/\n/g, '<br>')}</div>
+        ${editable ? `<button class="btn small ghost" data-action="story-edit" data-day="${featured.key}">Изменить</button>` : ''}
+      </div></article>`;
+  })() : '';
+  const rows = days.filter((d) => !d.empty || (markLabels[d.key] || []).length || stories[d.key]).map((d) => {
+    const s = stories[d.key];
+    const mastered = markLabels[d.key] || [];
+    const line = daySummaryLine(d);
+    return `<article class="day-card">
+      <div class="day-card-head"><h3>${dayTitle(d.key)}</h3></div>
+      ${line ? `<p class="day-line">${line}</p>` : ''}
+      ${trainsLine(d, cardName)}
+      ${mastered.length ? `<p class="mastered">✓ Освоено: ${mastered.map(escapeHtml).join('; ')}</p>` : ''}
+      ${s && d !== featured ? `<div class="story-mini">${s.photo ? `<img src="${escapeHtml(s.photo)}" alt="">` : ''}<div>
+        ${s.title ? `<strong>${escapeHtml(s.title)}</strong>` : ''}<p>${inline(s.text || '').replace(/\n/g, '<br>')}</p></div></div>` : ''}
+      ${d.notes.length ? `<ul class="ev-list notes">${d.notes.map((e) => eventRow(e)).join('')}</ul>` : ''}
+      ${d.list.length ? `<details class="intro"><summary>Все записи (${d.list.length})</summary>
+        <ul class="ev-list">${d.list.map((e) => eventRow(e)).join('')}</ul></details>` : ''}
+      ${storyBtn(d.key, !!s)}
+    </article>`;
+  }).join('');
+  return `${feature}
     <section class="section">
-      <h2>По дням</h2>
-      ${dayCards || `<p class="muted">${loading ? 'Загружаем…' : 'Пока пусто.'}</p>`}
+      ${rows || `<p class="muted">${loading ? 'Загружаем…' : 'Пока пусто. Записи из журнала и ваши заметки о днях появятся здесь.'}</p>`}
       ${hasMore ? '<button class="btn wide" data-action="diary-more">Показать ещё 4 недели</button>' : ''}
     </section>`;
 }
+
+const MONTHS_SHORT = ['янв', 'фев', 'мар', 'апр', 'мая', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
