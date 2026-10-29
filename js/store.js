@@ -1,4 +1,4 @@
-// Хранение отметок, расписания, журнала и правок карточек.
+// Хранение отметок, расписания, журнала, правок карточек, паспорта и заметок дневника.
 // Если Firebase настроен — общие данные в Firestore, обновления в реальном времени.
 // Если нет — всё хранится только на этом телефоне (localStorage), чтобы приложением можно было пользоваться сразу.
 
@@ -23,7 +23,7 @@ const newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2
 
 // ---------- Только этот телефон ----------
 
-function localStore({ onState, onPlan, onDay, onMarks, onEvents, onCards }) {
+function localStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onPet = () => {}, onPhoto = () => {}, onHealth = () => {} }) {
   let day = null;
   const state = { mode: 'local', status: 'ready', user: { name: '' } };
   const mark = () => ({ uid: 'local', name: '', at: new Date().toISOString() });
@@ -40,6 +40,9 @@ function localStore({ onState, onPlan, onDay, onMarks, onEvents, onCards }) {
       onPlan(read('bt.plan', null), { fromServer: true });
       onMarks(revive(read('bt.marks', {})));
       onCards(read('bt.cards', {}));
+      onPet(read('bt.pet', null));
+      onPhoto(read('bt.photo', ''));
+      onHealth(Object.entries(read('bt.health', {})).map(([id, r]) => ({ id, ...r })));
     },
     setDay(key) {
       day = key;
@@ -94,7 +97,35 @@ function localStore({ onState, onPlan, onDay, onMarks, onEvents, onCards }) {
       try {
         Object.keys(localStorage).filter((k) => k.startsWith('bt.day.')).forEach((k) => { days[k.slice(7)] = read(k, {}); });
       } catch { /* ничего */ }
-      return { plan: read('bt.plan', null), marks: read('bt.marks', {}), days, events: read('bt.events', []), cards: read('bt.cards', {}) };
+      return {
+        plan: read('bt.plan', null), marks: read('bt.marks', {}), days, events: read('bt.events', []), cards: read('bt.cards', {}),
+        pet: read('bt.pet', null), health: read('bt.health', {}), stories: read('bt.stories', {}),
+      };
+    },
+    // Паспорт и дневник
+    savePet(profile) { write('bt.pet', profile); onPet(profile); },
+    savePhoto(data) { write('bt.photo', data || ''); onPhoto(data || ''); },
+    saveHealth(id, rec) {
+      const all = read('bt.health', {});
+      const key = id || newId();
+      all[key] = { ...rec };
+      write('bt.health', all);
+      onHealth(Object.entries(all).map(([k, r]) => ({ id: k, ...r })));
+      return key;
+    },
+    deleteHealth(id) {
+      const all = read('bt.health', {});
+      delete all[id];
+      write('bt.health', all);
+      onHealth(Object.entries(all).map(([k, r]) => ({ id: k, ...r })));
+    },
+    async loadStories(from, to) {
+      return Object.fromEntries(Object.entries(read('bt.stories', {})).filter(([k]) => k >= from && k <= to));
+    },
+    async saveStory(day, story) {
+      const all = read('bt.stories', {});
+      if (story) all[day] = story; else delete all[day];
+      write('bt.stories', all);
     },
     signIn() {}, signOut() {},
   };
@@ -102,7 +133,7 @@ function localStore({ onState, onPlan, onDay, onMarks, onEvents, onCards }) {
 
 // ---------- Firebase ----------
 
-function firebaseStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onError }, firebaseConfig) {
+function firebaseStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onError, onPet = () => {}, onPhoto = () => {}, onHealth = () => {} }, firebaseConfig) {
   const state = { mode: 'firebase', status: 'loading', user: null, message: '' };
   let fb = null; // модули SDK
   let db = null;
@@ -159,6 +190,11 @@ function firebaseStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onE
       const cards = {};
       snap.forEach((d) => { cards[d.id] = d.data(); });
       onCards(cards);
+    }, fail));
+    unsubs.push(onSnapshot(doc(db, 'pet', 'profile'), (snap) => { onPet(snap.exists() ? plainPet(snap.data()) : null); }, fail));
+    unsubs.push(onSnapshot(doc(db, 'pet', 'photo'), (snap) => { onPhoto(snap.exists() ? String(snap.data().data || '') : ''); }, fail));
+    unsubs.push(onSnapshot(collection(db, 'health'), (snap) => {
+      onHealth(snap.docs.map((d) => { const v = d.data(); return { id: d.id, title: v.title, kind: v.kind, date: v.date, done: !!v.done, note: v.note || '', updatedBy: v.updatedBy || '' }; }));
     }, fail));
     listenDay();
   }
@@ -231,6 +267,9 @@ function firebaseStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onE
           onDay({});
           onEvents([]);
           onCards({});
+          onPet(null);
+          onPhoto('');
+          onHealth([]);
           return emit({ status: 'signed-out', user: null });
         }
         checkAccess(user);
@@ -368,9 +407,64 @@ function firebaseStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onE
       return {
         plan: plan.exists() ? plain(plan.data()) : null,
         marks: await all('marks'), days: await all('days'), events: await all('events'), cards: await all('cards'),
+        pet: await all('pet'), health: await all('health'), stories: await all('stories'),
       };
     },
+
+    // ---------- Паспорт ----------
+    savePet(profile) {
+      if (!ready()) return;
+      const { doc, setDoc, serverTimestamp } = fb.fs;
+      setDoc(doc(db, 'pet', 'profile'), { ...plainPet(profile), updatedAt: serverTimestamp(), updatedBy: state.user.name }).catch(fail);
+    },
+    savePhoto(data) {
+      if (!ready()) return;
+      const { doc, setDoc, deleteDoc, serverTimestamp } = fb.fs;
+      const ref = doc(db, 'pet', 'photo');
+      (data ? setDoc(ref, { data, updatedAt: serverTimestamp(), updatedBy: state.user.name }) : deleteDoc(ref)).catch(fail);
+    },
+    // Запись о здоровье: {title, kind, date, done, note}; возвращает id
+    saveHealth(id, rec) {
+      if (!ready()) return null;
+      const { doc, collection, setDoc, serverTimestamp } = fb.fs;
+      const ref = id ? doc(db, 'health', id) : doc(collection(db, 'health'));
+      setDoc(ref, {
+        title: rec.title, kind: rec.kind, date: rec.date, done: !!rec.done, note: rec.note || '',
+        updatedAt: serverTimestamp(), updatedBy: state.user.name,
+      }).catch(fail);
+      return ref.id;
+    },
+    deleteHealth(id) {
+      if (!ready()) return;
+      const { doc, deleteDoc } = fb.fs;
+      deleteDoc(doc(db, 'health', id)).catch(fail);
+    },
+
+    // ---------- Заметки о днях (дневник) ----------
+    async loadStories(from, to) {
+      if (!ready()) return {};
+      const { collection, query, where, getDocs, documentId } = fb.fs;
+      const snap = await getDocs(query(collection(db, 'stories'), where(documentId(), '>=', from), where(documentId(), '<=', to)));
+      const out = {};
+      snap.forEach((d) => { const v = d.data(); out[d.id] = { title: v.title || '', text: v.text || '', photo: v.photo || '' }; });
+      return out;
+    },
+    async saveStory(day, story) {
+      if (!ready()) return;
+      const { doc, setDoc, deleteDoc, serverTimestamp } = fb.fs;
+      const ref = doc(db, 'stories', day);
+      try {
+        if (story) await setDoc(ref, { title: story.title || '', text: story.text || '', photo: story.photo || '', updatedAt: serverTimestamp(), updatedBy: state.user.name });
+        else await deleteDoc(ref);
+      } catch (err) { fail(err); }
+    },
   };
+}
+
+// Карточка собаки: только известные поля, строками
+const PET_FIELDS = ['name', 'breed', 'birth', 'sex', 'chip', 'mdr1', 'weight'];
+function plainPet(v) {
+  return Object.fromEntries(PET_FIELDS.map((k) => [k, typeof v[k] === 'string' ? v[k] : '']));
 }
 
 function explain(err) {

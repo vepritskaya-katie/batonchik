@@ -107,6 +107,59 @@ service cloud.firestore {
       allow delete: if isAllowed();
     }
 
+    // Паспорт: карточка собаки (profile) и фото (photo, сжатая картинка в виде строки data:image/…)
+    function str(d, key, n) {
+      return !(key in d) || (d[key] is string && d[key].size() <= n);
+    }
+    match /pet/{doc} {
+      allow read: if isAllowed();
+      allow create, update: if isAllowed() && (
+        (doc == 'profile'
+          && request.resource.data.keys().hasOnly(['name', 'breed', 'birth', 'sex', 'chip', 'mdr1', 'weight', 'updatedAt', 'updatedBy'])
+          && str(request.resource.data, 'name', 40) && str(request.resource.data, 'breed', 60)
+          && str(request.resource.data, 'birth', 10) && str(request.resource.data, 'sex', 20)
+          && str(request.resource.data, 'chip', 40) && str(request.resource.data, 'mdr1', 60)
+          && str(request.resource.data, 'weight', 20)
+          && request.resource.data.updatedAt == request.time
+          && request.resource.data.updatedBy is string && request.resource.data.updatedBy.size() <= 40)
+        || (doc == 'photo'
+          && request.resource.data.keys().hasOnly(['data', 'updatedAt', 'updatedBy'])
+          && request.resource.data.data is string && request.resource.data.data.size() <= 900000
+          && request.resource.data.updatedAt == request.time
+          && request.resource.data.updatedBy is string && request.resource.data.updatedBy.size() <= 40));
+      allow delete: if isAllowed() && doc == 'photo';
+    }
+
+    // Паспорт: прививки, обработки, таблетки, визиты к врачу. done == false — запланировано (напоминание)
+    match /health/{id} {
+      allow read: if isAllowed();
+      allow create, update: if isAllowed()
+        && id.size() <= 40
+        && request.resource.data.keys().hasOnly(['title', 'kind', 'date', 'done', 'note', 'updatedAt', 'updatedBy'])
+        && request.resource.data.title is string && request.resource.data.title.size() > 0 && request.resource.data.title.size() <= 120
+        && request.resource.data.kind in ['vaccine', 'ticks', 'worms', 'pill', 'vet', 'other']
+        && request.resource.data.date is string && request.resource.data.date.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+        && request.resource.data.done is bool
+        && request.resource.data.note is string && request.resource.data.note.size() <= 1000
+        && request.resource.data.updatedAt == request.time
+        && request.resource.data.updatedBy is string && request.resource.data.updatedBy.size() <= 40;
+      allow delete: if isAllowed();
+    }
+
+    // Дневник: заметка о дне (заголовок, текст и необязательное фото), один документ на дату
+    match /stories/{day} {
+      allow read: if isAllowed();
+      allow create, update: if isAllowed()
+        && day.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+        && request.resource.data.keys().hasOnly(['title', 'text', 'photo', 'updatedAt', 'updatedBy'])
+        && request.resource.data.title is string && request.resource.data.title.size() <= 120
+        && request.resource.data.text is string && request.resource.data.text.size() <= 5000
+        && request.resource.data.photo is string && request.resource.data.photo.size() <= 900000
+        && request.resource.data.updatedAt == request.time
+        && request.resource.data.updatedBy is string && request.resource.data.updatedBy.size() <= 40;
+      allow delete: if isAllowed();
+    }
+
     // Всё остальное закрыто
     match /{document=**} {
       allow read, write: if false;

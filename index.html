@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Батончик</title>
   <meta name="description" content="Тренировки щенка аусси Батончика: распорядок дня, команды, игры, советы и заметки из каналов">
-  <meta name="theme-color" content="#fbf7f2" media="(prefers-color-scheme: light)">
-  <meta name="theme-color" content="#17130f" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#f5f3eb" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#141812" media="(prefers-color-scheme: dark)">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="Батончик">
@@ -14,6 +14,7 @@
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icons/icon-192.png" type="image/png">
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="preload" href="fonts/manrope-cyrillic.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="css/style.css">
   <script>
     // Тема до отрисовки, чтобы не мигало
@@ -34,26 +35,26 @@
     <noscript>Для работы приложения нужен JavaScript.</noscript>
   </main>
 
-  <!-- Иконки «Тренировки» (pets) и «Игры» (pet_supplies): Material Symbols, Google, лицензия Apache 2.0 -->
+  <!-- Иконка «Тренировки» (pets): Material Symbols, Google, лицензия Apache 2.0 -->
   <nav class="tabbar" aria-label="Разделы">
     <a href="#/" data-tab="today">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 10.5 12 4l8 6.5V19a1.5 1.5 0 0 1-1.5 1.5H15v-6h-6v6H5.5A1.5 1.5 0 0 1 4 19z"/></svg>
+      <span data-label="Главная">Главная</span></a>
+    <a href="#/day" data-tab="day">
       <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="15" rx="3"/><path d="M8 3v4M16 3v4M8.5 13l2.5 2.5 4.5-5"/></svg>
-      <span>Сегодня</span></a>
-    <a href="#/d" data-tab="d">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4.5A1.5 1.5 0 0 1 6.5 3H19v15H6.5A1.5 1.5 0 0 0 5 19.5v-15zM5 19.5A1.5 1.5 0 0 0 6.5 21H19v-3M9 7.5h6M9 11h4"/></svg>
-      <span>Дневник</span></a>
+      <span data-label="День">День</span></a>
     <a href="#/k" data-tab="k">
       <svg class="ms" viewBox="0 -960 960 960" aria-hidden="true"><path d="M169.86-485Q132-485 106-511.14t-26-64Q80-613 106.14-639t64-26Q208-665 234-638.86t26 64Q260-537 233.86-511t-64 26ZM291-681.14q-26-26.14-26-64T291.14-809q26.14-26 64-26T419-808.86q26 26.14 26 64T418.86-681q-26.14 26-64 26T291-681.14Zm250 0q-26-26.14-26-64T541.14-809q26.14-26 64-26T669-808.86q26 26.14 26 64T668.86-681q-26.14 26-64 26T541-681.14ZM789.86-485Q752-485 726-511.14t-26-64Q700-613 726.14-639t64-26Q828-665 854-638.86t26 64Q880-537 853.86-511t-64 26ZM266-75q-42 0-69-31.53-27-31.52-27-74.47 0-42 25.5-74.5T250-318q22-22 41-46.5t36-50.5q29-44 65-82t88-38q52 0 88.5 38t65.5 83q17 26 35.5 50t40.5 46q29 30 54.5 62.5T790-181q0 42.95-27 74.47Q736-75 694-75q-54 0-107-9t-107-9q-54 0-107 9t-107 9Z"/></svg>
-      <span>Тренировки</span></a>
-    <a href="#/g" data-tab="g">
-      <svg class="ms" viewBox="0 -960 960 960" aria-hidden="true"><path d="M368-80q-54 0-90-36t-36-89.79q0-8.21 1.5-21.71T243-243q-2-2-15.5-.5t-21.71 1.5Q152-242 116-278q-36-36-36-90t36-90q36-36 90-36 36 0 61.5 13t38.5 25l198-198q-11-13-24.5-38.5T466-754q0-54 36-90t90-36q54 0 90 36t36 89.79q0 8.21-1.5 21.71t.5 15.5q2 2 15.5.5t21.71-1.5Q808-718 844-682q36 36 36 90t-36 90q-36 36-90 36-36 0-61.5-13.5T654-504L456-306q12 13 25 38.5t13 61.5q0 54-36 90t-90 36Zm47.5-79q18.5-18 18.5-47 0-23-10-40t-18-26q-15-18-12.5-38.5T413-348l198-198q16.58-17.11 38.29-19.56Q671-568 688-554q9 8 26 18t40 10q28.6 0 47.3-18.5Q820-563 820-592t-18.7-47.5Q782.6-658 754-658q-26 0-47-2t-33-14q-12-12-14-33t-2-47q0-28.6-18.5-47.3Q621-820 592-820t-47.5 18.7Q526-782.6 526-754q0 23 10 40t18 26q15 18 12.5 38.5T547-612L349-414q-16.58 17.11-38.29 19.56Q289-392 272-406q-9-8-26-18t-40-10q-29 0-47 18.5T141-368q0 29 18 47.5t47 18.5q26 0 47 2t33 14q12 12 14 33t2 47q0 29 18.5 47t47.5 18q29 0 47.5-18ZM481-481Z"/></svg>
-      <span>Игры</span></a>
+      <span data-label="Тренировки">Тренировки</span></a>
+    <a href="#/pass" data-tab="pass">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="3" width="14" height="18" rx="2.5"/><circle cx="12" cy="10" r="2.6"/><path d="M8.5 16.5c.8-1.6 2-2.4 3.5-2.4s2.7.8 3.5 2.4"/></svg>
+      <span data-label="Паспорт">Паспорт</span></a>
     <a href="#/t" data-tab="t">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-3.5 10.9c.6.5 1 1.2 1 2.1h5c0-.9.4-1.6 1-2.1A6 6 0 0 0 12 3z"/></svg>
-      <span>Советы</span></a>
-    <a href="#/c" data-tab="c">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h10a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2H9l-4 3v-3H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2zM18 8h2a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-1v3l-4-3h-4a2 2 0 0 1-2-2v-1"/></svg>
-      <span>Каналы</span></a>
+      <span data-label="Советы">Советы</span></a>
+    <a href="#/d" data-tab="d">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4.5A1.5 1.5 0 0 1 6.5 3H19v15H6.5A1.5 1.5 0 0 0 5 19.5v-15zM5 19.5A1.5 1.5 0 0 0 6.5 21H19v-3M9 7.5h6M9 11h4"/></svg>
+      <span data-label="Дневник">Дневник</span></a>
   </nav>
 
   <div id="sheet" class="sheet" hidden>

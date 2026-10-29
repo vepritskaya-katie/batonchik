@@ -1,11 +1,14 @@
-// Экраны приложения «Батончик»: Сегодня, Команды, Игры, Советы и настройки.
+// Экраны приложения «Батончик»: Главная, День, Тренировки (с играми), Паспорт, Советы (с Каналами), Дневник и настройки.
 
 import { parseBlocks, parseCatalog, parseCardMd, parseToday, renderBlocks, inline, escapeHtml, hash, plainText, stepKey as stepKeyFor } from './md.js';
 import { createStore } from './store.js';
 import { cardToForm, emptyForm, formToMd, editorHtml, editorAction, setPath, formatText } from './editor.js';
 import {
-  EVENT_TYPES, SUBS, TRAIN, dayKey, fmtTime, fmtDate, addDays, moscowDate, dayStats, eventRow, todaySummary, nightLine, nightFor, diaryHtml, plural, mondayOf, dayTitle,
+  EVENT_TYPES, SUBS, TRAIN, dayKey, fmtTime, fmtDate, addDays, moscowDate, dayStats, eventRow, todaySummary, nightLine, nightFor, plural, mondayOf, dayTitle,
+  rhythmHtml, weekStatsHtml, dayFeedHtml,
 } from './diary.js';
+import { HEALTH_KINDS, NEXT_OPTIONS, nextDate, suggestNext, dueText, ageText, upcoming, doneRecords, googleCalendarUrl, icsText, healthRowHtml, daysBetween } from './passport.js';
+import { pickPhoto, compressPhoto } from './photo.js';
 import { pickIdeas } from './ideas.js';
 import { parseNotes, notesListHtml, noteHtml, noteMatches, countText } from './notes.js';
 
@@ -21,6 +24,8 @@ try {
 }
 
 const TZ = 'Europe/Moscow';
+const DAY_START_HOUR = 6; // если «Легли вечером» не отметили, новый день начинается в 6:00
+const moscowHour = (d = new Date()) => Number(new Intl.DateTimeFormat('ru-RU', { timeZone: 'Europe/Moscow', hour: 'numeric', hourCycle: 'h23' }).format(d));
 const DIARY_STEP = 28; // дневник подгружает историю по 4 недели
 const MIN_REPS = 5;   // цель по умолчанию для тренировки на сегодня: не меньше 5 повторов
 const MAX_REPS = 50;
@@ -70,12 +75,39 @@ const S = {
   diary: { from: null, events: [], days: {}, loading: false, loadedAt: 0 },
   editor: null,       // { tab, id, form, isNew } — открытая форма правки карточки
   store: { mode: 'local', status: 'loading' },
-  day: dayKey(),
+  day: startDay(),
   edit: { trainings: false },
   notes: null,        // вкладка «Каналы»: заметки из Telegram-каналов (только чтение)
   notesFilter: { q: '', now: false, future: false, sci: false, exp: false },
   tipShift: 0,        // «Ещё совет» в «Совете дня»
+  pet: null,          // паспорт: { name, breed, birth, sex, chip, mdr1, weight }
+  photo: '',          // фото Батончика (data:image/jpeg…)
+  health: [],         // паспорт: прививки, обработки, таблетки, врач — { id, title, kind, date, done, note }
+  stories: {},        // дневник: заметки о днях { 'ГГГГ-ММ-ДД': { title, text, photo } } за загруженные дни
 };
+
+const DOG = () => (S.pet && S.pet.name) || 'Батончик';
+
+// ---------- День приложения ----------
+// Новый день начинается после «Легли вечером», а не в полночь: записи после полуночи, пока не легли спать,
+// остаются во вчерашнем дне. Подстраховка, если «Легли» забыли нажать, — «Встали утром» или 6:00.
+function startDay() {
+  const now = new Date();
+  return moscowHour(now) < DAY_START_HOUR ? addDays(dayKey(now), -1) : dayKey(now);
+}
+
+function appDay(now = new Date()) {
+  const cal = dayKey(now);
+  const stillYesterday = S.day === addDays(cal, -1) && moscowHour(now) < DAY_START_HOUR && !S.events.some((e) => e.type === 'bed');
+  return stillYesterday ? S.day : cal;
+}
+
+// День для записи: всё, что после полуночи и до «Легли», — во вчерашний день; «Встали утром» — уже новый день
+function eventDayFor(at, type) {
+  const cal = dayKey(at);
+  if (type !== 'wake' && cal === dayKey() && S.day < cal) return S.day;
+  return cal;
+}
 
 // Карточка в «Советах» со списком для окошка «Совет дня»: в общем списке советов её не показываем
 const DAILY_TIPS_ID = 'sovety-dnya';
@@ -84,11 +116,6 @@ const $ = (sel) => document.querySelector(sel);
 const view = $('#view');
 
 // ---------- Время по Москве ----------
-
-function todayTitle() {
-  const s = new Intl.DateTimeFormat('ru-RU', { timeZone: TZ, weekday: 'long', day: 'numeric', month: 'long' }).format(new Date());
-  return s.charAt(0).toUpperCase() + s.slice(1);
-}
 
 const rid = () => Math.random().toString(36).slice(2, 10);
 
@@ -113,8 +140,15 @@ const store = createStore({
   },
   onDay(checks) { S.checks = checks || {}; render(); },
   onMarks(marks) { S.marks = marks || {}; render(); },
-  onEvents(list) { S.events = withNewRefs(list); render(); },
+  onEvents(list) {
+    S.events = withNewRefs(list);
+    render();
+    if (appDay() !== S.day) setTimeout(checkDay, 0);
+  },
   onCards(docs) { S.cardDocs = docs || {}; rebuildCatalogs(); render(); },
+  onPet(pet) { S.pet = pet; render(); },
+  onPhoto(data) { S.photo = data || ''; render(); },
+  onHealth(list) { S.health = list || []; render(); },
   onError(message) { toast(message); },
 }, firebaseConfig);
 
@@ -413,6 +447,18 @@ function cardProgress(tab, card) {
 
 // ---------- Общие куски разметки ----------
 
+const PLUS_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>';
+
+// Шапка страницы: надпись сверху, заголовок, подзаголовок и круглая кнопка «+»
+function pageHead({ eyebrow = '', title, sub = '', plus = null }) {
+  return `<div class="page-head">
+    <div class="page-head-text">${eyebrow ? `<p class="eyebrow">${escapeHtml(eyebrow)}</p>` : ''}<h1>${title}</h1>${sub ? `<p class="page-sub">${sub}</p>` : ''}</div>
+    ${plus && canWrite() ? `<button class="round-btn" data-action="${plus.action}" aria-label="${escapeHtml(plus.label)}">${PLUS_SVG}</button>` : ''}
+  </div>`;
+}
+
+const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+
 const CONFIG_BROKEN = `В файле js/firebase-config.js ошибка, поэтому отметки сохраняются только на этом телефоне.
   Как исправить — README.md, шаг 8.`;
 
@@ -466,14 +512,29 @@ function journalHtml() {
   const st = dayStats(S.day, S.events, S.checks, 0);
   const night = nightFor(S.day, [...S.recent, ...S.events]);
   const list = [...st.list].reverse();
-  return `<section class="section">
-    <div class="section-head"><h2>Журнал</h2><a class="btn small" href="#/d">Дневник</a></div>
+  return `<section class="card">
+    <div class="card-head"><h2>Журнал</h2></div>
     <div class="ev-buttons">${buttons}</div>
     ${todaySummary(st)}
     ${nightLine(night)}
     ${list.length ? `<ul class="ev-list">${list.map((e) => eventRow(e, { editable: can })).join('')}</ul>`
       : '<p class="muted">Сегодня ещё ничего не записано. Нажмите кнопку, и запись появится здесь с временем и именем.</p>'}
   </section>`;
+}
+
+// Строка значков быстрых записей (на главной): одно нажатие — как кнопки журнала
+function evIconsHtml() {
+  const can = canWrite();
+  return `<div class="ev-icons">${Object.entries(EVENT_TYPES).map(([type, t]) =>
+    `<button class="ev-icon-btn" data-action="ev-add" data-type="${type}"${can ? '' : ' disabled'} aria-label="${t.label}">
+      <span class="ev-icon" aria-hidden="true">${t.icon}</span><span>${t.short}</span></button>`).join('')}</div>`;
+}
+
+// «+» вверху главной и «Дня»: выбор, что записать
+function evMenuSheet() {
+  openSheet(`<div class="form"><h2>Новая запись</h2>
+    ${Object.entries(EVENT_TYPES).map(([type, t]) => `<button type="button" class="pick big" data-action="ev-add" data-type="${type}" data-close="1">${t.icon} ${t.label}</button>`).join('')}
+    <div class="form-actions"><button type="button" class="btn" data-action="sheet-close">Отмена</button></div></div>`, null);
 }
 
 // Цель на день: у тренировки — поле «Повторов в день» в карточке (по умолчанию 5), у игры — число в списке
@@ -509,7 +570,7 @@ function todayItems(plan = currentPlan()) {
 }
 const weekChosen = (plan = currentPlan()) => plan.focus.some((f) => f.week === mondayOf(S.day));
 
-function trainingsHtml() {
+function trainingsHtml(title = '') {
   const plan = currentPlan();
   const edit = S.edit.trainings;
   const can = canWrite();
@@ -558,11 +619,11 @@ function trainingsHtml() {
     ? `<div class="banner week-banner"><span>${week === S.day ? 'Понедельник — ' : ''}выберите ${WEEK_SIZE} тренировок на эту неделю. Они будут на главной до воскресенья.</span>
         <button class="btn primary" data-action="week-pick">Выбрать</button></div>` : '';
   return `<section class="section">
-    <div class="section-head"><h2>${escapeHtml(t.title || 'Тренировки на сегодня')}</h2>${editBtn}</div>
+    <div class="section-head"><h2>${escapeHtml(title || t.title || 'Тренировки на сегодня')}</h2>${editBtn}</div>
     ${weekBanner}
     ${chosen ? `<p class="muted small">Неделя с ${dayTitle(week, { day: 'numeric', month: 'long' })}.</p>` : ''}
     ${t.intro && t.intro.length ? `<details class="intro"><summary>Как устроены занятия</summary><div class="prose">${renderBlocks(t.intro)}</div></details>` : ''}
-    <p class="muted small">Одно нажатие на «+1» — один повтор. Сделали все повторы — строка станет зелёной и уйдёт вниз. Ошиблись — нажмите на счёт «2 из 5», чтобы убрать лишний повтор.</p>
+    <p class="muted small">Одно нажатие на «+1» — один повтор. Сделали все повторы — строка станет зелёной и уйдёт вниз. Ошиблись — нажмите на счёт «2 из 5», чтобы убрать лишний повтор. Счёт начинается заново после «Легли вечером».</p>
     <ul class="list">${items || '<li class="empty">Список пуст. Нажмите «Изменить», чтобы добавить тренировки.</li>'}</ul>
     ${edit ? `<div class="edit-actions">
       <button class="btn" data-action="tr-add">+ Добавить на сегодня</button>
@@ -668,44 +729,212 @@ function ideasHtml() {
       </div></div>`;
   };
   const html = row('game', '🎲', 'Игра', ideas.game, ideas.gameCount) + row('training', '🎯', 'Тренировка', ideas.training, ideas.trainingCount);
-  return html ? `<section class="section"><div class="section-head"><h2>Идея на сегодня</h2></div><div class="ideas">${html}</div></section>` : '';
+  return html ? `<section class="section">
+    <div class="section-head"><h2>Идеи на сегодня</h2></div>
+    <p class="muted small">Игра и тренировка вне плана — если есть время и настроение.</p>
+    <div class="ideas">${html}</div></section>` : '';
 }
 
-function renderToday() {
+// Прогресс тренировок за день: сколько тренировок выполнено и сколько повторов сделано
+function dayProgress() {
   const items = todayItems();
   const counts = todayTrains();
   const total = items.reduce((a, f) => a + targetOf(f), 0);
   const done = items.reduce((a, f) => a + Math.min(targetOf(f), counts[f.card] || 0), 0);
-  const t = S.today || {};
+  const finished = items.filter((f) => (counts[f.card] || 0) >= targetOf(f)).length;
+  return { items, counts, total, done, finished };
+}
 
-  // «В течение дня» — из файла, без отметок
-  const sections = (t.sections || []).map((g) => `<section class="section">
+function greeting() {
+  const h = moscowHour();
+  if (h < 5) return 'Доброй ночи';
+  if (h < 12) return 'Доброе утро';
+  if (h < 18) return 'Добрый день';
+  return 'Добрый вечер';
+}
+
+const PAW_SVG = '<svg class="ms" viewBox="0 -960 960 960" aria-hidden="true"><path d="M169.86-485Q132-485 106-511.14t-26-64Q80-613 106.14-639t64-26Q208-665 234-638.86t26 64Q260-537 233.86-511t-64 26ZM291-681.14q-26-26.14-26-64T291.14-809q26.14-26 64-26T419-808.86q26 26.14 26 64T418.86-681q-26.14 26-64 26T291-681.14Zm250 0q-26-26.14-26-64T541.14-809q26.14-26 64-26T669-808.86q26 26.14 26 64T668.86-681q-26.14 26-64 26T541-681.14ZM789.86-485Q752-485 726-511.14t-26-64Q700-613 726.14-639t64-26Q828-665 854-638.86t26 64Q880-537 853.86-511t-64 26ZM266-75q-42 0-69-31.53-27-31.52-27-74.47 0-42 25.5-74.5T250-318q22-22 41-46.5t36-50.5q29-44 65-82t88-38q52 0 88.5 38t65.5 83q17 26 35.5 50t40.5 46q29 30 54.5 62.5T790-181q0 42.95-27 74.47Q736-75 694-75q-54 0-107-9t-107-9q-54 0-107 9t-107 9Z"/></svg>';
+
+// Фото Батончика и прогресс дня
+function heroHtml() {
+  const p = dayProgress();
+  const pct = p.total ? Math.round((p.done / p.total) * 100) : 0;
+  const age = ageText(S.pet && S.pet.birth, S.day);
+  const headline = !p.items.length ? 'Новый день'
+    : p.finished === p.items.length ? 'Все тренировки сделаны!' : `Тренировки: ${p.finished} из ${p.items.length}`;
+  return `<section class="hero${S.photo ? '' : ' no-photo'}">
+    ${S.photo ? `<img class="hero-img" src="${escapeHtml(S.photo)}" alt="${escapeHtml(DOG())}">` : `<div class="hero-empty">${PAW_SVG}</div>`}
+    <span class="hero-pill"><i></i>${escapeHtml(DOG())}${age ? ` · ${age}` : ''}</span>
+    ${!S.photo && canWrite() ? '<button class="hero-photo-btn" data-action="photo-pick">Добавить фото</button>' : ''}
+    <div class="hero-copy">
+      <h2>${headline}</h2>
+      <p>${p.total ? `Повторы: ${p.done} из ${p.total}` : 'Выберите тренировки на неделю — и здесь появится прогресс.'}</p>
+      <div class="hero-meta"><span>Прогресс дня</span><strong>${pct}%</strong></div>
+      <div class="hero-track" role="img" aria-label="Прогресс дня ${pct}%"><span style="width:${pct}%"></span></div>
+    </div>
+  </section>`;
+}
+
+// Тренировки дня на главной: три первые несделанные с «+1»; весь план — во вкладке «Тренировки»
+const HOME_TRAININGS = 3;
+function homeTrainingsHtml() {
+  if (S.today && (S.today.raw || S.today.error)) return '';
+  const can = canWrite();
+  const p = dayProgress();
+  const left = p.items.filter((it) => (p.counts[it.card] || 0) < targetOf(it));
+  const list = left.slice(0, HOME_TRAININGS).map((it) => {
+    const { tab, id, card } = cardByRef(it.card);
+    const n = p.counts[it.card] || 0;
+    const target = targetOf(it);
+    const name = card ? card.name : 'Карточка не найдена';
+    return `<li class="mini-row">
+      ${card ? `<a class="mini-name" href="#/${tab}/${id}">${escapeHtml(name)}</a>` : `<span class="mini-name muted">${name}</span>`}
+      ${n && can ? `<button class="mini-count" data-action="tr-reps" data-card="${it.card}" aria-label="Повторы за сегодня: ${n}. Нажмите, чтобы убрать лишний">${n} из ${target}</button>`
+        : `<span class="mini-count">${n} из ${target}</span>`}
+      <button class="mini-tap" data-action="tr-tap" data-card="${it.card}"${can && card ? '' : ' disabled'} aria-label="Отметить повтор: ${escapeHtml(name)}">+1</button>
+    </li>`;
+  }).join('');
+  const more = left.length - HOME_TRAININGS;
+  const chosen = weekChosen();
+  const banner = can && !chosen && S.contentReady
+    ? `<div class="banner week-banner"><span>Выберите ${WEEK_SIZE} тренировок на эту неделю.</span><button class="btn small primary" data-action="week-pick">Выбрать</button></div>` : '';
+  let body;
+  if (list) body = `<ul class="mini-list">${list}</ul>`;
+  else if (p.items.length) body = '<p class="muted">Все тренировки на сегодня сделаны.</p>';
+  else body = '<p class="muted">На сегодня тренировок нет. Выберите их во вкладке «Тренировки».</p>';
+  return `<section class="card">
+    <div class="card-head"><h2>Тренировки дня</h2></div>
+    ${banner}
+    ${body}
+    <a class="text-link more" href="#/k">${more > 0 ? `Ещё ${more} — весь план` : 'Весь план'} ›</a>
+  </section>`;
+}
+
+// «1 ч 40 мин назад»
+function agoText(at, now = new Date()) {
+  const m = Math.max(0, Math.floor((now - at) / 60000));
+  if (m < 1) return 'только что';
+  if (m < 60) return `${m} мин назад`;
+  const h = Math.floor(m / 60);
+  if (h >= 24) return 'больше суток назад';
+  return `${h} ч${m % 60 ? ` ${m % 60} мин` : ''} назад`;
+}
+// «в 20:51», «вчера в 23:05»
+function atText(at, now = new Date()) {
+  const k = dayKey(at);
+  if (k === dayKey(now)) return `в ${fmtTime(at)}`;
+  if (k === addDays(dayKey(now), -1)) return `вчера в ${fmtTime(at)}`;
+  return `${dayTitle(k, { day: 'numeric', month: 'long' })} в ${fmtTime(at)}`;
+}
+// Время «назад» на главной обновляется само, без перерисовки экрана
+function updateSince() {
+  document.querySelectorAll('[data-since]').forEach((el) => { el.textContent = agoText(new Date(el.dataset.since)); });
+}
+
+// Журнал на главной: значки записи и сколько прошло с последнего туалета и еды
+function homeJournalHtml() {
+  const all = [...S.recent, ...S.events];
+  const last = (types) => all.filter((e) => types.includes(e.type)).sort((a, b) => new Date(b.at) - new Date(a.at))[0];
+  const toilet = last(['toilet', 'accident']);
+  const meal = last(['meal']);
+  const home = toilet && toilet.type === 'accident';
+  const cell = (label, value) => `<div class="since-cell"><span>${label}</span><strong${value.at ? ` data-since="${new Date(value.at).toISOString()}"` : ''}>${value.text}</strong></div>`;
+  return `<section class="card">
+    <div class="card-head"><h2>Журнал</h2><a class="text-link" href="#/day">Весь день ›</a></div>
+    ${evIconsHtml()}
+    <div class="since">
+      ${cell(`${home ? EVENT_TYPES.accident.icon : EVENT_TYPES.toilet.icon} Туалет${home ? ' дома' : ''}`,
+        toilet ? { at: toilet.at, text: agoText(new Date(toilet.at)) } : { text: 'ещё не было' })}
+      ${cell(`${EVENT_TYPES.meal.icon} Еда`, meal ? { text: atText(new Date(meal.at)) } : { text: 'ещё не было' })}
+    </div>
+  </section>`;
+}
+
+// Здоровье на главной: только если до события неделя или меньше (или оно просрочено)
+function homeHealthHtml() {
+  const soon = upcoming(S.health).filter((r) => daysBetween(S.day, r.date) <= 7).slice(0, 3);
+  if (!soon.length) return '';
+  return `<section class="health-strip">
+    <div class="health-symbol" aria-hidden="true">🩺</div>
+    <div><p class="eyebrow">Здоровье</p><strong>Скоро</strong></div>
+    <ul class="health-list">${soon.map((r) => healthRowHtml(r, S.day)).join('')}</ul>
+    <a class="btn small wide" href="#/pass">Открыть паспорт ›</a></section>`;
+}
+
+function renderHome() {
+  return `${pageHead({ eyebrow: cap(dayTitle(S.day)), title: greeting() })}
+    ${statusBanner()}
+    ${heroHtml()}
+    ${homeJournalHtml()}
+    ${dailyTipHtml()}
+    ${homeTrainingsHtml()}
+    ${homeHealthHtml()}`;
+}
+
+// ---------- День ----------
+
+function renderDayPage() {
+  if (canWrite() && (!S.diary.from || (Date.now() - S.diary.loadedAt > 60000 && !S.diary.loading))) {
+    if (!S.diary.loading) setTimeout(() => loadDiary(false), 0);
+  }
+  const st = dayStats(S.day, S.events, S.checks, 0);
+  st.night = nightFor(S.day, [...S.recent, ...S.events]);
+  const p = dayProgress();
+  const days = diaryDays();
+  return `${pageHead({ eyebrow: cap(dayTitle(S.day)), title: 'День', sub: 'Всё, что отметили за день. Новый день начнётся после «Легли вечером».', plus: { action: 'ev-menu', label: 'Новая запись' } })}
+    ${statusBanner()}
+    ${journalHtml()}
+    ${rhythmHtml(st, { trainsDone: p.done, trainsTotal: p.total })}
+    ${canWrite() ? weekStatsHtml({ days, prevWeek: days.slice(7, 14), loading: S.diary.loading || !S.diary.from }) : ''}`;
+}
+
+// ---------- Тренировки (с играми) ----------
+
+// «В течение дня» из rasporyadok.md: подсказки без отметок
+function daySectionsHtml() {
+  const t = S.today || {};
+  return (t.sections || []).map((g) => `<section class="section">
       ${g.title ? `<h2>${inline(g.title)}</h2>` : ''}
       ${g.intro && g.intro.length ? `<div class="prose">${renderBlocks(g.intro)}</div>` : ''}
       <ul class="list">${g.items.map((it) => `<li class="item plain"><div class="item-body">${scheduleItemHtml(it)}</div></li>`).join('')}</ul>
     </section>`).join('');
+}
 
-  return `
-    <div class="dayhead">
-      <h1>${todayTitle()}</h1>
-      ${total ? `<div class="progress" role="img" aria-label="Подходов ${done} из ${total}"><span style="width:${Math.round(done / total * 100)}%"></span></div>
-      <p class="muted">Тренировки: ${done} из ${total} ${plural(total, 'повтора', 'повторов', 'повторов')}. Счёт обнуляется в полночь по Москве.</p>` : ''}
-    </div>
+function renderTrainingsPage() {
+  const t = S.today || {};
+  const week = mondayOf(S.day);
+  return `${pageHead({ eyebrow: weekChosen() ? `Неделя с ${dayTitle(week, { day: 'numeric', month: 'long' })}` : 'Тренировки и игры', title: 'Тренировки', sub: 'План на неделю, подсказки на день и все тренировки и игры.', plus: { action: 'new-card-sheet', label: 'Добавить' } })}
     ${statusBanner()}
-    ${journalHtml()}
+    ${t.raw ? `<div class="prose">${safe(() => renderBlocks(parseBlocks(t.raw)), t.raw)}</div>` : trainingsHtml('План на неделю')}
+    ${t.error ? '<p class="empty">Не удалось загрузить план. Проверьте интернет.</p>' : ''}
     ${ideasHtml()}
-    ${t.raw ? `<div class="prose">${safe(() => renderBlocks(parseBlocks(t.raw)), t.raw)}</div>` : trainingsHtml()}
-    ${t.error ? '<p class="empty">Не удалось загрузить главный экран. Проверьте интернет.</p>' : ''}
-    ${sections}`;
+    ${daySectionsHtml()}
+    <h2 class="lib-title">Библиотека</h2>
+    ${catalogBody('k')}
+    ${catalogBody('g', { showTitle: true })}`;
+}
+
+// ---------- Советы и Каналы ----------
+
+function tipsSwitch(on) {
+  const a = (key, href, label) => `<a class="seg${on === key ? ' on' : ''}" href="${href}"${on === key ? ' aria-current="page"' : ''}>${label}</a>`;
+  return `<nav class="segmented two" aria-label="Советы или Каналы">${a('t', '#/t', 'Наши советы')}${a('c', '#/c', 'Каналы')}</nav>`;
+}
+
+function renderTipsPage() {
+  return `${pageHead({ title: 'Советы', sub: 'Правила, протоколы и заметки из каналов.', plus: { action: 'new-tip', label: 'Новый совет' } })}
+    ${tipsSwitch('t')}
+    ${catalogBody('t')}`;
+}
+
+function renderNotesPage() {
+  const head = `${pageHead({ title: 'Советы', sub: 'Правила, протоколы и заметки из каналов.' })}${tipsSwitch('c')}`;
+  if (!S.notes) return `${head}<p class="muted">Загружаем…</p>`;
+  if (S.notes.error) return `${head}<div class="banner warn">Не удалось загрузить заметки. Проверьте интернет.</div>`;
+  return head + notesListHtml(S.notes, S.notesFilter);
 }
 
 // ---------- Каналы ----------
-
-function renderNotes() {
-  if (!S.notes) return '<h1>Каналы</h1><p class="muted">Загружаем…</p>';
-  if (S.notes.error) return '<h1>Каналы</h1><div class="banner warn">Не удалось загрузить заметки. Проверьте интернет.</div>';
-  return notesListHtml(S.notes, S.notesFilter);
-}
 
 function renderNote(id) {
   const arrow = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>';
@@ -767,13 +996,12 @@ function dailyTipHtml() {
 
 // ---------- Каталоги ----------
 
-function renderCatalog(tab) {
+function catalogBody(tab, { showTitle = false } = {}) {
   const cat = S.catalogs[tab];
-  const title = TABS[tab].title;
-  if (!cat) return `<h1>${title}</h1><p class="muted">Загружаем…</p>`;
+  if (!cat) return '<p class="muted">Загружаем…</p>';
   const errors = cat.errors.map((e) => `<div class="banner warn">${escapeHtml(e)}</div>`).join('');
-  // Один раздел в файле — его название становится заголовком страницы
-  const single = cat.groups.length === 1 && !!cat.groups[0].title;
+  // Один раздел в файле (советы) — без своего заголовка; игры на странице «Тренировки» — с заголовком
+  const single = cat.groups.length === 1 && !!cat.groups[0].title && !showTitle;
   const loose = cat.loose.length ? `<div class="prose">${blocksHtml(cat.loose, tab, null)}</div>` : '';
   const groups = cat.groups.map((g) => {
     if (g.raw) return `<section class="group"><div class="raw">${escapeHtml(g.raw)}</div></section>`;
@@ -791,7 +1019,7 @@ function renderCatalog(tab) {
         <svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg></a></li>`;
     }).join('');
     const intro = g.intro.length
-      ? (plainText(g.intro).length > 220
+      ? (plainText(g.intro).length > 220 || showTitle
         ? `<details class="intro"><summary>Вступление к разделу</summary><div class="prose">${blocksHtml(g.intro, tab, null)}</div></details>`
         : `<div class="prose">${blocksHtml(g.intro, tab, null)}</div>`)
       : '';
@@ -801,8 +1029,7 @@ function renderCatalog(tab) {
       ${cards ? `<ul class="cards">${cards}</ul>` : (g.intro.length ? '' : '<p class="empty">Здесь пока пусто.</p>')}
     </section>`;
   }).join('');
-  const addBtn = canWrite() ? `<a class="btn small" href="#/edit/${tab}/new">+ Новая карточка</a>` : '';
-  return `<div class="page-head"><h1>${single ? inline(cat.groups[0].title) : escapeHtml(TABS[tab].heading || title)}</h1>${addBtn}</div>${errors}${tab === 't' ? dailyTipHtml() : ''}${loose}${groups}`;
+  return `${errors}${loose}${groups}`;
 }
 
 function renderCard(tab, id) {
@@ -812,7 +1039,7 @@ function renderCard(tab, id) {
   const from = prevHash && pageTitle(prevHash);
   const back = from
     ? `<a class="back" href="${prevHash}" data-action="back">${arrow}${escapeHtml(from)}</a>`
-    : `<a class="back" href="#/${tab}">${arrow}${TABS[tab].title}</a>`;
+    : `<a class="back" href="#/${TAB_OF[tab] || tab}">${arrow}${PAGE_TITLES[tab]}</a>`;
   if (!card) {
     return `${back}<h1>Не найдено</h1><p class="muted">${S.catalogs[tab] ? 'Возможно, карточку переименовали в памятке.' : 'Загружаем…'}</p>`;
   }
@@ -897,8 +1124,9 @@ async function loadDiary(more) {
   S.diary.loading = true;
   render();
   try {
-    const data = await store.loadHistory(from, today);
+    const [data, stories] = await Promise.all([store.loadHistory(from, today), store.loadStories(from, today)]);
     S.diary = { from, events: withNewRefs(data.events), days: data.days, loading: false, loadedAt: Date.now() };
+    S.stories = { ...S.stories, ...stories };
   } catch (err) {
     console.error(err);
     S.diary.loading = false;
@@ -926,26 +1154,236 @@ function markLabel(id) {
   return null;
 }
 
+// Дни дневника: сегодняшние записи — живые, остальное — из загруженной истории
+function diaryDays() {
+  const today = S.day;
+  const events = [...S.diary.events.filter((e) => e.day !== today), ...S.events];
+  const days = [];
+  for (let k = today; S.diary.from && k >= S.diary.from; k = addDays(k, -1)) {
+    days.push(dayStats(k, events, k === today ? S.checks : S.diary.days[k], 0));
+  }
+  return days;
+}
+
 function renderDiary() {
-  if (!canWrite()) return `<h1>Дневник</h1>${statusBanner()}<p class="muted">Дневник появится после входа.</p>`;
+  const head = pageHead({ eyebrow: DOG(), title: 'Дневник', sub: 'Как прошёл каждый день: коротко из журнала и ваши заметки.', plus: { action: 'story-edit', label: 'Написать о сегодняшнем дне' } });
+  if (!canWrite()) return `${head}${statusBanner()}<p class="muted">Дневник появится после входа.</p>`;
   if (!S.diary.from || (Date.now() - S.diary.loadedAt > 60000 && !S.diary.loading)) {
     if (!S.diary.loading) setTimeout(() => loadDiary(false), 0);
   }
-  const today = S.day;
-  // Сегодняшние записи — живые, остальное — из загруженной истории
-  const events = [...S.diary.events.filter((e) => e.day !== today), ...S.events];
-  const total = 0;
-  const days = [];
-  for (let k = today; S.diary.from && k >= S.diary.from; k = addDays(k, -1)) {
-    days.push(dayStats(k, events, k === today ? S.checks : S.diary.days[k], total));
-  }
+  const days = diaryDays();
   const markLabels = {};
   for (const [id, m] of Object.entries(S.marks)) {
     if (!m.at) continue;
     const label = markLabel(id);
     if (label) (markLabels[dayKey(m.at)] = markLabels[dayKey(m.at)] || []).push(label);
   }
-  return diaryHtml({ days, prevWeek: days.slice(7, 14), markLabels, cardName, hasMore: !!S.diary.from && !S.diary.loading, loading: S.diary.loading || !S.diary.from });
+  return head + dayFeedHtml({
+    days, markLabels, cardName, stories: S.stories, editable: canWrite(),
+    hasMore: !!S.diary.from && !S.diary.loading, loading: S.diary.loading || !S.diary.from,
+  });
+}
+
+// Заметка о дне: заголовок, текст и фото
+let storyPhoto = '';
+function storySheet(day) {
+  const s = S.stories[day] || { title: '', text: '', photo: '' };
+  storyPhoto = s.photo || '';
+  openSheet(`<form class="form story-form"><h2>${escapeHtml(cap(dayTitle(day)))}</h2>
+    <label>Заголовок <span class="muted">(необязательно)</span><input name="title" maxlength="120" value="${escapeHtml(s.title)}" placeholder="Например: первый раз сам вышел из лифта"></label>
+    <label>Как прошёл день<textarea name="text" rows="6" maxlength="5000" placeholder="Что было хорошего, что получилось, что запомнилось">${escapeHtml(s.text)}</textarea></label>
+    <div class="story-photo-field">${storyPhotoFieldHtml()}</div>
+    <div class="form-actions"><button type="button" class="btn" data-action="sheet-close">Отмена</button><button class="btn primary">Сохранить</button></div>
+    ${S.stories[day] ? `<button type="button" class="btn danger-outline wide" data-action="story-delete" data-day="${day}">Удалить заметку</button>` : ''}
+  </form>`, (fd) => {
+    const story = { title: String(fd.get('title') || '').trim(), text: String(fd.get('text') || '').trim(), photo: storyPhoto };
+    if (!story.title && !story.text && !story.photo) { delete S.stories[day]; store.saveStory(day, null); } else {
+      S.stories[day] = story;
+      store.saveStory(day, story);
+    }
+    render();
+    toast('Заметка сохранена.');
+  });
+}
+
+function storyPhotoFieldHtml() {
+  return `${storyPhoto ? `<img class="story-photo" src="${escapeHtml(storyPhoto)}" alt="">` : ''}
+    <div class="edit-actions"><button type="button" class="btn small" data-action="story-photo">${storyPhoto ? 'Заменить фото' : 'Добавить фото'}</button>
+    ${storyPhoto ? '<button type="button" class="btn small danger" data-action="story-photo-remove">Убрать фото</button>' : ''}</div>`;
+}
+
+// ---------- Паспорт ----------
+
+const SEX = ['Кобель', 'Сука'];
+const MDR1 = ['Не проверяли', 'N/N — норма', 'N/m — носитель', 'm/m — мутация'];
+const HEALTH_SUGGEST = ['Комплексная прививка', 'Прививка от бешенства', 'Обработка от клещей и блох', 'Глистогонное', 'Осмотр у ветеринара', 'Взвешивание'];
+
+function petTitle() {
+  return DOG() === 'Батончик' ? 'Паспорт Батончика' : `Паспорт · ${escapeHtml(DOG())}`;
+}
+
+function renderPassport() {
+  const pet = S.pet || {};
+  const field = (label, value) => `<div><dt>${label}</dt><dd>${value ? escapeHtml(value) : '—'}</dd></div>`;
+  const age = ageText(pet.birth, S.day);
+  const next = upcoming(S.health);
+  const done = doneRecords(S.health);
+  const birth = pet.birth ? `${dayTitle(pet.birth, { day: 'numeric', month: 'long', year: 'numeric' })}${age ? ` · ${age}` : ''}` : '';
+  return `${pageHead({ eyebrow: pet.chip ? `Чип ${pet.chip}` : 'Паспорт', title: petTitle(), sub: 'Данные, прививки, обработки и напоминания — в одном месте.', plus: { action: 'health-add', label: 'Новая запись о здоровье' } })}
+    ${statusBanner()}
+    <section class="id-card">
+      <div class="id-top"><span>Паспорт собаки</span>${canWrite() ? '<button class="id-edit" data-action="pet-edit">Изменить</button>' : ''}</div>
+      <div class="id-body">
+        <button class="id-photo" data-action="photo-pick"${canWrite() ? '' : ' disabled'} aria-label="${S.photo ? 'Сменить фото' : 'Добавить фото'}">
+          ${S.photo ? `<img src="${escapeHtml(S.photo)}" alt="${escapeHtml(DOG())}">` : `${PAW_SVG}<span>Добавить фото</span>`}</button>
+        <div class="id-info">
+          <p class="id-label">Кличка</p>
+          <h2>${escapeHtml(DOG())}</h2>
+          <dl class="id-grid">${field('Порода', pet.breed)}${field('Дата рождения', birth)}${field('Пол', pet.sex)}${field('Чип', pet.chip)}${field('MDR1', pet.mdr1)}${field('Вес', pet.weight)}</dl>
+        </div>
+      </div>
+      ${!S.pet && canWrite() ? '<button class="btn wide id-fill" data-action="pet-edit">Заполнить паспорт</button>' : ''}
+    </section>
+    <section class="card">
+      <div class="card-head"><h2>Напоминания</h2></div>
+      ${next.length ? `<ul class="health-list">${next.map((r) => healthRowHtml(r, S.day)).join('')}</ul>`
+        : '<p class="muted">Запланированных событий нет. Нажмите «+», чтобы добавить прививку, обработку от клещей, глистогонное или визит к врачу.</p>'}
+    </section>
+    <section class="card">
+      <div class="card-head"><h2>История</h2></div>
+      ${done.length ? `<ul class="health-list">${done.map((r) => healthRowHtml(r, S.day)).join('')}</ul>`
+        : '<p class="muted">Здесь появится всё, что уже сделано: прививки, обработки, таблетки, визиты к врачу.</p>'}
+    </section>`;
+}
+
+function petSheet() {
+  const pet = S.pet || { name: 'Батончик', breed: 'Австралийская овчарка (аусси)', birth: '2026-05-29', sex: 'Кобель', chip: '', mdr1: '', weight: '' };
+  const opts = (list, value) => ['', ...list].map((v) => `<option value="${escapeHtml(v)}"${v === value ? ' selected' : ''}>${v ? escapeHtml(v) : '—'}</option>`).join('');
+  openSheet(`<form class="form"><h2>Паспорт</h2>
+    <label>Кличка<input name="name" maxlength="40" value="${escapeHtml(pet.name || '')}"></label>
+    <label>Порода<input name="breed" maxlength="60" value="${escapeHtml(pet.breed || '')}"></label>
+    <label>Дата рождения<input type="date" name="birth" value="${escapeHtml(pet.birth || '')}"></label>
+    <label>Пол<select name="sex">${opts(SEX, pet.sex)}</select></label>
+    <label>Номер чипа<input name="chip" maxlength="40" inputmode="numeric" value="${escapeHtml(pet.chip || '')}"></label>
+    <label>MDR1<select name="mdr1">${opts(MDR1.includes(pet.mdr1) || !pet.mdr1 ? MDR1 : [...MDR1, pet.mdr1], pet.mdr1)}</select></label>
+    <label>Вес<input name="weight" maxlength="20" placeholder="Например: 12,5 кг (29 октября)" value="${escapeHtml(pet.weight || '')}"></label>
+    ${S.photo ? '<button type="button" class="btn danger-outline wide" data-action="photo-remove">Убрать фото</button>' : ''}
+    <div class="form-actions"><button type="button" class="btn" data-action="sheet-close">Отмена</button><button class="btn primary">Сохранить</button></div>
+  </form>`, (fd) => {
+    const v = (k) => String(fd.get(k) || '').trim();
+    store.savePet({ name: v('name'), breed: v('breed'), birth: /^\d{4}-\d\d-\d\d$/.test(v('birth')) ? v('birth') : '', sex: v('sex'), chip: v('chip'), mdr1: v('mdr1'), weight: v('weight') });
+    toast('Паспорт сохранён.');
+  });
+}
+
+// Новая запись о здоровье или правка: что, вид, дата, сделано / запланировано, следующий раз
+function healthFormSheet(id) {
+  const r = (id && S.health.find((x) => x.id === id)) || { title: '', kind: 'vaccine', date: S.day, done: true, note: '' };
+  openSheet(`<form class="form health-form"><h2>${id ? 'Изменить запись' : 'Новая запись о здоровье'}</h2>
+    <label>Что<input name="title" maxlength="120" required list="health-suggest" value="${escapeHtml(r.title)}" placeholder="Например: обработка от клещей"></label>
+    <datalist id="health-suggest">${HEALTH_SUGGEST.map((s) => `<option value="${escapeHtml(s)}">`).join('')}</datalist>
+    <fieldset><legend>Вид</legend><div class="choices">${Object.entries(HEALTH_KINDS).map(([k, v]) =>
+      `<label class="choice"><input type="radio" name="kind" value="${k}"${k === r.kind ? ' checked' : ''}>${v.icon} ${v.label}</label>`).join('')}</div></fieldset>
+    <fieldset><legend>Статус</legend><div class="choices">
+      <label class="choice"><input type="radio" name="done" value="1"${r.done ? ' checked' : ''}>Уже сделано</label>
+      <label class="choice"><input type="radio" name="done" value="0"${r.done ? '' : ' checked'}>Запланировать</label></div></fieldset>
+    <label>Дата<input type="date" name="date" required value="${escapeHtml(r.date)}"></label>
+    <div class="next-field"${r.done ? '' : ' hidden'}>${nextFieldHtml(suggestNext(r, S.health, S.pet && S.pet.birth))}</div>
+    <label>Заметка <span class="muted">(необязательно)</span><textarea name="note" rows="2" maxlength="1000" placeholder="Препарат, доза, клиника">${escapeHtml(r.note)}</textarea></label>
+    <div class="form-actions"><button type="button" class="btn" data-action="sheet-close">Отмена</button><button class="btn primary">Сохранить</button></div>
+    ${id ? `<button type="button" class="btn danger-outline wide" data-action="health-delete" data-id="${id}">Удалить запись</button>` : ''}
+  </form>`, (fd) => {
+    const rec = {
+      title: String(fd.get('title') || '').trim(), kind: String(fd.get('kind') || 'other'),
+      date: String(fd.get('date') || S.day), done: fd.get('done') === '1', note: String(fd.get('note') || '').trim(),
+    };
+    if (!rec.title || !/^\d{4}-\d\d-\d\d$/.test(rec.date)) return;
+    store.saveHealth(id || null, rec);
+    const planned = rec.done ? planNext(rec, fd) : '';
+    toast(planned ? `Сохранено. Следующий раз — ${dayTitle(planned, { day: 'numeric', month: 'long' })}.` : 'Сохранено.');
+  });
+  const form = sheet.querySelector('.health-form');
+  const next = form.querySelector('select[name=next]');
+  next.addEventListener('change', () => { next.dataset.touched = '1'; });
+  form.addEventListener('change', () => {
+    const fd = new FormData(form);
+    form.querySelector('.next-field').hidden = fd.get('done') !== '1';
+    if (!next.dataset.touched) {
+      const rec = { id, title: String(fd.get('title') || ''), kind: String(fd.get('kind') || 'other'), date: String(fd.get('date') || S.day), done: true };
+      next.value = suggestNext(rec, S.health, S.pet && S.pet.birth);
+    }
+    watchNextDate(form);
+  });
+}
+
+// «Следующий раз» после выполненного: через месяц, 3 месяца, 12 недель, год или своя дата
+function nextFieldHtml(selected = '') {
+  return `<label>Следующий раз<select name="next">${NEXT_OPTIONS.map(([v, l]) => `<option value="${v}"${v === selected ? ' selected' : ''}>${l}</option>`).join('')}</select></label>
+    <label class="next-date" hidden>Дата следующего раза<input type="date" name="nextDate"></label>`;
+}
+function watchNextDate(form) {
+  const next = form.querySelector('select[name=next]');
+  if (next) form.querySelector('.next-date').hidden = next.value !== 'date';
+}
+
+// Запланировать следующий раз; возвращает дату или ''
+function planNext(rec, fd) {
+  const opt = String(fd.get('next') || '');
+  const date = opt === 'date' ? String(fd.get('nextDate') || '') : nextDate(rec.date, opt);
+  if (!/^\d{4}-\d\d-\d\d$/.test(date)) return '';
+  store.saveHealth(null, { title: rec.title, kind: rec.kind, date, done: false, note: rec.note });
+  return date;
+}
+
+// Запись о здоровье: подробности, «Сделано», календарь, правка
+function healthSheet(id) {
+  const r = S.health.find((x) => x.id === id);
+  if (!r) return;
+  const k = HEALTH_KINDS[r.kind] || HEALTH_KINDS.other;
+  const when = dayTitle(r.date, { day: 'numeric', month: 'long', year: 'numeric' });
+  openSheet(`<div class="form"><h2>${k.icon} ${escapeHtml(r.title)}</h2>
+    <p class="muted">${k.label} · ${r.done ? `сделано ${when}` : `${when} — ${dueText(r.date, S.day)}`}${r.updatedBy ? ` · записал(а) ${escapeHtml(r.updatedBy)}` : ''}</p>
+    ${r.note ? `<p>${inline(r.note)}</p>` : ''}
+    ${r.done ? '' : `<button type="button" class="btn primary wide" data-action="health-done" data-id="${r.id}">✓ Сделано</button>
+      <p class="muted small">Напоминание на телефоне — через календарь:</p>
+      <div class="edit-actions">
+        <a class="btn small" href="${escapeHtml(googleCalendarUrl(r, DOG()))}" target="_blank" rel="noopener">Google Календарь</a>
+        <button type="button" class="btn small" data-action="cal-ics" data-id="${r.id}">Календарь iPhone (.ics)</button>
+      </div>`}
+    <div class="form-actions"><button type="button" class="btn" data-action="sheet-close">Закрыть</button><button type="button" class="btn" data-action="health-form" data-id="${r.id}">Изменить</button></div>
+  </div>`, null);
+}
+
+// Отметить запланированное сделанным и сразу запланировать следующий раз
+function healthDoneSheet(id) {
+  const r = S.health.find((x) => x.id === id);
+  if (!r) return;
+  openSheet(`<form class="form"><h2>${escapeHtml(r.title)}</h2>
+    <label>Когда сделали<input type="date" name="date" required value="${S.day}"></label>
+    ${nextFieldHtml(suggestNext({ ...r, date: S.day }, S.health, S.pet && S.pet.birth))}
+    <div class="form-actions"><button type="button" class="btn" data-action="sheet-close">Отмена</button><button class="btn primary">Сохранить</button></div>
+  </form>`, (fd) => {
+    const date = String(fd.get('date') || S.day);
+    const rec = { ...r, date, done: true };
+    store.saveHealth(r.id, { title: rec.title, kind: rec.kind, date, done: true, note: rec.note });
+    const planned = planNext(rec, fd);
+    toast(planned ? `Отмечено. Следующий раз — ${dayTitle(planned, { day: 'numeric', month: 'long' })}.` : 'Отмечено.');
+  });
+  const form = sheet.querySelector('form');
+  form.addEventListener('change', () => watchNextDate(form));
+}
+
+// Фото Батончика: выбрать, сжать и сохранить
+async function choosePhoto() {
+  const file = await pickPhoto();
+  if (!file) return null;
+  try {
+    return await compressPhoto(file);
+  } catch (err) {
+    console.error(err);
+    toast('Не получилось открыть фото. Попробуйте другое.');
+    return null;
+  }
 }
 
 // ---------- Резервная копия ----------
@@ -1039,15 +1477,16 @@ function onHashChange() {
 }
 
 // Название страницы для кнопки «Назад»; для правки карточки — нет (туда не возвращаемся)
+const PAGE_TITLES = { today: 'Главная', day: 'День', k: 'Тренировки', g: 'Тренировки', pass: 'Паспорт', t: 'Советы', c: 'Каналы', d: 'Дневник', me: 'Настройки' };
+// Какая вкладка внизу подсвечена: игры живут во вкладке «Тренировки», Каналы — в «Советах»
+const TAB_OF = { today: 'today', day: 'day', k: 'k', g: 'k', pass: 'pass', t: 't', c: 't', d: 'd' };
+
 function pageTitle(hash) {
   const parts = hash.replace(/^#\/?/, '').split('/').filter(Boolean);
-  if (!parts.length || parts[0] === 'today') return 'Сегодня';
+  if (!parts.length) return 'Главная';
   if (parts[0] === 'edit') return null;
-  if (parts[0] === 'd') return 'Дневник';
-  if (parts[0] === 'me') return 'Настройки';
-  if (parts[0] === 'c') return parts[1] ? 'Назад' : 'Каналы';
-  if (TABS[parts[0]]) return parts[1] ? 'Назад' : TABS[parts[0]].title;
-  return null;
+  if (parts[1] && (TABS[parts[0]] || parts[0] === 'c')) return 'Назад';
+  return PAGE_TITLES[parts[0]] || null;
 }
 
 function render(force) {
@@ -1060,10 +1499,12 @@ function render(force) {
   let html;
   if (r.page === 'me') html = renderMe();
   else if (r.page === 'edit') html = renderEditor(r);
+  else if (r.page === 'day') html = renderDayPage();
+  else if (r.page === 'pass') html = renderPassport();
   else if (r.page === 'd') html = renderDiary();
-  else if (r.page === 'c') html = r.id ? renderNote(r.id) : renderNotes();
-  else if (TABS[r.tab]) html = r.id ? renderCard(r.tab, r.id) : renderCatalog(r.tab);
-  else html = renderToday();
+  else if (r.page === 'c') html = r.id ? renderNote(r.id) : renderNotesPage();
+  else if (TABS[r.tab]) html = r.id ? renderCard(r.tab, r.id) : (r.tab === 't' ? renderTipsPage() : renderTrainingsPage());
+  else html = renderHome();
   view.innerHTML = html;
 
   const routeKey = r.page + '/' + (r.tab || '') + '/' + (r.id || '');
@@ -1079,7 +1520,7 @@ function render(force) {
   }
   if (pendingScroll && (Math.abs(window.scrollY - pendingScroll.y) < 2 || Date.now() >= pendingScroll.until)) pendingScroll = null;
   document.querySelectorAll('.tabbar a').forEach((a) => {
-    const current = r.page === 'edit' ? r.tab : (TABS[r.tab] || r.page === 'me' || r.page === 'd' || r.page === 'c' ? r.page : 'today');
+    const current = r.page === 'edit' ? TAB_OF[r.tab] : (TAB_OF[r.page] || (r.page === 'me' ? 'me' : 'today'));
     const on = a.dataset.tab === current;
     a.classList.toggle('on', on);
     if (on) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
@@ -1114,32 +1555,34 @@ function closeSheet() {
   document.body.classList.remove('no-scroll');
 }
 
-function saveEvent(type, extra = {}, at = new Date(), day = dayKey(at)) {
+function saveEvent(type, extra = {}, at = new Date(), day = eventDayFor(at, type)) {
   const id = store.addEvent({ type, sub: '', text: '', ...extra, at, day });
   const t = EVENT_TYPES[type];
-  // Запись за вчера (сделали после полуночи) в сегодняшний журнал не попадает — обновляем историю
-  const past = day !== dayKey(new Date());
+  // «Встали утром» после полуночи, когда «Легли» не отметили, — это уже новый день
+  if (type === 'wake' && day === dayKey() && S.day < day) switchDay(day);
+  // Запись в прошлый день в сегодняшний журнал не попадает — обновляем историю
+  const past = day < S.day;
   if (past || type === 'wake') loadRecent(); // для ночного перерыва нужна вчерашняя запись «Легли»
-  toast(`Записано: ${t.label.toLowerCase()}${extra.sub ? ` — ${SUBS[extra.sub]}` : ''}, ${past ? 'вчера ' : ''}${fmtTime(at)}`, {
+  toast(`Записано: ${t.label.toLowerCase()}${extra.sub ? ` — ${SUBS[extra.sub]}` : ''}, ${past ? `${dayTitle(day, { day: 'numeric', month: 'long' })}, ` : ''}${fmtTime(at)}`, {
     label: 'Отменить', onClick: () => { if (id) store.deleteEvent(id); if (past) loadRecent(); },
   });
 }
 
-// Время, указанное в окне записи: сегодня, а если оно ещё не наступило — вчера (записали после полуночи)
-function pastTime(hm) {
+// Время, указанное в окне записи: сегодня, а если оно ещё не наступило — вчера (записали после полуночи).
+// День записи — по правилу «новый день после «Легли вечером»»
+function pastTime(hm, type) {
   const now = new Date();
-  const today = dayKey(now);
-  if (!/^\d\d:\d\d$/.test(hm)) return { at: now, day: today };
-  const at = moscowDate(today, hm);
-  if (at - now <= 5 * 60000) return { at, day: today };
-  const day = addDays(today, -1);
-  return { at: moscowDate(day, hm), day };
+  const cal = dayKey(now);
+  if (!/^\d\d:\d\d$/.test(hm)) return { at: now, day: eventDayFor(now, type) };
+  let at = moscowDate(cal, hm);
+  if (at - now > 5 * 60000) at = moscowDate(addDays(cal, -1), hm);
+  return { at, day: eventDayFor(at, type) };
 }
 
 function saveTrain(ref) {
   const at = new Date();
   const n = (todayTrains()[ref] || 0) + 1; // считаем до записи: хранилище может обновить журнал сразу
-  const id = store.addEvent({ type: 'train', card: ref, at, day: dayKey(at) });
+  const id = store.addEvent({ type: 'train', card: ref, at, day: S.day });
   const it = todayItems().find((f) => f.card === ref);
   toast(`${TRAIN.label}: ${cardName(ref)}${it ? ` — ${Math.min(n, 99)} из ${targetOf(it)}` : ''}`, {
     label: 'Отменить', onClick: () => { if (id) store.deleteEvent(id); },
@@ -1181,14 +1624,14 @@ function addEventFlow(type) {
 }
 
 // Подсказка в окне записи, если время ещё не наступило: запись уйдёт во вчерашний день
-function watchPastTime() {
+function watchPastTime(type) {
   const time = sheet.querySelector('input[name=time]');
   const when = sheet.querySelector('.ev-when');
   if (!time || !when) return;
   time.addEventListener('input', () => {
-    const { day } = pastTime(time.value);
-    when.hidden = day === dayKey(new Date());
-    when.textContent = when.hidden ? '' : `Запишется на вчера, ${dayTitle(day, { day: 'numeric', month: 'long' })}.`;
+    const { day } = pastTime(time.value, type);
+    when.hidden = day >= S.day;
+    when.textContent = when.hidden ? '' : `Запишется в прошлый день, ${dayTitle(day, { day: 'numeric', month: 'long' })}.`;
   });
 }
 
@@ -1208,10 +1651,10 @@ function eventFormSheet(type) {
     const text = String(fd.get('text') || '').trim();
     if (t.text && !text) return;
     const sub = t.subs && SUBS[fd.get('sub')] ? String(fd.get('sub')) : '';
-    const { at, day } = pastTime(String(fd.get('time') || ''));
+    const { at, day } = pastTime(String(fd.get('time') || ''), type);
     saveEvent(type, { sub, text }, at, day);
   });
-  watchPastTime();
+  watchPastTime(type);
   if (t.text) setTimeout(() => { const ta = sheet.querySelector('textarea'); if (ta) ta.focus(); }, 50);
 }
 
@@ -1221,7 +1664,7 @@ function editEvent(id) {
   const t = EVENT_TYPES[e.type] || { label: e.type, icon: '' };
   openSheet(`<form class="form"><h2>${t.icon} ${t.label}</h2>
     <label>Время <input type="time" name="time" required value="${fmtTime(e.at)}"></label>
-    ${e.day === dayKey(new Date()) ? '<p class="muted small ev-when" hidden></p>' : ''}
+    ${e.day === S.day ? '<p class="muted small ev-when" hidden></p>' : ''}
     ${t.subs ? `<label>Что было <select name="sub">${Object.entries(SUBS).map(([k, v]) => `<option value="${k}"${e.sub === k ? ' selected' : ''}>${v}</option>`).join('')}</select></label>` : ''}
     <label>${t.text ? 'Текст заметки' : 'Комментарий'} <textarea name="text" rows="3" maxlength="2000">${escapeHtml(e.text)}</textarea></label>
     <p class="muted small">Записал${e.name ? `: ${escapeHtml(e.name)}` : 'и'}</p>
@@ -1232,15 +1675,15 @@ function editEvent(id) {
     const hm = String(fd.get('time') || '');
     if (/^\d\d:\d\d$/.test(hm)) {
       // У сегодняшней записи время, которое ещё не наступило, — это вчера (например, «Легли» в 23:30, исправленное утром)
-      const when = e.day === dayKey(new Date()) ? pastTime(hm) : { at: moscowDate(e.day, hm), day: e.day };
+      const when = e.day === S.day ? pastTime(hm, e.type) : { at: moscowDate(e.day, hm), day: e.day };
       patch.at = when.at;
       if (when.day !== e.day) patch.day = when.day;
     }
     if (t.subs) patch.sub = String(fd.get('sub'));
     store.updateEvent(e.id, patch);
-    if (patch.day) { loadRecent(); toast(`Запись перенесена на вчера, ${fmtTime(patch.at)}.`); }
+    if (patch.day) { loadRecent(); toast(`Запись перенесена на ${dayTitle(patch.day, { day: 'numeric', month: 'long' })}, ${fmtTime(patch.at)}.`); }
   });
-  watchPastTime();
+  watchPastTime(e.type);
 }
 
 function move(list, id, dir) {
@@ -1309,7 +1752,59 @@ const actions = {
   },
   'idea-next': (el) => { S.ideaShift[el.dataset.kind] = (S.ideaShift[el.dataset.kind] || 0) + 1; render(); },
   // Журнал
-  'ev-add': (el) => addEventFlow(el.dataset.type),
+  'ev-add': (el) => { if (el.dataset.close) closeSheet(); addEventFlow(el.dataset.type); },
+  'ev-menu': () => evMenuSheet(),
+  'new-card-sheet': () => openSheet(`<div class="form"><h2>Добавить</h2>
+    <a class="pick big" href="#/edit/k/new" data-action="sheet-close-link">🎯 Новая тренировка</a>
+    <a class="pick big" href="#/edit/g/new" data-action="sheet-close-link">🎲 Новая игра</a>
+    <button type="button" class="pick big" data-action="tr-add">📅 Тренировка или игра только на сегодня</button>
+    <div class="form-actions"><button type="button" class="btn" data-action="sheet-close">Отмена</button></div></div>`, null),
+  'sheet-close-link': (el) => { closeSheet(); location.hash = el.getAttribute('href'); },
+  'new-tip': () => { location.hash = '#/edit/t/new'; },
+  'photo-pick': async () => {
+    if (!canWrite()) return;
+    const data = await choosePhoto();
+    if (data) { store.savePhoto(data); toast('Фото сохранено.'); }
+  },
+  'photo-remove': () => {
+    if (!confirm('Убрать фото?')) return;
+    closeSheet();
+    store.savePhoto('');
+  },
+  'pet-edit': () => petSheet(),
+  'health-add': () => healthFormSheet(null),
+  'health-edit': (el) => healthSheet(el.dataset.id),
+  'health-form': (el) => healthFormSheet(el.dataset.id),
+  'health-done': (el) => healthDoneSheet(el.dataset.id),
+  'health-delete': (el) => {
+    if (!confirm('Удалить запись?')) return;
+    closeSheet();
+    store.deleteHealth(el.dataset.id);
+  },
+  'cal-ics': (el) => {
+    const r = S.health.find((x) => x.id === el.dataset.id);
+    if (r) download('batonchik-napominanie.ics', icsText(r, DOG()), 'text/calendar');
+  },
+  'story-edit': (el) => storySheet(el.dataset.day || S.day),
+  'story-photo': async () => {
+    const data = await choosePhoto();
+    if (!data) return;
+    storyPhoto = data;
+    const box = sheet.querySelector('.story-photo-field');
+    if (box) box.innerHTML = storyPhotoFieldHtml();
+  },
+  'story-photo-remove': () => {
+    storyPhoto = '';
+    const box = sheet.querySelector('.story-photo-field');
+    if (box) box.innerHTML = storyPhotoFieldHtml();
+  },
+  'story-delete': (el) => {
+    if (!confirm('Удалить заметку о дне?')) return;
+    closeSheet();
+    delete S.stories[el.dataset.day];
+    store.saveStory(el.dataset.day, null);
+    render();
+  },
   'ev-sub': (el) => { closeSheet(); saveEvent(el.dataset.type, { sub: el.dataset.sub }); },
   'ev-edit': (el) => editEvent(el.dataset.id),
   'ev-delete': (el) => {
@@ -1458,19 +1953,19 @@ function hideToast() {
 
 // ---------- Запуск ----------
 
-function checkDay() {
-  const k = dayKey();
-  if (k !== S.day) {
-    S.day = k;
-    S.checks = {};
-    S.recent = [...S.recent, ...S.events];
-    S.events = [];
-    S.ideaShift = { game: 0, training: 0 };
-    S.tipShift = 0;
-    store.setDay(k);
-    render();
-  }
+function switchDay(k) {
+  if (k === S.day) return;
+  S.day = k;
+  S.checks = {};
+  S.recent = [...S.recent, ...S.events];
+  S.events = [];
+  S.ideaShift = { game: 0, training: 0 };
+  S.tipShift = 0;
+  store.setDay(k);
+  render();
 }
+
+function checkDay() { switchDay(appDay()); }
 
 applyTheme();
 window.addEventListener('hashchange', onHashChange);
@@ -1487,6 +1982,7 @@ document.addEventListener('visibilitychange', () => {
   if (canWrite() && Date.now() - recentAt > 60000) { recentAt = Date.now(); loadRecent(); }
 });
 setInterval(checkDay, 30000);
+setInterval(updateSince, 30000);
 updateNet();
 renderHeader();
 render();
