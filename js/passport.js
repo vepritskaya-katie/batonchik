@@ -43,6 +43,29 @@ export function nextDate(from, option) {
 
 export const daysBetween = (from, to) => Math.round((toUTC(to) - toUTC(from)) / 86400000);
 
+// Срок по виду записи. Глисты: до 6 месяцев — раз в месяц, потом — раз в 3 месяца
+function kindNext(kind, birth, date) {
+  if (kind === 'ticks') return '1m';
+  if (kind === 'vaccine') return '1y';
+  if (kind === 'worms') return birth && addMonths(birth, 6) > date ? '1m' : '3m';
+  return '';
+}
+
+// «Следующий раз» по умолчанию: как в прошлый раз (если это один из сроков в списке), иначе — по виду записи
+export function suggestNext(rec, records, birth) {
+  const same = (r) => r.done && r.id !== rec.id && r.kind === rec.kind
+    && String(r.title || '').trim().toLowerCase() === String(rec.title || '').trim().toLowerCase() && r.date < rec.date;
+  const prev = records.filter(same).sort((a, b) => (a.date < b.date ? 1 : -1))[0];
+  if (prev) {
+    const n = daysBetween(prev.date, rec.date);
+    if (n >= 26 && n <= 35) return '1m';
+    if (n >= 80 && n <= 87) return '12w';
+    if (n >= 88 && n <= 95) return '3m';
+    if (n >= 355 && n <= 375) return '1y';
+  }
+  return kindNext(rec.kind, birth, rec.date);
+}
+
 // «сегодня», «завтра», «через 3 дня», «просрочено на 2 дня»
 export function dueText(date, today) {
   const n = daysBetween(today, date);

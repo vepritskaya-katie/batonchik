@@ -7,7 +7,7 @@ import {
   EVENT_TYPES, SUBS, TRAIN, dayKey, fmtTime, fmtDate, addDays, moscowDate, dayStats, eventRow, todaySummary, nightLine, nightFor, plural, mondayOf, dayTitle,
   rhythmHtml, weekStatsHtml, dayFeedHtml,
 } from './diary.js';
-import { HEALTH_KINDS, NEXT_OPTIONS, nextDate, dueText, ageText, upcoming, doneRecords, googleCalendarUrl, icsText, healthRowHtml } from './passport.js';
+import { HEALTH_KINDS, NEXT_OPTIONS, nextDate, suggestNext, dueText, ageText, upcoming, doneRecords, googleCalendarUrl, icsText, healthRowHtml } from './passport.js';
 import { pickPhoto, compressPhoto } from './photo.js';
 import { pickIdeas } from './ideas.js';
 import { parseNotes, notesListHtml, noteHtml, noteMatches, countText } from './notes.js';
@@ -1261,7 +1261,7 @@ function healthFormSheet(id) {
       <label class="choice"><input type="radio" name="done" value="1"${r.done ? ' checked' : ''}>Уже сделано</label>
       <label class="choice"><input type="radio" name="done" value="0"${r.done ? '' : ' checked'}>Запланировать</label></div></fieldset>
     <label>Дата<input type="date" name="date" required value="${escapeHtml(r.date)}"></label>
-    <div class="next-field"${r.done ? '' : ' hidden'}>${nextFieldHtml()}</div>
+    <div class="next-field"${r.done ? '' : ' hidden'}>${nextFieldHtml(suggestNext(r, S.health, S.pet && S.pet.birth))}</div>
     <label>Заметка <span class="muted">(необязательно)</span><textarea name="note" rows="2" maxlength="1000" placeholder="Препарат, доза, клиника">${escapeHtml(r.note)}</textarea></label>
     <div class="form-actions"><button type="button" class="btn" data-action="sheet-close">Отмена</button><button class="btn primary">Сохранить</button></div>
     ${id ? `<button type="button" class="btn danger-outline wide" data-action="health-delete" data-id="${id}">Удалить запись</button>` : ''}
@@ -1276,15 +1276,22 @@ function healthFormSheet(id) {
     toast(planned ? `Сохранено. Следующий раз — ${dayTitle(planned, { day: 'numeric', month: 'long' })}.` : 'Сохранено.');
   });
   const form = sheet.querySelector('.health-form');
+  const next = form.querySelector('select[name=next]');
+  next.addEventListener('change', () => { next.dataset.touched = '1'; });
   form.addEventListener('change', () => {
-    form.querySelector('.next-field').hidden = new FormData(form).get('done') !== '1';
+    const fd = new FormData(form);
+    form.querySelector('.next-field').hidden = fd.get('done') !== '1';
+    if (!next.dataset.touched) {
+      const rec = { id, title: String(fd.get('title') || ''), kind: String(fd.get('kind') || 'other'), date: String(fd.get('date') || S.day), done: true };
+      next.value = suggestNext(rec, S.health, S.pet && S.pet.birth);
+    }
     watchNextDate(form);
   });
 }
 
 // «Следующий раз» после выполненного: через месяц, 3 месяца, 12 недель, год или своя дата
-function nextFieldHtml() {
-  return `<label>Следующий раз<select name="next">${NEXT_OPTIONS.map(([v, l]) => `<option value="${v}">${l}</option>`).join('')}</select></label>
+function nextFieldHtml(selected = '') {
+  return `<label>Следующий раз<select name="next">${NEXT_OPTIONS.map(([v, l]) => `<option value="${v}"${v === selected ? ' selected' : ''}>${l}</option>`).join('')}</select></label>
     <label class="next-date" hidden>Дата следующего раза<input type="date" name="nextDate"></label>`;
 }
 function watchNextDate(form) {
@@ -1326,7 +1333,7 @@ function healthDoneSheet(id) {
   if (!r) return;
   openSheet(`<form class="form"><h2>${escapeHtml(r.title)}</h2>
     <label>Когда сделали<input type="date" name="date" required value="${S.day}"></label>
-    ${nextFieldHtml()}
+    ${nextFieldHtml(suggestNext({ ...r, date: S.day }, S.health, S.pet && S.pet.birth))}
     <div class="form-actions"><button type="button" class="btn" data-action="sheet-close">Отмена</button><button class="btn primary">Сохранить</button></div>
   </form>`, (fd) => {
     const date = String(fd.get('date') || S.day);
