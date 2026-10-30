@@ -5,17 +5,18 @@ import { parseBlocks, renderBlocks, inline, escapeHtml, slug, stripComments } fr
 
 // Рубрики в порядке показа; key — часть адреса (#/lib/a, #/lib/qa …), read — у карточек есть «Прочитано»
 export const RUBRICS = [
+  { key: 'vet', title: 'Срочно к ветеринару', icon: '🚑', urgent: true, sub: 'Когда нельзя ждать' },
   { key: 'a', title: 'Статьи', icon: '📖', read: true, sub: 'Почему это работает' },
   { key: 'qa', title: 'Вопрос — ответ', icon: '❓', read: true, sub: 'Короткие ответы' },
   { key: 'myths', title: 'Мифы и факты', icon: '🔍', read: true, sub: 'Что устарело' },
   { key: 'ages', title: 'Календарь взросления', icon: '🌱', sub: 'Этапы по возрасту' },
   { key: 'body', title: 'Язык тела', icon: '🐾', sub: 'Шпаргалка' },
   { key: 'dict', title: 'Словарь', icon: '🔤', sub: 'Термины' },
-  { key: 'quiz', title: 'Проверь себя', icon: '✏️', sub: 'Тест из 15 вопросов' },
+  { key: 'quiz', title: 'Проверь себя', icon: '✏️', sub: 'Тесты' },
   { key: 'books', title: 'Что почитать', icon: '📚', sub: 'Книги и сайты' },
 ];
 const SECTION_KEY = {
-  'Библиотека': 'intro', 'Статьи': 'a', 'Вопрос — ответ': 'qa', 'Мифы и факты': 'myths', 'Календарь взросления': 'ages',
+  'Библиотека': 'intro', 'Срочно к ветеринару': 'vet', 'Статьи': 'a', 'Вопрос — ответ': 'qa', 'Мифы и факты': 'myths', 'Календарь взросления': 'ages',
   'Язык тела': 'body', 'Словарь': 'dict', 'Проверь себя': 'quiz', 'Что почитать': 'books', 'Факт дня': 'facts',
 };
 const META_RE = /^\*\*(Время чтения|Когда актуально):\*\*\s*(.*)$/;
@@ -53,6 +54,19 @@ function ageRange(title) {
   return { from: +m[1] * k, to: +m[2] * k };
 }
 
+// «Проверь себя»: ## Тест N, внутри ### Вопрос N
+function parseQuizzes(lines) {
+  const tests = [];
+  let cur = null;
+  for (const line of lines) {
+    const h = line.match(/^##\s+(.*?)\s*$/);
+    if (h) { cur = { title: h[1], lines: [] }; tests.push(cur); continue; }
+    if (!cur) { cur = { title: 'Тест', lines: [] }; tests.push(cur); }
+    cur.lines.push(line);
+  }
+  return tests.map((t, i) => ({ id: `t${i + 1}`, title: t.title, qs: parseQuiz(t.lines) })).filter((t) => t.qs.length);
+}
+
 function parseQuiz(lines) {
   const qs = [];
   let q = null;
@@ -86,9 +100,9 @@ export function parseLibrary(source) {
     if (cur) sections[cur].push(line);
   }
   const lib = { intro: parseBlocks(splitLabels(sections.intro || []).join('\n')) };
-  for (const key of ['a', 'qa', 'myths', 'ages', 'body', 'books']) lib[key] = splitCards(sections[key] || []);
+  for (const key of ['vet', 'a', 'qa', 'myths', 'ages', 'body', 'books']) lib[key] = splitCards(sections[key] || []);
   lib.ages.forEach((s) => { s.range = ageRange(s.title); const [label, dates] = s.title.split(' · '); s.label = label; s.dates = dates || ''; });
-  lib.quiz = parseQuiz(sections.quiz || []);
+  lib.quizzes = parseQuizzes(sections.quiz || []);
   lib.dict = parseDict(sections.dict || []);
   lib.facts = (sections.facts || []).map((l) => l.match(/^\s*\d+[.)]\s+(.*)$/)).filter(Boolean).map((m) => m[1]);
   return lib;
@@ -166,20 +180,20 @@ export function booksHtml(lib) {
 }
 
 // Варианты в случайном порядке для каждой попытки — чтобы правильный не угадывался по месту
-export function quizOrder(lib) {
-  return lib.quiz.map((q) => q.options.map((_, k) => k).sort(() => Math.random() - 0.5));
+export function quizOrder(test) {
+  return test.qs.map((q) => q.options.map((_, k) => k).sort(() => Math.random() - 0.5));
 }
 
-// Тест: state = { i, picked, score, done, order }
-export function quizHtml(lib, state, best) {
-  const total = lib.quiz.length;
+// Тест: state = { test, i, picked, score, done, order }
+export function quizHtml(test, state, best) {
+  const total = test.qs.length;
   if (state.done) {
     return `<section class="card quiz-result"><p class="eyebrow">Результат</p>
       <p class="quiz-score">${state.score}<small> из ${total}</small></p>
       <p class="muted">${best != null ? `Лучший результат — ${best} из ${total}.` : ''}</p>
       <button class="btn primary wide" data-action="quiz-restart">Пройти ещё раз</button></section>`;
   }
-  const q = lib.quiz[state.i];
+  const q = test.qs[state.i];
   const answered = state.picked != null;
   const order = (state.order && state.order[state.i]) || q.options.map((_, k) => k);
   const opts = order.map((k) => {
@@ -189,7 +203,7 @@ export function quizHtml(lib, state, best) {
   }).join('');
   const verdict = answered ? (state.picked === q.answer ? '<p class="quiz-verdict right">Верно</p>' : '<p class="quiz-verdict wrong">Не совсем</p>') : '';
   return `<section class="card quiz">
-    <div class="quiz-top"><span class="eyebrow">Вопрос ${state.i + 1} из ${total}</span><span class="muted small">верно: ${state.score}</span></div>
+    <div class="quiz-top"><span class="eyebrow">${escapeHtml(test.title)} · вопрос ${state.i + 1} из ${total}</span><span class="muted small">верно: ${state.score}</span></div>
     <div class="quiz-track"><span style="width:${Math.round((state.i / total) * 100)}%"></span></div>
     <p class="quiz-q">${inline(q.text)}</p>
     <div class="quiz-opts">${opts}</div>

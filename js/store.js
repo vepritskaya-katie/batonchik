@@ -23,7 +23,7 @@ const newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2
 
 // ---------- Только этот телефон ----------
 
-function localStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onPet = () => {}, onPhoto = () => {}, onHealth = () => {}, onGrowth = () => {}, onReads = () => {} }) {
+function localStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onPet = () => {}, onPhoto = () => {}, onHealth = () => {}, onGrowth = () => {}, onReads = () => {}, onVet = () => {}, onWeeks = () => {} }) {
   let day = null;
   const state = { mode: 'local', status: 'ready', user: { name: '' } };
   const mark = () => ({ uid: 'local', name: '', at: new Date().toISOString() });
@@ -44,7 +44,9 @@ function localStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onPet 
       onPhoto(read('bt.photo', ''));
       onHealth(Object.entries(read('bt.health', {})).map(([id, r]) => ({ id, ...r })));
       onGrowth(Object.entries(read('bt.growth', {})).map(([id, r]) => ({ id, ...r })));
-      onReads(read('bt.reads', { items: {}, quizBest: null }));
+      onReads(read('bt.reads', { items: {}, quiz: {} }));
+      onVet(read('bt.vet', null));
+      onWeeks(Object.entries(read('bt.weeks', {})).map(([id, w]) => ({ id, ...w })));
     },
     setDay(key) {
       day = key;
@@ -107,6 +109,14 @@ function localStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onPet 
     // Паспорт и дневник
     savePet(profile) { write('bt.pet', profile); onPet(profile); },
     savePhoto(data) { write('bt.photo', data || ''); onPhoto(data || ''); },
+    saveVet(v) { write('bt.vet', v); onVet(v); },
+    // «Неделя Батончика»: ответы за воскресенье day
+    saveWeek(day, w) {
+      const all = read('bt.weeks', {});
+      all[day] = { ...w };
+      write('bt.weeks', all);
+      onWeeks(Object.entries(all).map(([id, x]) => ({ id, ...x })));
+    },
     saveHealth(id, rec) {
       const all = read('bt.health', {});
       const key = id || newId();
@@ -136,14 +146,14 @@ function localStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onPet 
     },
     // Библиотека: что прочитано и лучший результат теста — у каждого свои
     setRead(key, on) {
-      const r = read('bt.reads', { items: {}, quizBest: null });
+      const r = read('bt.reads', { items: {}, quiz: {} });
       if (on) r.items[key] = true; else delete r.items[key];
       write('bt.reads', r);
       onReads(r);
     },
-    saveQuizBest(n) {
-      const r = read('bt.reads', { items: {}, quizBest: null });
-      r.quizBest = n;
+    saveQuizBest(test, n) {
+      const r = read('bt.reads', { items: {}, quiz: {} });
+      r.quiz = { ...(r.quiz || {}), [test]: n };
       write('bt.reads', r);
       onReads(r);
     },
@@ -161,7 +171,7 @@ function localStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onPet 
 
 // ---------- Firebase ----------
 
-function firebaseStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onError, onPet = () => {}, onPhoto = () => {}, onHealth = () => {}, onGrowth = () => {}, onReads = () => {} }, firebaseConfig) {
+function firebaseStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onError, onPet = () => {}, onPhoto = () => {}, onHealth = () => {}, onGrowth = () => {}, onReads = () => {}, onVet = () => {}, onWeeks = () => {} }, firebaseConfig) {
   const state = { mode: 'firebase', status: 'loading', user: null, message: '' };
   let fb = null; // модули SDK
   let db = null;
@@ -220,13 +230,20 @@ function firebaseStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onE
       onCards(cards);
     }, fail));
     unsubs.push(onSnapshot(doc(db, 'pet', 'profile'), (snap) => { onPet(snap.exists() ? plainPet(snap.data()) : null); }, fail));
+    unsubs.push(onSnapshot(collection(db, 'weeks'), (snap) => {
+      onWeeks(snap.docs.map((d) => { const v = d.data(); return { id: d.id, joy: !!v.joy, choice: !!v.choice, sleep: !!v.sleep, ribs: v.ribs || '', waist: v.waist || '', notes: v.notes || '', updatedBy: v.updatedBy || '' }; }));
+    }, fail));
+    unsubs.push(onSnapshot(doc(db, 'pet', 'vet'), (snap) => {
+      const v = snap.exists() ? snap.data() : null;
+      onVet(v && Object.fromEntries(VET_FIELDS.map((k) => [k, String(v[k] || '')])));
+    }, fail));
     unsubs.push(onSnapshot(doc(db, 'pet', 'photo'), (snap) => { onPhoto(snap.exists() ? String(snap.data().data || '') : ''); }, fail));
     unsubs.push(onSnapshot(collection(db, 'health'), (snap) => {
       onHealth(snap.docs.map((d) => { const v = d.data(); return { id: d.id, title: v.title, kind: v.kind, date: v.date, done: !!v.done, note: v.note || '', updatedBy: v.updatedBy || '' }; }));
     }, fail));
     unsubs.push(onSnapshot(doc(db, 'reads', state.user.uid), (snap) => {
       const v = snap.exists() ? snap.data() : {};
-      onReads({ items: v.items || {}, quizBest: typeof v.quizBest === 'number' ? v.quizBest : null });
+      onReads({ items: v.items || {}, quiz: v.quiz || {} });
     }, fail));
     unsubs.push(onSnapshot(collection(db, 'growth'), (snap) => {
       onGrowth(snap.docs.map((d) => { const v = d.data(); return { id: d.id, date: v.date, weight: v.weight || 0, height: v.height || 0 }; }));
@@ -306,7 +323,9 @@ function firebaseStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onE
           onPhoto('');
           onHealth([]);
           onGrowth([]);
-          onReads({ items: {}, quizBest: null });
+          onReads({ items: {}, quiz: {} });
+          onVet(null);
+          onWeeks([]);
           return emit({ status: 'signed-out', user: null });
         }
         checkAccess(user);
@@ -499,10 +518,26 @@ function firebaseStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onE
       const { doc, setDoc, serverTimestamp, deleteField } = fb.fs;
       setDoc(doc(db, 'reads', state.user.uid), { items: { [key]: on ? true : deleteField() }, updatedAt: serverTimestamp() }, { merge: true }).catch(fail);
     },
-    saveQuizBest(n) {
+    saveQuizBest(test, n) {
       if (!ready()) return;
       const { doc, setDoc, serverTimestamp } = fb.fs;
-      setDoc(doc(db, 'reads', state.user.uid), { quizBest: n, updatedAt: serverTimestamp() }, { merge: true }).catch(fail);
+      setDoc(doc(db, 'reads', state.user.uid), { quiz: { [test]: n }, updatedAt: serverTimestamp() }, { merge: true }).catch(fail);
+    },
+    // «Неделя Батончика»: weeks/{воскресенье} — вопросы о благополучии, фигура, заметки (вес — в growth)
+    saveWeek(day, w) {
+      if (!ready()) return;
+      const { doc, setDoc, serverTimestamp } = fb.fs;
+      setDoc(doc(db, 'weeks', day), {
+        joy: !!w.joy, choice: !!w.choice, sleep: !!w.sleep, ribs: w.ribs || '', waist: w.waist || '', notes: w.notes || '',
+        updatedAt: serverTimestamp(), updatedBy: state.user.name,
+      }).catch(fail);
+    },
+    // «Срочно к ветеринару»: телефоны клиники и ветеринара — общие для двоих
+    saveVet(v) {
+      if (!ready()) return;
+      const { doc, setDoc, serverTimestamp } = fb.fs;
+      const data = Object.fromEntries(VET_FIELDS.map((k) => [k, String(v[k] || '')]));
+      setDoc(doc(db, 'pet', 'vet'), { ...data, updatedAt: serverTimestamp(), updatedBy: state.user.name }).catch(fail);
     },
 
     // ---------- Заметки о днях (дневник) ----------
@@ -528,6 +563,8 @@ function firebaseStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onE
 
 // Карточка собаки: только известные поля, строками
 const PET_FIELDS = ['name', 'breed', 'birth', 'sex', 'chip', 'mdr1', 'weight'];
+const VET_FIELDS = ['clinicName', 'clinicAddress', 'clinicPhone', 'vetName', 'vetPhone'];
+
 function plainPet(v) {
   return Object.fromEntries(PET_FIELDS.map((k) => [k, typeof v[k] === 'string' ? v[k] : '']));
 }

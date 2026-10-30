@@ -123,6 +123,13 @@ service cloud.firestore {
           && str(request.resource.data, 'weight', 20)
           && request.resource.data.updatedAt == request.time
           && request.resource.data.updatedBy is string && request.resource.data.updatedBy.size() <= 40)
+        || (doc == 'vet'
+          && request.resource.data.keys().hasOnly(['clinicName', 'clinicAddress', 'clinicPhone', 'vetName', 'vetPhone', 'updatedAt', 'updatedBy'])
+          && str(request.resource.data, 'clinicName', 80) && str(request.resource.data, 'clinicAddress', 160)
+          && str(request.resource.data, 'clinicPhone', 30) && str(request.resource.data, 'vetName', 80)
+          && str(request.resource.data, 'vetPhone', 30)
+          && request.resource.data.updatedAt == request.time
+          && request.resource.data.updatedBy is string && request.resource.data.updatedBy.size() <= 40)
         || (doc == 'photo'
           && request.resource.data.keys().hasOnly(['data', 'updatedAt', 'updatedBy'])
           && request.resource.data.data is string && request.resource.data.data.size() <= 900000
@@ -162,14 +169,28 @@ service cloud.firestore {
       allow delete: if isAllowed();
     }
 
-    // Библиотека: что прочитано и лучший результат теста — у каждого свой документ, чужой не виден
+    // Библиотека: что прочитано и лучшие результаты тестов — у каждого свой документ, чужой не виден
     match /reads/{uid} {
       allow read, delete: if isAllowed() && request.auth.uid == uid;
       allow create, update: if isAllowed() && request.auth.uid == uid
-        && request.resource.data.keys().hasOnly(['items', 'quizBest', 'updatedAt'])
+        && request.resource.data.keys().hasOnly(['items', 'quiz', 'updatedAt'])
         && (!('items' in request.resource.data) || (request.resource.data.items is map && request.resource.data.items.size() <= 500))
-        && (!('quizBest' in request.resource.data) || (request.resource.data.quizBest is int && request.resource.data.quizBest >= 0 && request.resource.data.quizBest <= 100))
+        && (!('quiz' in request.resource.data) || (request.resource.data.quiz is map && request.resource.data.quiz.size() <= 20))
         && request.resource.data.updatedAt == request.time;
+    }
+
+    // «Неделя Батончика»: ответы за воскресенье — три вопроса о благополучии, фигура, заметки
+    match /weeks/{day} {
+      allow read: if isAllowed();
+      allow create, update: if isAllowed()
+        && day.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+        && request.resource.data.keys().hasOnly(['joy', 'choice', 'sleep', 'ribs', 'waist', 'notes', 'updatedAt', 'updatedBy'])
+        && request.resource.data.joy is bool && request.resource.data.choice is bool && request.resource.data.sleep is bool
+        && request.resource.data.ribs in ['', 'yes', 'no'] && request.resource.data.waist in ['', 'yes', 'no']
+        && request.resource.data.notes is string && request.resource.data.notes.size() <= 2000
+        && request.resource.data.updatedAt == request.time
+        && request.resource.data.updatedBy is string && request.resource.data.updatedBy.size() <= 40;
+      allow delete: if isAllowed();
     }
 
     // Дневник: заметка о дне (заголовок, текст и необязательное фото), один документ на дату

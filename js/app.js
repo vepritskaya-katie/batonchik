@@ -86,8 +86,10 @@ const S = {
   health: [],         // паспорт: прививки, обработки, таблетки, врач — { id, title, kind, date, done, note }
   growth: [],         // рост и вес: { id, date, weight (кг), height (см) }
   lib: null,          // Библиотека (content/biblioteka.md)
-  reads: { items: {}, quizBest: null }, // что прочитано в Библиотеке и лучший результат теста — у каждого свои
-  quiz: { i: 0, picked: null, score: 0, done: false },
+  reads: { items: {}, quiz: {} }, // что прочитано в Библиотеке и лучшие результаты тестов — у каждого свои
+  quiz: { test: '', i: 0, picked: null, score: 0, done: false, order: null },
+  vet: null,          // «Срочно к ветеринару»: круглосуточная клиника и наш ветеринар
+  weeks: [],          // «Неделя Батончика»: { id: воскресенье, joy, choice, sleep, ribs, waist, notes }
   factShift: 0,       // «Факт дня» на главной: нажатие — следующий
   stories: {},        // дневник: заметки о днях { 'ГГГГ-ММ-ДД': { title, text, photo } } за загруженные дни
 };
@@ -153,7 +155,9 @@ const store = createStore({
   onPhoto(data) { S.photo = data || ''; render(); },
   onHealth(list) { S.health = list || []; render(); },
   onGrowth(list) { S.growth = list || []; render(); },
-  onReads(r) { S.reads = r || { items: {}, quizBest: null }; render(); },
+  onReads(r) { S.reads = r || { items: {}, quiz: {} }; render(); },
+  onVet(v) { S.vet = v; render(); },
+  onWeeks(list) { S.weeks = list || []; render(); },
   onError(message) { toast(message); },
 }, firebaseConfig);
 
@@ -888,9 +892,11 @@ function renderDayPage() {
   const days = diaryDays();
   return `${pageHead({ eyebrow: cap(dayTitle(S.day)), title: 'День', sub: 'Всё, что отметили за день. Новый день начнётся после «Легли вечером».', plus: { action: 'ev-menu', label: 'Новая запись' } })}
     ${statusBanner()}
+    ${weekCardHtml()}
     ${journalHtml()}
     ${rhythmHtml(st, { trainsDone: p.done, trainsTotal: p.total })}
-    ${canWrite() ? weekStatsHtml({ days, prevWeek: days.slice(7, 14), loading: S.diary.loading || !S.diary.from }) : ''}`;
+    ${canWrite() ? weekStatsHtml({ days, prevWeek: days.slice(7, 14), loading: S.diary.loading || !S.diary.from }) : ''}
+    <a class="next-link weeks-link" href="#/weeks"><span class="muted small">По воскресеньям</span><strong>Неделя Батончика — история ›</strong></a>`;
 }
 
 // ---------- Тренировки (с играми) ----------
@@ -914,7 +920,7 @@ function renderTrainingsPage() {
     ${t.error ? '<p class="empty">Не удалось загрузить план. Проверьте интернет.</p>' : ''}
     ${ideasHtml()}
     ${daySectionsHtml()}
-    <h2 class="lib-title">Библиотека</h2>
+    <h2 class="lib-title">Все тренировки и игры</h2>
     ${catalogBody('k')}
     ${catalogBody('g', { showTitle: true })}`;
 }
@@ -929,15 +935,90 @@ const TIPS_SUB = 'Почему это работает, что делать и �
 
 function renderTipsPage() {
   return `${pageHead({ title: 'Советы', sub: TIPS_SUB, plus: { action: 'new-tip', label: 'Новый совет' } })}
+    ${urgentBtn()}
     ${tipsSwitch('t')}
     ${catalogBody('t')}`;
 }
 
 function renderNotesPage() {
-  const head = `${pageHead({ title: 'Советы', sub: TIPS_SUB })}${tipsSwitch('c')}`;
+  const head = `${pageHead({ title: 'Советы', sub: TIPS_SUB })}${urgentBtn()}${tipsSwitch('c')}`;
   if (!S.notes) return `${head}<p class="muted">Загружаем…</p>`;
   if (S.notes.error) return `${head}<div class="banner warn">Не удалось загрузить заметки. Проверьте интернет.</div>`;
   return head + notesListHtml(S.notes, S.notesFilter);
+}
+
+// ---------- Неделя Батончика ----------
+
+const WEEK_QS = [
+  ['joy', 'Было что-то радостное (игра, поиск, новое место, друг)?'],
+  ['choice', 'Было что-то, что он выбирал сам (маршрут, игрушку, с кем общаться)?'],
+  ['sleep', 'Хватало тихого сна?'],
+];
+const FIGURE = [['ribs', 'Рёбра прощупываются легко'], ['waist', 'Сверху видна талия']];
+const isSunday = (key) => new Date(`${key}T00:00:00Z`).getUTCDay() === 0;
+const lastSunday = (key) => addDays(key, -new Date(`${key}T00:00:00Z`).getUTCDay());
+const weekOf = (day) => S.weeks.find((w) => w.id === day);
+const weightOn = (day) => { const g = S.growth.find((x) => x.date === day && x.weight); return g ? g.weight : 0; };
+
+function weekSummaryHtml(w, day) {
+  const yes = WEEK_QS.filter(([k]) => w[k]).length;
+  const fig = FIGURE.map(([k, label]) => (w[k] ? `${label.toLowerCase()}: ${w[k] === 'yes' ? 'да' : 'нет'}` : '')).filter(Boolean).join(' · ');
+  const kg = weightOn(day);
+  return `<p class="week-line"><strong>${yes} из 3</strong> «да» о благополучии${kg ? ` · вес ${fmtNum(kg)} кг` : ''}</p>
+    ${fig ? `<p class="muted small">${escapeHtml(cap(fig))}</p>` : ''}${w.notes ? `<p class="week-notes">${inline(w.notes)}</p>` : ''}`;
+}
+
+// Карточка на «Дне» — только по воскресеньям
+function weekCardHtml() {
+  if (!isSunday(S.day)) return '';
+  const w = weekOf(S.day);
+  const can = canWrite();
+  return `<section class="card week-card-sun">
+    <div class="card-head"><h2>Неделя Батончика</h2><a class="text-link" href="#/weeks">История ›</a></div>
+    ${w ? weekSummaryHtml(w, S.day) : '<p class="muted">Раз в неделю — три вопроса о благополучии, вес и фигура. Ответы сохранятся с датой.</p>'}
+    ${can ? `<button class="btn${w ? '' : ' primary'} wide" data-action="week-edit" data-day="${S.day}">${w ? 'Изменить' : 'Заполнить'}</button>` : ''}
+  </section>`;
+}
+
+function weekSheet(day) {
+  const w = weekOf(day) || {};
+  const kg = weightOn(day);
+  const yn = (k) => `<div class="choices">${[['yes', 'Да'], ['no', 'Нет']].map(([v, l]) => `<label class="choice"><input type="radio" name="${k}" value="${v}"${w[k] === v ? ' checked' : ''}>${l}</label>`).join('')}</div>`;
+  openSheet(`<form class="form"><h2>Неделя Батончика</h2><p class="muted">${escapeHtml(cap(dayTitle(day)))}</p>
+    <fieldset><legend>Благополучие</legend>${WEEK_QS.map(([k, q]) => `<label class="check-row"><input type="checkbox" name="${k}"${w[k] ? ' checked' : ''}>${q}</label>`).join('')}</fieldset>
+    <label>Вес, кг <span class="muted">(попадёт в «Рост и вес»)</span><input name="weight" inputmode="decimal" autocomplete="off" placeholder="Например: 13,3" value="${kg ? fmtNum(kg) : ''}"></label>
+    ${FIGURE.map(([k, label]) => `<fieldset><legend>${label}</legend>${yn(k)}</fieldset>`).join('')}
+    <label>Заметки <textarea name="notes" rows="3" maxlength="2000" placeholder="Что получилось на этой неделе, что было трудно, что пробуем дальше">${escapeHtml(w.notes || '')}</textarea></label>
+    <div class="form-actions"><button type="button" class="btn" data-action="sheet-close">Отмена</button><button class="btn primary">Сохранить</button></div>
+  </form>`, (fd) => {
+    const rec = { joy: fd.get('joy') === 'on', choice: fd.get('choice') === 'on', sleep: fd.get('sleep') === 'on',
+      ribs: String(fd.get('ribs') || ''), waist: String(fd.get('waist') || ''), notes: String(fd.get('notes') || '').trim() };
+    store.saveWeek(day, rec);
+    const weight = parseNum(fd.get('weight'));
+    if (weight && weight <= 150 && weight !== kg) {
+      const g = S.growth.find((x) => x.date === day);
+      store.saveGrowth(g ? g.id : null, { date: day, weight, height: g ? g.height || 0 : 0 });
+    }
+    toast('Неделя записана.');
+  });
+}
+
+function renderWeeks() {
+  const back = `<a class="back" href="#/day">${BACK_SVG}День</a>`;
+  const list = [...S.weeks].sort((a, b) => (a.id < b.id ? 1 : -1));
+  const pts = series(S.growth, 'weight');
+  const sun = lastSunday(S.day);
+  return `${back}${pageHead({ eyebrow: 'По воскресеньям', title: 'Неделя Батончика', sub: 'Что было радостного, выбирал ли он сам, хватало ли сна — и как меняются вес и фигура.' })}
+    ${canWrite() ? `<button class="btn${weekOf(sun) ? '' : ' primary'} wide" data-action="week-edit" data-day="${sun}">${weekOf(sun) ? 'Изменить' : 'Заполнить'} за ${dayTitle(sun, { day: 'numeric', month: 'long' })}</button>` : ''}
+    ${pts.length ? `<section class="growth-card weeks-weight"><p class="eyebrow">Вес</p>
+      <div class="growth-now"><strong>${fmtNum(pts[pts.length - 1].value)}<small>кг</small></strong><span>${escapeHtml(deltaText(pts, 'кг'))}</span></div>
+      <figure class="growth-chart">${lineChartSvg(pts, { unit: 'кг' })}</figure></section>` : ''}
+    ${list.length ? `<section class="card"><div class="card-head"><h2>Все недели</h2></div><ul class="weeks-list">${list.map((w) => `<li>
+      <p class="week-date">${escapeHtml(cap(dayTitle(w.id, { day: 'numeric', month: 'long', year: 'numeric' })))}</p>
+      <p class="week-qs">${WEEK_QS.map(([k]) => `<span class="${w[k] ? 'yes' : 'no'}">${w[k] ? '✓' : '—'}</span>`).join('')}</p>
+      ${weekSummaryHtml(w, w.id)}
+      ${canWrite() ? `<button class="text-link" data-action="week-edit" data-day="${w.id}">Изменить</button>` : ''}</li>`).join('')}</ul></section>`
+      : '<p class="empty">Записей пока нет. Первая карточка появится в воскресенье на вкладке «День».</p>'}`;
 }
 
 // ---------- Библиотека ----------
@@ -951,23 +1032,27 @@ function rubricNote(key) {
   if (r.read) { const c = readCount(lib, key, S.reads.items); return c.done ? `прочитано ${c.done} из ${c.total}` : `${c.total} ${key === 'a' ? plural(c.total, 'статья', 'статьи', 'статей') : key === 'qa' ? plural(c.total, 'вопрос', 'вопроса', 'вопросов') : plural(c.total, 'миф', 'мифа', 'мифов')}`; }
   if (key === 'ages') { const m = ageMonths(S.pet && S.pet.birth, S.day); const now = m != null && lib.ages.find((s) => s.range && m >= s.range.from && m < s.range.to); return now ? `сейчас: ${now.label}` : r.sub; }
   if (key === 'dict') return `${lib.dict.length} ${plural(lib.dict.length, 'термин', 'термина', 'терминов')}`;
-  if (key === 'quiz') return S.reads.quizBest != null ? `лучший результат: ${S.reads.quizBest} из ${lib.quiz.length}` : `${lib.quiz.length} вопросов`;
+  if (key === 'quiz') return `${lib.quizzes.length} ${plural(lib.quizzes.length, 'тест', 'теста', 'тестов')}, пройдено ${lib.quizzes.filter((t) => S.reads.quiz[t.id] != null).length}`;
   return r.sub;
 }
 
+// Красная кнопка в шапке «Советов»: «Срочно к ветеринару» в одно касание
+const urgentBtn = () => `<a class="urgent-btn" href="#/lib/vet"><span aria-hidden="true">🚑</span><span><strong>Срочно к ветеринару</strong><small>когда нельзя ждать и куда звонить</small></span><span aria-hidden="true">›</span></a>`;
+
 function renderLibrary(r) {
-  const head = `${pageHead({ title: 'Советы', sub: TIPS_SUB })}${tipsSwitch('lib')}`;
+  const head = `${pageHead({ title: 'Советы', sub: TIPS_SUB })}${urgentBtn()}${tipsSwitch('lib')}`;
   if (!S.lib) return `${head}<p class="muted">Загружаем…</p>`;
   if (S.lib.error) return `${head}<div class="banner warn">Не удалось загрузить Библиотеку. Проверьте интернет.</div>`;
   const rubric = RUBRICS.find((x) => x.key === r.id);
   if (!rubric) {
-    const tiles = RUBRICS.map((x) => `<a class="lib-tile" href="#/lib/${x.key}"><span class="lib-icon" aria-hidden="true">${x.icon}</span>
+    const tiles = RUBRICS.filter((x) => !x.urgent).map((x) => `<a class="lib-tile" href="#/lib/${x.key}"><span class="lib-icon" aria-hidden="true">${x.icon}</span>
       <strong>${x.title}</strong><span>${escapeHtml(rubricNote(x.key))}</span></a>`).join('');
     return `${head}<div class="prose lib-intro">${introHtml(S.lib)}</div><div class="lib-grid">${tiles}</div>`;
   }
   if (rubric.key === 'a' && r.sub) return renderArticle(r.sub);
+  if (rubric.key === 'vet') return renderVet();
   const can = canWrite();
-  const back = `<a class="back" href="#/lib">${BACK_SVG}Библиотека</a>`;
+  const back = rubric.key === 'quiz' && r.sub ? `<a class="back" href="#/lib/quiz">${BACK_SVG}Проверь себя</a>` : `<a class="back" href="#/lib">${BACK_SVG}Библиотека</a>`;
   const top = `${back}<div class="page-head"><div class="page-head-text"><p class="eyebrow">Библиотека</p><h1>${rubric.title}</h1>
     <p class="page-sub">${escapeHtml(rubricNote(rubric.key))}${rubric.read && can ? ' · кружок справа — «прочитано»' : ''}</p></div></div>`;
   let body = '';
@@ -984,11 +1069,67 @@ function renderLibrary(r) {
   } else if (rubric.key === 'body') body = S.lib.body.map((c) => `<div class="prose lib-sheet">${articleBody(c)}</div>`).join('');
   else if (rubric.key === 'dict') body = dictHtml(S.lib);
   else if (rubric.key === 'quiz') {
-    if (!S.quiz.order) S.quiz.order = quizOrder(S.lib);
-    body = quizHtml(S.lib, S.quiz, S.reads.quizBest);
+    const test = r.sub && S.lib.quizzes.find((t) => t.id === r.sub);
+    if (!test) {
+      body = `<ul class="lib-list">${S.lib.quizzes.map((t) => {
+        const best = S.reads.quiz[t.id];
+        return `<li class="lib-row"><a class="lib-link" href="#/lib/quiz/${t.id}"><strong>${inline(t.title)}</strong>
+          <span class="muted small">${t.qs.length} ${plural(t.qs.length, 'вопрос', 'вопроса', 'вопросов')}${best != null ? ` · лучший результат ${best} из ${t.qs.length}` : ''}</span></a>
+          <span class="chev-sm" aria-hidden="true">›</span></li>`;
+      }).join('')}</ul>`;
+    } else {
+      if (S.quiz.test !== test.id) S.quiz = { test: test.id, i: 0, picked: null, score: 0, done: false, order: quizOrder(test) };
+      body = quizHtml(test, S.quiz, S.reads.quiz[test.id]);
+    }
   }
   else if (rubric.key === 'books') body = booksHtml(S.lib);
   return top + body;
+}
+
+// Телефон для ссылки «Позвонить»: только цифры и плюс
+const telHref = (phone) => `tel:${String(phone || '').replace(/[^\d+]/g, '')}`;
+
+function vetContactsHtml() {
+  const v = S.vet || {};
+  const has = v.clinicName || v.clinicPhone || v.vetName || v.vetPhone;
+  const can = canWrite();
+  if (!has) {
+    return `<section class="vet-contacts empty-contacts"><p><strong>Впишите телефоны заранее</strong> — в панике искать некогда. Круглосуточная клиника и ваш ветеринар будут здесь, с кнопкой «Позвонить».</p>
+      ${can ? '<button class="btn primary wide" data-action="vet-edit">Добавить телефоны</button>' : ''}</section>`;
+  }
+  const block = (label, name, extra, phone) => `<div class="vet-contact"><p class="eyebrow">${label}</p>
+    ${name ? `<strong>${escapeHtml(name)}</strong>` : ''}${extra ? `<span class="muted">${escapeHtml(extra)}</span>` : ''}
+    ${phone ? `<span class="vet-phone">${escapeHtml(phone)}</span><a class="btn primary call-btn" href="${escapeHtml(telHref(phone))}">📞 Позвонить</a>` : '<span class="muted">Телефон не указан</span>'}</div>`;
+  return `<section class="vet-contacts">
+    ${block('Круглосуточная клиника', v.clinicName, v.clinicAddress, v.clinicPhone)}
+    ${block('Наш ветеринар', v.vetName, '', v.vetPhone)}
+    ${can ? '<button class="text-link vet-edit" data-action="vet-edit">Изменить</button>' : ''}</section>`;
+}
+
+function renderVet() {
+  const c = S.lib.vet[0];
+  const back = `<a class="back" href="#/lib">${BACK_SVG}Библиотека</a>`;
+  if (!c) return `${back}<p class="empty">Раздел не найден.</p>`;
+  return `${back}<p class="eyebrow urgent-eyebrow">Библиотека · срочно</p>
+    <h1 class="card-title">${inline(c.title)}</h1>
+    ${vetContactsHtml()}
+    <div class="prose article vet-article">${articleBody(c)}</div>`;
+}
+
+function vetSheet() {
+  const v = S.vet || {};
+  const f = (name, label, max, extra = '') => `<label>${label}<input name="${name}" maxlength="${max}" value="${escapeHtml(v[name] || '')}"${extra}></label>`;
+  openSheet(`<form class="form"><h2>🚑 Куда звонить</h2>
+    <h3>Круглосуточная клиника</h3>
+    ${f('clinicName', 'Название', 80)}${f('clinicAddress', 'Адрес', 160)}${f('clinicPhone', 'Телефон', 30, ' type="tel" inputmode="tel" placeholder="+7 …"')}
+    <h3>Наш ветеринар</h3>
+    ${f('vetName', 'Имя', 80)}${f('vetPhone', 'Телефон', 30, ' type="tel" inputmode="tel" placeholder="+7 …"')}
+    <div class="form-actions"><button type="button" class="btn" data-action="sheet-close">Отмена</button><button class="btn primary">Сохранить</button></div>
+  </form>`, (fd) => {
+    const g = (k) => String(fd.get(k) || '').trim();
+    store.saveVet({ clinicName: g('clinicName'), clinicAddress: g('clinicAddress'), clinicPhone: g('clinicPhone'), vetName: g('vetName'), vetPhone: g('vetPhone') });
+    toast('Телефоны сохранены.');
+  });
 }
 
 function renderArticle(id) {
@@ -1638,9 +1779,9 @@ function onHashChange() {
 }
 
 // Название страницы для кнопки «Назад»; для правки карточки — нет (туда не возвращаемся)
-const PAGE_TITLES = { today: 'Главная', day: 'День', k: 'Тренировки', g: 'Тренировки', pass: 'Паспорт', growth: 'Рост и вес', lib: 'Библиотека', t: 'Советы', c: 'Каналы', d: 'Дневник', me: 'Настройки' };
+const PAGE_TITLES = { today: 'Главная', day: 'День', k: 'Тренировки', g: 'Тренировки', pass: 'Паспорт', growth: 'Рост и вес', lib: 'Библиотека', weeks: 'Неделя Батончика', t: 'Советы', c: 'Каналы', d: 'Дневник', me: 'Настройки' };
 // Какая вкладка внизу подсвечена: игры живут во вкладке «Тренировки», Каналы — в «Советах»
-const TAB_OF = { today: 'today', day: 'day', k: 'k', g: 'k', pass: 'pass', growth: 'pass', lib: 't', t: 't', c: 't', d: 'd' };
+const TAB_OF = { today: 'today', day: 'day', k: 'k', g: 'k', pass: 'pass', growth: 'pass', lib: 't', weeks: 'day', t: 't', c: 't', d: 'd' };
 
 function pageTitle(hash) {
   const parts = hash.replace(/^#\/?/, '').split('/').filter(Boolean);
@@ -1665,6 +1806,7 @@ function render(force) {
   else if (r.page === 'pass') html = renderPassport();
   else if (r.page === 'growth') html = renderGrowth();
   else if (r.page === 'lib') html = renderLibrary(r);
+  else if (r.page === 'weeks') html = renderWeeks();
   else if (r.page === 'd') html = renderDiary();
   else if (r.page === 'c') html = r.id ? renderNote(r.id) : renderNotesPage();
   else if (TABS[r.tab]) html = r.id ? renderCard(r.tab, r.id) : (r.tab === 't' ? renderTipsPage() : renderTrainingsPage());
@@ -2022,21 +2164,31 @@ const actions = {
     store.setRead(el.dataset.id, on);
     render();
   },
+  'vet-edit': () => vetSheet(),
+  'week-edit': (el) => weekSheet(el.dataset.day),
   'quiz-pick': (el) => {
-    const q = S.lib.quiz[S.quiz.i];
+    const test = S.lib.quizzes.find((t) => t.id === S.quiz.test);
+    const q = test && test.qs[S.quiz.i];
     if (S.quiz.picked != null || !q) return;
     S.quiz.picked = +el.dataset.k;
     if (S.quiz.picked === q.answer) S.quiz.score++;
     render();
   },
   'quiz-next': () => {
-    if (S.quiz.i + 1 < S.lib.quiz.length) { S.quiz = { ...S.quiz, i: S.quiz.i + 1, picked: null }; render(); return; }
+    const test = S.lib.quizzes.find((t) => t.id === S.quiz.test);
+    if (!test) return;
+    if (S.quiz.i + 1 < test.qs.length) { S.quiz = { ...S.quiz, i: S.quiz.i + 1, picked: null }; render(); return; }
     S.quiz = { ...S.quiz, done: true };
-    if (canWrite() && (S.reads.quizBest == null || S.quiz.score > S.reads.quizBest)) store.saveQuizBest(S.quiz.score);
+    const best = S.reads.quiz[test.id];
+    if (canWrite() && (best == null || S.quiz.score > best)) store.saveQuizBest(test.id, S.quiz.score);
     render();
     window.scrollTo(0, 0);
   },
-  'quiz-restart': () => { S.quiz = { i: 0, picked: null, score: 0, done: false, order: quizOrder(S.lib) }; render(); },
+  'quiz-restart': () => {
+    const test = S.lib.quizzes.find((t) => t.id === S.quiz.test);
+    if (test) S.quiz = { test: test.id, i: 0, picked: null, score: 0, done: false, order: quizOrder(test) };
+    render();
+  },
   // Оформление текста совета: подзаголовок, список, жирный
   'ed-fmt': (el) => {
     const ta = view.querySelector('[data-editor] textarea[data-path="text"]');

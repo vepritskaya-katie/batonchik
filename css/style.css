@@ -16,6 +16,7 @@
   --hint: #f6efdc;
   --hint-border: #e0cfa6;
   --danger: #a63d2c;
+  --danger-soft: #f6e3dc;
   --sand: #eee5d1;
   --sage: #dae6d5;
   --lavender: #e6e0ef;
@@ -46,6 +47,7 @@
     --hint: #29271b;
     --hint-border: #5a5134;
     --danger: #ff8f80;
+    --danger-soft: #3a2420;
     --sand: #3a3324;
     --sage: #25311f;
     --lavender: #2f2a38;
@@ -76,6 +78,7 @@
   --hint: #29271b;
   --hint-border: #5a5134;
   --danger: #ff8f80;
+  --danger-soft: #3a2420;
   --sand: #3a3324;
   --sage: #25311f;
   --lavender: #2f2a38;
@@ -603,6 +606,7 @@ button.ev-row { cursor: pointer; }
 .card-head h2 { margin: 0; }
 .text-link { color: var(--accent-text); font-weight: 600; font-size: 15px; text-decoration: none; min-height: 40px; display: inline-flex; align-items: center; }
 .text-link.more { margin-top: 8px; }
+button.text-link { padding: 0; border: 0; background: none; font: inherit; font-weight: 600; font-size: 15px; cursor: pointer; }
 .lib-title { margin: 34px 0 4px; font-size: 25px; letter-spacing: -.03em; }
 
 /* ---------- Фото и прогресс дня ---------- */
@@ -911,3 +915,41 @@ a.id-stat::after { content: "›"; position: absolute; top: 6px; right: 10px; co
 .fact-head { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: color-mix(in srgb, var(--text) 60%, var(--sage)); }
 .fact-more { margin-left: auto; letter-spacing: 0; text-transform: none; font-weight: 600; color: var(--accent-text); }
 .fact-text { font: 500 18px/1.45 "Manrope", sans-serif; letter-spacing: -.01em; }
+
+/* ---------- Срочно к ветеринару ---------- */
+.urgent-btn {
+  display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 12px; margin: 0 0 14px; padding: 12px 16px;
+  border-radius: 18px; background: var(--danger-soft); color: var(--danger); text-decoration: none;
+  border: 1px solid color-mix(in srgb, var(--danger) 25%, transparent);
+}
+.urgent-btn > span:first-child { font-size: 24px; }
+.urgent-btn strong { display: block; font: 700 16px/1.25 "Manrope", sans-serif; }
+.urgent-btn small { display: block; color: color-mix(in srgb, var(--danger) 70%, var(--text)); font-size: 13px; }
+.urgent-btn > span:last-child { font-size: 22px; }
+.urgent-eyebrow { color: var(--danger); }
+.vet-contacts { display: grid; gap: 10px; margin: 0 0 22px; padding: 16px; border-radius: 20px; background: var(--danger-soft); border: 1px solid color-mix(in srgb, var(--danger) 22%, transparent); }
+.vet-contacts.empty-contacts p { margin: 0 0 4px; }
+.vet-contact { display: grid; gap: 2px; padding: 12px 14px; border-radius: 16px; background: var(--surface); }
+.vet-contact strong { font-size: 17px; }
+.vet-phone { font: 600 18px "Manrope", sans-serif; font-variant-numeric: tabular-nums; margin-top: 2px; }
+.btn.call-btn { margin-top: 8px; background: var(--danger); border-color: var(--danger); color: #fff; }
+.btn.call-btn:active { background: color-mix(in srgb, var(--danger) 85%, #000); }
+.vet-edit { justify-self: start; }
+.vet-article h3 { margin-top: 22px; }
+.chev-sm { color: var(--muted); font-size: 22px; flex: none; }
+
+/* ---------- Неделя Батончика ---------- */
+.week-card-sun { background: color-mix(in srgb, var(--sand) 55%, var(--card)); }
+.week-line { margin: 0 0 4px; }
+.week-notes { margin: 8px 0 0; color: var(--text-2); }
+.week-card-sun .btn { margin-top: 12px; }
+.weeks-list { list-style: none; margin: 0; padding: 0; }
+.weeks-list li { padding: 12px 0; border-top: 1px solid var(--line); }
+.weeks-list li:first-child { border-top: 0; }
+.week-date { margin: 0; font-weight: 600; }
+.week-qs { display: flex; gap: 6px; margin: 6px 0; }
+.week-qs span { width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; font-size: 14px; font-weight: 700; }
+.week-qs .yes { background: var(--ok-soft); color: var(--ok); }
+.week-qs .no { background: var(--surface-2); color: var(--muted); }
+.weeks-link { margin-top: 18px; }
+.page-head + .btn.wide { margin-bottom: 16px; }
