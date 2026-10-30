@@ -68,9 +68,10 @@ service cloud.firestore {
 
     // Журнал: туалет, прогулки, кормления, подъём, отбой, заметки и подходы к тренировкам (train)
     function validEvent(d) {
-      return d.keys().hasOnly(['type', 'sub', 'text', 'at', 'day', 'uid', 'name', 'createdAt', 'card'])
+      return d.keys().hasOnly(['type', 'sub', 'text', 'at', 'day', 'uid', 'name', 'createdAt', 'card', 'grams'])
         && d.type in ['toilet', 'accident', 'walk', 'meal', 'wake', 'bed', 'note', 'train']
         && (!('card' in d) || (d.card is string && d.card.size() <= 120))
+        && (!('grams' in d) || (d.grams is int && d.grams >= 0 && d.grams <= 5000))
         && d.sub in ['', 'pee', 'poo', 'both']
         && d.text is string && d.text.size() <= 2000
         && d.at is timestamp
@@ -122,6 +123,13 @@ service cloud.firestore {
           && str(request.resource.data, 'weight', 20)
           && request.resource.data.updatedAt == request.time
           && request.resource.data.updatedBy is string && request.resource.data.updatedBy.size() <= 40)
+        || (doc == 'vet'
+          && request.resource.data.keys().hasOnly(['clinicName', 'clinicAddress', 'clinicPhone', 'vetName', 'vetPhone', 'updatedAt', 'updatedBy'])
+          && str(request.resource.data, 'clinicName', 80) && str(request.resource.data, 'clinicAddress', 160)
+          && str(request.resource.data, 'clinicPhone', 30) && str(request.resource.data, 'vetName', 80)
+          && str(request.resource.data, 'vetPhone', 30)
+          && request.resource.data.updatedAt == request.time
+          && request.resource.data.updatedBy is string && request.resource.data.updatedBy.size() <= 40)
         || (doc == 'photo'
           && request.resource.data.keys().hasOnly(['data', 'updatedAt', 'updatedBy'])
           && request.resource.data.data is string && request.resource.data.data.size() <= 900000
@@ -141,6 +149,45 @@ service cloud.firestore {
         && request.resource.data.date is string && request.resource.data.date.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
         && request.resource.data.done is bool
         && request.resource.data.note is string && request.resource.data.note.size() <= 1000
+        && request.resource.data.updatedAt == request.time
+        && request.resource.data.updatedBy is string && request.resource.data.updatedBy.size() <= 40;
+      allow delete: if isAllowed();
+    }
+
+    // Рост и вес: дата и хотя бы одно из двух — вес в килограммах, рост в холке в сантиметрах
+    match /growth/{id} {
+      allow read: if isAllowed();
+      allow create, update: if isAllowed()
+        && id.size() <= 40
+        && request.resource.data.keys().hasOnly(['date', 'weight', 'height', 'updatedAt', 'updatedBy'])
+        && request.resource.data.date is string && request.resource.data.date.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+        && ('weight' in request.resource.data || 'height' in request.resource.data)
+        && (!('weight' in request.resource.data) || (request.resource.data.weight is number && request.resource.data.weight > 0 && request.resource.data.weight <= 150))
+        && (!('height' in request.resource.data) || (request.resource.data.height is number && request.resource.data.height > 0 && request.resource.data.height <= 150))
+        && request.resource.data.updatedAt == request.time
+        && request.resource.data.updatedBy is string && request.resource.data.updatedBy.size() <= 40;
+      allow delete: if isAllowed();
+    }
+
+    // Библиотека: что прочитано и лучшие результаты тестов — у каждого свой документ, чужой не виден
+    match /reads/{uid} {
+      allow read, delete: if isAllowed() && request.auth.uid == uid;
+      allow create, update: if isAllowed() && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['items', 'quiz', 'updatedAt'])
+        && (!('items' in request.resource.data) || (request.resource.data.items is map && request.resource.data.items.size() <= 500))
+        && (!('quiz' in request.resource.data) || (request.resource.data.quiz is map && request.resource.data.quiz.size() <= 20))
+        && request.resource.data.updatedAt == request.time;
+    }
+
+    // «Неделя Батончика»: ответы за воскресенье — три вопроса о благополучии, фигура, заметки
+    match /weeks/{day} {
+      allow read: if isAllowed();
+      allow create, update: if isAllowed()
+        && day.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+        && request.resource.data.keys().hasOnly(['joy', 'choice', 'sleep', 'ribs', 'waist', 'notes', 'updatedAt', 'updatedBy'])
+        && request.resource.data.joy is bool && request.resource.data.choice is bool && request.resource.data.sleep is bool
+        && request.resource.data.ribs in ['', 'yes', 'no'] && request.resource.data.waist in ['', 'yes', 'no']
+        && request.resource.data.notes is string && request.resource.data.notes.size() <= 2000
         && request.resource.data.updatedAt == request.time
         && request.resource.data.updatedBy is string && request.resource.data.updatedBy.size() <= 40;
       allow delete: if isAllowed();

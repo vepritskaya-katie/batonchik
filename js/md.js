@@ -147,6 +147,8 @@ export function inline(text) {
   s = s.replace(/`([^`]+)`/g, (_, c) => { codes.push(c); return `\u0000${codes.length - 1}\u0000`; });
   s = s.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (m, label, url) => {
     if (/^https?:\/\//i.test(url)) return `<a href="${url}" target="_blank" rel="noopener">${label}</a>`;
+    // Ссылка внутри приложения, например на статью Библиотеки: #/lib/a/…
+    if (/^#\/[\w\/-]+$/.test(url)) return `<a href="${url}">${label}</a>`;
     // Ссылка на файл рядом с памяткой, например PDF в папке content
     if (/^[\w.\-\/]+$/.test(url) && !url.startsWith('/') && !url.includes('..')) {
       return `<a href="content/${url}" target="_blank" rel="noopener">${label}</a>`;
