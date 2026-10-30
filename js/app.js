@@ -7,8 +7,9 @@ import {
   EVENT_TYPES, SUBS, TRAIN, dayKey, fmtTime, fmtDate, addDays, moscowDate, dayStats, eventRow, todaySummary, nightLine, nightFor, plural, mondayOf, dayTitle,
   rhythmHtml, weekStatsHtml, dayFeedHtml,
 } from './diary.js';
-import { HEALTH_KINDS, NEXT_OPTIONS, nextDate, suggestNext, dueText, ageText, upcoming, doneRecords, googleCalendarUrl, icsText, healthRowHtml, daysBetween } from './passport.js';
+import { HEALTH_KINDS, NEXT_OPTIONS, nextDate, suggestNext, dueText, ageText, upcoming, doneRecords, googleCalendarUrl, icsText, healthRowHtml, daysBetween, ageShort } from './passport.js';
 import { pickPhoto, compressPhoto } from './photo.js';
+import { fmtNum, parseNum, series, deltaText, lineChartSvg } from './growth.js';
 import { pickIdeas } from './ideas.js';
 import { parseNotes, notesListHtml, noteHtml, noteMatches, countText } from './notes.js';
 
@@ -83,6 +84,7 @@ const S = {
   pet: null,          // паспорт: { name, breed, birth, sex, chip, mdr1, weight }
   photo: '',          // фото Батончика (data:image/jpeg…)
   health: [],         // паспорт: прививки, обработки, таблетки, врач — { id, title, kind, date, done, note }
+  growth: [],         // рост и вес: { id, date, weight (кг), height (см) }
   stories: {},        // дневник: заметки о днях { 'ГГГГ-ММ-ДД': { title, text, photo } } за загруженные дни
 };
 
@@ -149,6 +151,7 @@ const store = createStore({
   onPet(pet) { S.pet = pet; render(); },
   onPhoto(data) { S.photo = data || ''; render(); },
   onHealth(list) { S.health = list || []; render(); },
+  onGrowth(list) { S.growth = list || []; render(); },
   onError(message) { toast(message); },
 }, firebaseConfig);
 
@@ -775,8 +778,8 @@ function heroHtml() {
   </section>`;
 }
 
-// Тренировки дня на главной: три первые несделанные с «+1»; весь план — во вкладке «Тренировки»
-const HOME_TRAININGS = 3;
+// Тренировки дня на главной: пять первых несделанных с «+1»; весь план — во вкладке «Тренировки»
+const HOME_TRAININGS = 5;
 function homeTrainingsHtml() {
   if (S.today && (S.today.raw || S.today.error)) return '';
   const can = canWrite();
@@ -819,24 +822,21 @@ function agoText(at, now = new Date()) {
   if (h >= 24) return 'больше суток назад';
   return `${h} ч${m % 60 ? ` ${m % 60} мин` : ''} назад`;
 }
-// «в 20:51», «вчера в 23:05»
-function atText(at, now = new Date()) {
-  const k = dayKey(at);
-  if (k === dayKey(now)) return `в ${fmtTime(at)}`;
-  if (k === addDays(dayKey(now), -1)) return `вчера в ${fmtTime(at)}`;
-  return `${dayTitle(k, { day: 'numeric', month: 'long' })} в ${fmtTime(at)}`;
-}
 // Время «назад» на главной обновляется само, без перерисовки экрана
 function updateSince() {
   document.querySelectorAll('[data-since]').forEach((el) => { el.textContent = agoText(new Date(el.dataset.since)); });
 }
 
-// Журнал на главной: значки записи и сколько прошло с последнего туалета и еды
+// Журнал на главной: значки записи, сколько прошло с последнего туалета и сколько еды отсыпали за сегодня
 function homeJournalHtml() {
   const all = [...S.recent, ...S.events];
   const last = (types) => all.filter((e) => types.includes(e.type)).sort((a, b) => new Date(b.at) - new Date(a.at))[0];
   const toilet = last(['toilet', 'accident']);
-  const meal = last(['meal']);
+  const meals = S.events.filter((e) => e.type === 'meal' && e.day === S.day);
+  const grams = meals.reduce((a, e) => a + (e.grams || 0), 0);
+  const noGrams = meals.filter((e) => !e.grams).length;
+  const food = !meals.length ? 'ещё не кормили'
+    : grams ? `${grams} г${noGrams ? ` + ${noGrams} без веса` : ''}` : `${meals.length} ${plural(meals.length, 'раз', 'раза', 'раз')}`;
   const home = toilet && toilet.type === 'accident';
   const cell = (label, value) => `<div class="since-cell"><span>${label}</span><strong${value.at ? ` data-since="${new Date(value.at).toISOString()}"` : ''}>${value.text}</strong></div>`;
   return `<section class="card">
@@ -845,7 +845,7 @@ function homeJournalHtml() {
     <div class="since">
       ${cell(`${home ? EVENT_TYPES.accident.icon : EVENT_TYPES.toilet.icon} Туалет${home ? ' дома' : ''}`,
         toilet ? { at: toilet.at, text: agoText(new Date(toilet.at)) } : { text: 'ещё не было' })}
-      ${cell(`${EVENT_TYPES.meal.icon} Еда`, meal ? { text: atText(new Date(meal.at)) } : { text: 'ещё не было' })}
+      ${cell(`${EVENT_TYPES.meal.icon} Еда сегодня`, { text: food })}
     </div>
   </section>`;
 }
@@ -1222,13 +1222,36 @@ function petTitle() {
   return DOG() === 'Батончик' ? 'Паспорт Батончика' : `Паспорт · ${escapeHtml(DOG())}`;
 }
 
+// Последнее измерение величины; для веса, пока измерений нет, — число из старого поля паспорта
+function latestGrowth(field) {
+  const pts = series(S.growth, field);
+  if (pts.length) return pts[pts.length - 1].value;
+  return field === 'weight' && S.pet ? parseNum(S.pet.weight) : 0;
+}
+
+// Плитки внизу паспорта: вес, возраст, рост; вес и рост открывают «Рост и вес»
+function idStatsHtml(pet) {
+  const age = ageShort(pet.birth, S.day);
+  const weight = latestGrowth('weight');
+  const height = latestGrowth('height');
+  const tile = (value, unit, label, href) => {
+    const inner = value ? `<strong>${value}<small>${unit}</small></strong><span>${label}</span>`
+      : `<strong class="id-stat-add">+</strong><span>${label}</span>`;
+    return href ? `<a class="id-stat" href="${href}">${inner}</a>` : `<div class="id-stat">${inner}</div>`;
+  };
+  return `<div class="id-stats">
+    ${tile(weight ? fmtNum(weight) : '', 'кг', 'вес', '#/growth')}
+    ${tile(age ? age.n : '', age ? age.unit : '', 'возраст', '')}
+    ${tile(height ? fmtNum(height) : '', 'см', 'рост', '#/growth')}
+  </div>`;
+}
+
 function renderPassport() {
   const pet = S.pet || {};
-  const field = (label, value) => `<div><dt>${label}</dt><dd>${value ? escapeHtml(value) : '—'}</dd></div>`;
-  const age = ageText(pet.birth, S.day);
+  const field = (label, value, wide) => `<div${wide ? ' class="wide"' : ''}><dt>${label}</dt><dd>${value ? escapeHtml(value) : '—'}</dd></div>`;
   const next = upcoming(S.health);
   const done = doneRecords(S.health);
-  const birth = pet.birth ? `${dayTitle(pet.birth, { day: 'numeric', month: 'long', year: 'numeric' })}${age ? ` · ${age}` : ''}` : '';
+  const birth = pet.birth ? dayTitle(pet.birth, { day: 'numeric', month: 'long', year: 'numeric' }) : '';
   return `${pageHead({ eyebrow: pet.chip ? `Чип ${pet.chip}` : 'Паспорт', title: petTitle(), sub: 'Данные, прививки, обработки и напоминания — в одном месте.', plus: { action: 'health-add', label: 'Новая запись о здоровье' } })}
     ${statusBanner()}
     <section class="id-card">
@@ -1236,11 +1259,10 @@ function renderPassport() {
       <div class="id-body">
         <button class="id-photo" data-action="photo-pick"${canWrite() ? '' : ' disabled'} aria-label="${S.photo ? 'Сменить фото' : 'Добавить фото'}">
           ${S.photo ? `<img src="${escapeHtml(S.photo)}" alt="${escapeHtml(DOG())}">` : `${PAW_SVG}<span>Добавить фото</span>`}</button>
-        <div class="id-info">
-          <p class="id-label">Кличка</p>
-          <h2>${escapeHtml(DOG())}</h2>
-          <dl class="id-grid">${field('Порода', pet.breed)}${field('Дата рождения', birth)}${field('Пол', pet.sex)}${field('Чип', pet.chip)}${field('MDR1', pet.mdr1)}${field('Вес', pet.weight)}</dl>
-        </div>
+        <p class="id-label">Кличка</p>
+        <h2>${escapeHtml(DOG())}</h2>
+        <dl class="id-grid">${field('Порода', pet.breed, true)}${field('Дата рождения', birth)}${field('Пол', pet.sex)}${field('Чип', pet.chip)}${field('MDR1', pet.mdr1)}</dl>
+        ${idStatsHtml(pet)}
       </div>
       ${!S.pet && canWrite() ? '<button class="btn wide id-fill" data-action="pet-edit">Заполнить паспорт</button>' : ''}
     </section>
@@ -1266,13 +1288,73 @@ function petSheet() {
     <label>Пол<select name="sex">${opts(SEX, pet.sex)}</select></label>
     <label>Номер чипа<input name="chip" maxlength="40" inputmode="numeric" value="${escapeHtml(pet.chip || '')}"></label>
     <label>MDR1<select name="mdr1">${opts(MDR1.includes(pet.mdr1) || !pet.mdr1 ? MDR1 : [...MDR1, pet.mdr1], pet.mdr1)}</select></label>
-    <label>Вес<input name="weight" maxlength="20" placeholder="Например: 12,5 кг (29 октября)" value="${escapeHtml(pet.weight || '')}"></label>
     ${S.photo ? '<button type="button" class="btn danger-outline wide" data-action="photo-remove">Убрать фото</button>' : ''}
     <div class="form-actions"><button type="button" class="btn" data-action="sheet-close">Отмена</button><button class="btn primary">Сохранить</button></div>
   </form>`, (fd) => {
     const v = (k) => String(fd.get(k) || '').trim();
-    store.savePet({ name: v('name'), breed: v('breed'), birth: /^\d{4}-\d\d-\d\d$/.test(v('birth')) ? v('birth') : '', sex: v('sex'), chip: v('chip'), mdr1: v('mdr1'), weight: v('weight') });
+    store.savePet({ name: v('name'), breed: v('breed'), birth: /^\d{4}-\d\d-\d\d$/.test(v('birth')) ? v('birth') : '', sex: v('sex'), chip: v('chip'), mdr1: v('mdr1'), weight: (S.pet && S.pet.weight) || '' });
     toast('Паспорт сохранён.');
+  });
+}
+
+// ---------- Рост и вес ----------
+
+function growthCardHtml(field, title, unit, empty) {
+  const pts = series(S.growth, field);
+  if (!pts.length) return `<section class="growth-card"><p class="eyebrow">${title}</p><p class="muted">${empty}</p></section>`;
+  const last = pts[pts.length - 1];
+  const delta = deltaText(pts, unit);
+  return `<section class="growth-card">
+    <p class="eyebrow">${title}</p>
+    <div class="growth-now"><strong>${fmtNum(last.value)}<small>${unit}</small></strong>
+      <span>${delta ? escapeHtml(delta) : `${dayTitle(last.date, { day: 'numeric', month: 'long' })}, первое измерение`}</span></div>
+    <figure class="growth-chart">${lineChartSvg(pts, { unit })}</figure>
+  </section>`;
+}
+
+function renderGrowth() {
+  const arrow = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>';
+  const rows = [...S.growth].sort((a, b) => (a.date < b.date ? 1 : -1));
+  const birth = S.pet && S.pet.birth;
+  const oldWeight = !series(S.growth, 'weight').length && S.pet && S.pet.weight;
+  return `<a class="back" href="#/pass">${arrow}Паспорт</a>
+    ${pageHead({ eyebrow: DOG(), title: 'Рост и вес', sub: 'Взвешивайте раз в одну-две недели, в одно время дня — так прибавка видна честнее.', plus: { action: 'growth-add', label: 'Новое измерение' } })}
+    ${statusBanner()}
+    ${oldWeight ? `<div class="banner"><span>В паспорте записан вес «${escapeHtml(S.pet.weight)}». Добавьте его с датой — и появится график.</span>
+      ${canWrite() ? '<button class="btn small primary" data-action="growth-add">Добавить</button>' : ''}</div>` : ''}
+    ${growthCardHtml('weight', 'Вес', 'кг', 'Взвешиваний пока нет. Нажмите «+», чтобы добавить первое.')}
+    ${growthCardHtml('height', 'Рост в холке', 'см', 'Рост пока не измеряли. Меряют стоя, от пола до верхней точки лопаток.')}
+    ${rows.length ? `<section class="card"><div class="card-head"><h2>Все измерения</h2></div>
+      <ul class="growth-list">${rows.map((r) => {
+        const age = birth ? ageText(birth, r.date) : '';
+        return `<li><button class="growth-row" data-action="growth-edit" data-id="${r.id}"${canWrite() ? '' : ' disabled'}>
+          <span class="growth-date">${dayTitle(r.date, { day: 'numeric', month: 'long' })}${age ? `<small>${age}</small>` : ''}</span>
+          <span class="growth-val">${r.weight ? `${fmtNum(r.weight)} кг` : '—'}</span>
+          <span class="growth-val">${r.height ? `${fmtNum(r.height)} см` : '—'}</span></button></li>`;
+      }).join('')}</ul></section>` : ''}`;
+}
+
+// Новое измерение или правка: дата, вес и/или рост
+function growthSheet(id) {
+  const r = (id && S.growth.find((x) => x.id === id)) || { date: S.day, weight: id ? 0 : parseNum(S.pet && !series(S.growth, 'weight').length ? S.pet.weight : ''), height: 0 };
+  const num = (v) => (v ? fmtNum(v) : '');
+  openSheet(`<form class="form"><h2>${id ? 'Изменить измерение' : 'Новое измерение'}</h2>
+    <label>Дата<input type="date" name="date" required value="${escapeHtml(r.date)}"></label>
+    <label>Вес, кг<input name="weight" inputmode="decimal" autocomplete="off" placeholder="Например: 13,3" value="${num(r.weight)}"></label>
+    <label>Рост в холке, см <span class="muted">(необязательно)</span><input name="height" inputmode="decimal" autocomplete="off" placeholder="Например: 48" value="${num(r.height)}"></label>
+    <p class="muted small growth-err" hidden>Укажите вес или рост.</p>
+    <div class="form-actions"><button type="button" class="btn" data-action="sheet-close">Отмена</button><button class="btn primary">Сохранить</button></div>
+    ${id ? `<button type="button" class="btn danger-outline wide" data-action="growth-delete" data-id="${id}">Удалить измерение</button>` : ''}
+  </form>`, (fd) => {
+    const rec = { date: String(fd.get('date') || S.day), weight: parseNum(fd.get('weight')), height: parseNum(fd.get('height')) };
+    if (rec.weight > 150) rec.weight = 0;
+    if (rec.height > 150) rec.height = 0;
+    if (!/^\d{4}-\d\d-\d\d$/.test(rec.date) || (!rec.weight && !rec.height)) {
+      sheet.querySelector('.growth-err').hidden = false;
+      return false;
+    }
+    store.saveGrowth(id || null, rec);
+    toast('Измерение сохранено.');
   });
 }
 
@@ -1477,9 +1559,9 @@ function onHashChange() {
 }
 
 // Название страницы для кнопки «Назад»; для правки карточки — нет (туда не возвращаемся)
-const PAGE_TITLES = { today: 'Главная', day: 'День', k: 'Тренировки', g: 'Тренировки', pass: 'Паспорт', t: 'Советы', c: 'Каналы', d: 'Дневник', me: 'Настройки' };
+const PAGE_TITLES = { today: 'Главная', day: 'День', k: 'Тренировки', g: 'Тренировки', pass: 'Паспорт', growth: 'Рост и вес', t: 'Советы', c: 'Каналы', d: 'Дневник', me: 'Настройки' };
 // Какая вкладка внизу подсвечена: игры живут во вкладке «Тренировки», Каналы — в «Советах»
-const TAB_OF = { today: 'today', day: 'day', k: 'k', g: 'k', pass: 'pass', t: 't', c: 't', d: 'd' };
+const TAB_OF = { today: 'today', day: 'day', k: 'k', g: 'k', pass: 'pass', growth: 'pass', t: 't', c: 't', d: 'd' };
 
 function pageTitle(hash) {
   const parts = hash.replace(/^#\/?/, '').split('/').filter(Boolean);
@@ -1501,6 +1583,7 @@ function render(force) {
   else if (r.page === 'edit') html = renderEditor(r);
   else if (r.page === 'day') html = renderDayPage();
   else if (r.page === 'pass') html = renderPassport();
+  else if (r.page === 'growth') html = renderGrowth();
   else if (r.page === 'd') html = renderDiary();
   else if (r.page === 'c') html = r.id ? renderNote(r.id) : renderNotesPage();
   else if (TABS[r.tab]) html = r.id ? renderCard(r.tab, r.id) : (r.tab === 't' ? renderTipsPage() : renderTrainingsPage());
@@ -1563,7 +1646,7 @@ function saveEvent(type, extra = {}, at = new Date(), day = eventDayFor(at, type
   // Запись в прошлый день в сегодняшний журнал не попадает — обновляем историю
   const past = day < S.day;
   if (past || type === 'wake') loadRecent(); // для ночного перерыва нужна вчерашняя запись «Легли»
-  toast(`Записано: ${t.label.toLowerCase()}${extra.sub ? ` — ${SUBS[extra.sub]}` : ''}, ${past ? `${dayTitle(day, { day: 'numeric', month: 'long' })}, ` : ''}${fmtTime(at)}`, {
+  toast(`Записано: ${t.label.toLowerCase()}${extra.sub ? ` — ${SUBS[extra.sub]}` : ''}${extra.grams ? ` — ${extra.grams} г` : ''}, ${past ? `${dayTitle(day, { day: 'numeric', month: 'long' })}, ` : ''}${fmtTime(at)}`, {
     label: 'Отменить', onClick: () => { if (id) store.deleteEvent(id); if (past) loadRecent(); },
   });
 }
@@ -1642,6 +1725,7 @@ function eventFormSheet(type) {
   openSheet(`<form class="form"><h2>${t.icon} ${t.label}</h2>
     ${t.subs ? `<fieldset><legend>Что было</legend><div class="choices">${Object.entries(SUBS).map(([k, v]) =>
       `<label class="choice"><input type="radio" name="sub" value="${k}" required>${cap(v)}</label>`).join('')}</div></fieldset>` : ''}
+    ${t.grams ? gramsFieldHtml(lastGrams()) : ''}
     <label>Время <input type="time" name="time" required value="${fmtTime(new Date())}"></label>
     <p class="muted small ev-when" hidden></p>
     <label>${t.text ? 'Что произошло' : 'Комментарий'} <textarea name="text" rows="${t.text ? 4 : 2}" maxlength="2000"${t.text
@@ -1651,11 +1735,27 @@ function eventFormSheet(type) {
     const text = String(fd.get('text') || '').trim();
     if (t.text && !text) return;
     const sub = t.subs && SUBS[fd.get('sub')] ? String(fd.get('sub')) : '';
+    const grams = t.grams ? gramsOf(fd) : 0;
+    if (t.grams && !grams) return;
     const { at, day } = pastTime(String(fd.get('time') || ''), type);
-    saveEvent(type, { sub, text }, at, day);
+    saveEvent(type, grams ? { sub, text, grams } : { sub, text }, at, day);
   });
   watchPastTime(type);
   if (t.text) setTimeout(() => { const ta = sheet.querySelector('textarea'); if (ta) ta.focus(); }, 50);
+}
+
+// Граммы корма: целое число от 1 до 5000
+function gramsFieldHtml(value) {
+  return `<label>Сколько отсыпали, г <input type="number" name="grams" inputmode="numeric" min="1" max="5000" step="1" required value="${value || ''}" placeholder="Например: 80"></label>`;
+}
+function gramsOf(fd) {
+  const n = Math.round(Number(String(fd.get('grams') || '').replace(',', '.')));
+  return n >= 1 && n <= 5000 ? n : 0;
+}
+// Сколько отсыпали в прошлый раз — чтобы не вводить одно и то же
+function lastGrams() {
+  const meals = [...S.recent, ...S.events].filter((e) => e.type === 'meal' && e.grams).sort((a, b) => new Date(b.at) - new Date(a.at));
+  return meals.length ? meals[0].grams : '';
 }
 
 function editEvent(id) {
@@ -1666,6 +1766,7 @@ function editEvent(id) {
     <label>Время <input type="time" name="time" required value="${fmtTime(e.at)}"></label>
     ${e.day === S.day ? '<p class="muted small ev-when" hidden></p>' : ''}
     ${t.subs ? `<label>Что было <select name="sub">${Object.entries(SUBS).map(([k, v]) => `<option value="${k}"${e.sub === k ? ' selected' : ''}>${v}</option>`).join('')}</select></label>` : ''}
+    ${t.grams ? gramsFieldHtml(e.grams) : ''}
     <label>${t.text ? 'Текст заметки' : 'Комментарий'} <textarea name="text" rows="3" maxlength="2000">${escapeHtml(e.text)}</textarea></label>
     <p class="muted small">Записал${e.name ? `: ${escapeHtml(e.name)}` : 'и'}</p>
     <div class="form-actions"><button type="button" class="btn" data-action="sheet-close">Отмена</button><button class="btn primary">Сохранить</button></div>
@@ -1680,6 +1781,7 @@ function editEvent(id) {
       if (when.day !== e.day) patch.day = when.day;
     }
     if (t.subs) patch.sub = String(fd.get('sub'));
+    if (t.grams && gramsOf(fd)) patch.grams = gramsOf(fd);
     store.updateEvent(e.id, patch);
     if (patch.day) { loadRecent(); toast(`Запись перенесена на ${dayTitle(patch.day, { day: 'numeric', month: 'long' })}, ${fmtTime(patch.at)}.`); }
   });
@@ -1772,6 +1874,13 @@ const actions = {
     store.savePhoto('');
   },
   'pet-edit': () => petSheet(),
+  'growth-add': () => growthSheet(null),
+  'growth-edit': (el) => growthSheet(el.dataset.id),
+  'growth-delete': (el) => {
+    if (!confirm('Удалить измерение?')) return;
+    closeSheet();
+    store.deleteGrowth(el.dataset.id);
+  },
   'health-add': () => healthFormSheet(null),
   'health-edit': (el) => healthSheet(el.dataset.id),
   'health-form': (el) => healthFormSheet(el.dataset.id),
@@ -1916,7 +2025,12 @@ sheet.addEventListener('submit', (e) => {
   const fd = new FormData(e.target);
   const fn = sheetSubmit;
   closeSheet();
-  if (fn) fn(fd);
+  // Обработчик вернул false — данные не подходят, окно остаётся открытым с подсказкой
+  if (fn && fn(fd) === false) {
+    sheetSubmit = fn;
+    sheet.hidden = false;
+    document.body.classList.add('no-scroll');
+  }
 });
 
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !sheet.hidden) closeSheet(); });

@@ -6,13 +6,13 @@ export const TZ = 'Europe/Moscow';
 const MSK_OFFSET_H = 3; // Москва круглый год UTC+3, без перехода на летнее время
 
 // form: запись обычно делают после события — сначала окно со временем и комментарием;
-// без form («Авария дома», «Кормление») запись сохраняется сразу с текущим временем
+// без form («Авария дома») запись сохраняется сразу с текущим временем; grams — в окне спрашиваем граммы корма
 // short — подпись под значком в строке быстрых кнопок на главной
 export const EVENT_TYPES = {
   toilet: { icon: '🌳', label: 'Туалет на улице', short: 'Туалет', subs: true, form: true },
   accident: { icon: '💦', label: 'Авария дома', short: 'Авария', subs: true },
   walk: { icon: '🦮', label: 'Прогулка', short: 'Прогулка', form: true },
-  meal: { icon: '🍽', label: 'Кормление', short: 'Еда' },
+  meal: { icon: '🍽', label: 'Кормление', short: 'Еда', form: true, grams: true },
   wake: { icon: '☀️', label: 'Встали утром', short: 'Встали', form: true },
   bed: { icon: '🌙', label: 'Легли вечером', short: 'Легли', form: true },
   note: { icon: '✏️', label: 'Заметка', short: 'Заметка', text: true, form: true },
@@ -89,6 +89,7 @@ export function dayStats(key, events, checks, scheduleTotal) {
     toilet: count('toilet'), toiletPee: count('toilet', 'pee'), toiletPoo: count('toilet', 'poo'),
     accident: count('accident'), accidentPee: count('accident', 'pee'), accidentPoo: count('accident', 'poo'),
     walk: count('walk'), meal: count('meal'),
+    mealGrams: list.filter((e) => e.type === 'meal').reduce((a, e) => a + (e.grams || 0), 0),
     notes: list.filter((e) => e.text),
     night: nightFor(key, events),
     trains: trains.length, trainsByCard,
@@ -123,6 +124,11 @@ export function weekSummary(thisWeek, prevWeek) {
   if (wCur) lines.push(`Прогулок: в среднем ${num(wCur)} в день${cmp(wCur, prev.length ? avg(prev.map((d) => d.walk)) : null)}.`);
   const trCur = avg(cur.map((d) => d.trains));
   if (trCur) lines.push(`Повторов на тренировках: в среднем ${num(trCur)} в день${cmp(trCur, prev.length ? avg(prev.map((d) => d.trains)) : null)}.`);
+  const fed = cur.filter((d) => d.mealGrams);
+  if (fed.length) {
+    const gPrev = prev.filter((d) => d.mealGrams);
+    lines.push(`Еда: в среднем ${Math.round(avg(fed.map((d) => d.mealGrams)))} г в день${gPrev.length ? ` (неделей раньше — ${Math.round(avg(gPrev.map((d) => d.mealGrams)))} г)` : ''}.`);
+  }
   const nights = thisWeek.map((d) => d.night && d.night.ms).filter(Boolean);
   if (nights.length) lines.push(`Ночной перерыв: в среднем ${fmtDuration(avg(nights))} (записано ночей: ${nights.length}).`);
   return lines;
@@ -132,7 +138,7 @@ export function weekSummary(thisWeek, prevWeek) {
 
 export function eventLabel(e) {
   const t = EVENT_TYPES[e.type] || { icon: '•', label: e.type };
-  return `${t.icon} ${t.label}${e.sub && SUBS[e.sub] ? ` — ${SUBS[e.sub]}` : ''}`;
+  return `${t.icon} ${t.label}${e.sub && SUBS[e.sub] ? ` — ${SUBS[e.sub]}` : ''}${e.grams ? ` — ${e.grams} г` : ''}`;
 }
 
 export function eventRow(e, { editable } = {}) {
@@ -151,7 +157,7 @@ function chips(st) {
     st.toilet ? `<span class="stat">🌳 Туалет на улице: <b>${st.toilet}</b>${sub(st.toiletPee, st.toiletPoo)}</span>` : '',
     st.accident ? `<span class="stat">💦 Аварии дома: <b>${st.accident}</b>${sub(st.accidentPee, st.accidentPoo)}</span>` : '',
     st.walk ? `<span class="stat">🦮 Прогулки: <b>${st.walk}</b></span>` : '',
-    st.meal ? `<span class="stat">🍽 Кормления: <b>${st.meal}</b></span>` : '',
+    st.meal ? `<span class="stat">🍽 Кормления: <b>${st.meal}</b>${st.mealGrams ? ` <span class="muted">(${st.mealGrams} г)</span>` : ''}</span>` : '',
   ].filter(Boolean).join('');
 }
 
@@ -196,11 +202,11 @@ export function plural(n, one, few, many) {
   return many;
 }
 
-// Короткая строка о дне: «🌳 6 · 💦 1 · 🦮 3 · 🍽 4 · 🎯 24 · 🌙 8 ч 10 мин»
+// Короткая строка о дне: «🌳 6 · 💦 1 · 🦮 3 · 🍽 320 г · 🎯 24 · 🌙 8 ч 10 мин» (без граммов — число кормлений)
 export function daySummaryLine(st) {
   const parts = [
     st.toilet && `🌳 ${st.toilet}`, st.accident && `💦 ${st.accident}`, st.walk && `🦮 ${st.walk}`,
-    st.meal && `🍽 ${st.meal}`, st.trains && `🎯 ${st.trains}`, st.night && st.night.ms && `🌙 ${fmtDuration(st.night.ms)}`,
+    st.meal && `🍽 ${st.mealGrams ? `${st.mealGrams} г` : st.meal}`, st.trains && `🎯 ${st.trains}`, st.night && st.night.ms && `🌙 ${fmtDuration(st.night.ms)}`,
   ].filter(Boolean);
   return parts.join(' · ');
 }
@@ -218,7 +224,7 @@ export function rhythmHtml(st, { trainsDone, trainsTotal }) {
     ${row('🌳 Туалет на улице', st.toilet)}
     ${row('💦 Аварии дома', st.accident)}
     ${row('🦮 Прогулки', st.walk)}
-    ${row('🍽 Кормления', st.meal)}
+    ${row('🍽 Кормления', `${st.meal}${st.mealGrams ? ` · ${st.mealGrams} г` : ''}`)}
     ${row('🌙 Ночной сон', sleep)}
     ${row('🎯 Повторы тренировок', trainsTotal ? `${trainsDone} из ${trainsTotal}` : st.trains)}
   </section>`;

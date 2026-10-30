@@ -92,6 +92,18 @@ export function ageText(birth, today) {
     .filter(Boolean).join(' ');
 }
 
+// Возраст для плитки: { n: '5', unit: 'мес' }, { n: '11', unit: 'нед' }, { n: '1 г', unit: '3 мес' }
+export function ageShort(birth, today) {
+  if (!/^\d{4}-\d\d-\d\d$/.test(birth || '')) return null;
+  const [by, bm, bd] = birth.split('-').map(Number);
+  const [ty, tm, td] = today.split('-').map(Number);
+  const months = (ty - by) * 12 + (tm - bm) - (td < bd ? 1 : 0);
+  if (months < 0) return null;
+  if (months < 3) return { n: String(Math.floor(daysBetween(birth, today) / 7)), unit: 'нед' };
+  if (months < 12) return { n: String(months), unit: 'мес' };
+  return months % 12 ? { n: `${Math.floor(months / 12)} г`, unit: `${months % 12} мес` } : { n: String(months / 12), unit: plural(months / 12, 'год', 'года', 'лет') };
+}
+
 function plural(n, one, few, many) {
   const m10 = n % 10, m100 = n % 100;
   if (m10 === 1 && m100 !== 11) return one;

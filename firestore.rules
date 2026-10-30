@@ -68,9 +68,10 @@ service cloud.firestore {
 
     // Журнал: туалет, прогулки, кормления, подъём, отбой, заметки и подходы к тренировкам (train)
     function validEvent(d) {
-      return d.keys().hasOnly(['type', 'sub', 'text', 'at', 'day', 'uid', 'name', 'createdAt', 'card'])
+      return d.keys().hasOnly(['type', 'sub', 'text', 'at', 'day', 'uid', 'name', 'createdAt', 'card', 'grams'])
         && d.type in ['toilet', 'accident', 'walk', 'meal', 'wake', 'bed', 'note', 'train']
         && (!('card' in d) || (d.card is string && d.card.size() <= 120))
+        && (!('grams' in d) || (d.grams is int && d.grams >= 0 && d.grams <= 5000))
         && d.sub in ['', 'pee', 'poo', 'both']
         && d.text is string && d.text.size() <= 2000
         && d.at is timestamp
@@ -141,6 +142,21 @@ service cloud.firestore {
         && request.resource.data.date is string && request.resource.data.date.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
         && request.resource.data.done is bool
         && request.resource.data.note is string && request.resource.data.note.size() <= 1000
+        && request.resource.data.updatedAt == request.time
+        && request.resource.data.updatedBy is string && request.resource.data.updatedBy.size() <= 40;
+      allow delete: if isAllowed();
+    }
+
+    // Рост и вес: дата и хотя бы одно из двух — вес в килограммах, рост в холке в сантиметрах
+    match /growth/{id} {
+      allow read: if isAllowed();
+      allow create, update: if isAllowed()
+        && id.size() <= 40
+        && request.resource.data.keys().hasOnly(['date', 'weight', 'height', 'updatedAt', 'updatedBy'])
+        && request.resource.data.date is string && request.resource.data.date.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+        && ('weight' in request.resource.data || 'height' in request.resource.data)
+        && (!('weight' in request.resource.data) || (request.resource.data.weight is number && request.resource.data.weight > 0 && request.resource.data.weight <= 150))
+        && (!('height' in request.resource.data) || (request.resource.data.height is number && request.resource.data.height > 0 && request.resource.data.height <= 150))
         && request.resource.data.updatedAt == request.time
         && request.resource.data.updatedBy is string && request.resource.data.updatedBy.size() <= 40;
       allow delete: if isAllowed();

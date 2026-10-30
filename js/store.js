@@ -23,7 +23,7 @@ const newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2
 
 // ---------- Только этот телефон ----------
 
-function localStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onPet = () => {}, onPhoto = () => {}, onHealth = () => {} }) {
+function localStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onPet = () => {}, onPhoto = () => {}, onHealth = () => {}, onGrowth = () => {} }) {
   let day = null;
   const state = { mode: 'local', status: 'ready', user: { name: '' } };
   const mark = () => ({ uid: 'local', name: '', at: new Date().toISOString() });
@@ -43,6 +43,7 @@ function localStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onPet 
       onPet(read('bt.pet', null));
       onPhoto(read('bt.photo', ''));
       onHealth(Object.entries(read('bt.health', {})).map(([id, r]) => ({ id, ...r })));
+      onGrowth(Object.entries(read('bt.growth', {})).map(([id, r]) => ({ id, ...r })));
     },
     setDay(key) {
       day = key;
@@ -99,7 +100,7 @@ function localStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onPet 
       } catch { /* ничего */ }
       return {
         plan: read('bt.plan', null), marks: read('bt.marks', {}), days, events: read('bt.events', []), cards: read('bt.cards', {}),
-        pet: read('bt.pet', null), health: read('bt.health', {}), stories: read('bt.stories', {}),
+        pet: read('bt.pet', null), health: read('bt.health', {}), stories: read('bt.stories', {}), growth: read('bt.growth', {}),
       };
     },
     // Паспорт и дневник
@@ -119,6 +120,19 @@ function localStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onPet 
       write('bt.health', all);
       onHealth(Object.entries(all).map(([k, r]) => ({ id: k, ...r })));
     },
+    // Рост и вес: {date, weight (кг), height (см)}
+    saveGrowth(id, rec) {
+      const all = read('bt.growth', {});
+      all[id || newId()] = { ...rec };
+      write('bt.growth', all);
+      onGrowth(Object.entries(all).map(([k, r]) => ({ id: k, ...r })));
+    },
+    deleteGrowth(id) {
+      const all = read('bt.growth', {});
+      delete all[id];
+      write('bt.growth', all);
+      onGrowth(Object.entries(all).map(([k, r]) => ({ id: k, ...r })));
+    },
     async loadStories(from, to) {
       return Object.fromEntries(Object.entries(read('bt.stories', {})).filter(([k]) => k >= from && k <= to));
     },
@@ -133,7 +147,7 @@ function localStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onPet 
 
 // ---------- Firebase ----------
 
-function firebaseStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onError, onPet = () => {}, onPhoto = () => {}, onHealth = () => {} }, firebaseConfig) {
+function firebaseStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onError, onPet = () => {}, onPhoto = () => {}, onHealth = () => {}, onGrowth = () => {} }, firebaseConfig) {
   const state = { mode: 'firebase', status: 'loading', user: null, message: '' };
   let fb = null; // модули SDK
   let db = null;
@@ -149,7 +163,7 @@ function firebaseStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onE
   const toEvent = (d) => {
     const v = d.data({ serverTimestamps: 'estimate' });
     return {
-      id: d.id, type: v.type, sub: v.sub || '', text: v.text || '', card: v.card || '',
+      id: d.id, type: v.type, sub: v.sub || '', text: v.text || '', card: v.card || '', grams: typeof v.grams === 'number' ? v.grams : 0,
       at: toDate(v.at) || new Date(), day: v.day, uid: v.uid, name: v.name || '',
     };
   };
@@ -195,6 +209,9 @@ function firebaseStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onE
     unsubs.push(onSnapshot(doc(db, 'pet', 'photo'), (snap) => { onPhoto(snap.exists() ? String(snap.data().data || '') : ''); }, fail));
     unsubs.push(onSnapshot(collection(db, 'health'), (snap) => {
       onHealth(snap.docs.map((d) => { const v = d.data(); return { id: d.id, title: v.title, kind: v.kind, date: v.date, done: !!v.done, note: v.note || '', updatedBy: v.updatedBy || '' }; }));
+    }, fail));
+    unsubs.push(onSnapshot(collection(db, 'growth'), (snap) => {
+      onGrowth(snap.docs.map((d) => { const v = d.data(); return { id: d.id, date: v.date, weight: v.weight || 0, height: v.height || 0 }; }));
     }, fail));
     listenDay();
   }
@@ -270,6 +287,7 @@ function firebaseStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onE
           onPet(null);
           onPhoto('');
           onHealth([]);
+          onGrowth([]);
           return emit({ status: 'signed-out', user: null });
         }
         checkAccess(user);
@@ -332,8 +350,9 @@ function firebaseStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onE
       } catch (err) { fail(err); }
     },
 
-    // Журнал: {type, sub, text, card, at: Date, day}; возвращает id записи (для «Отменить»).
-    // card — карточка тренировки или игры («k/ko-mne»), только у повторов тренировок (type 'train')
+    // Журнал: {type, sub, text, card, grams, at: Date, day}; возвращает id записи (для «Отменить»).
+    // card — карточка тренировки или игры («k/ko-mne»), только у повторов тренировок (type 'train');
+    // grams — сколько граммов корма отсыпали, только у кормления
     addEvent(ev) {
       if (!ready()) return null;
       const { doc, collection, setDoc, serverTimestamp, Timestamp } = fb.fs;
@@ -343,6 +362,7 @@ function firebaseStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onE
         uid: state.user.uid, name: state.user.name, createdAt: serverTimestamp(),
       };
       if (ev.card) data.card = ev.card;
+      if (ev.grams) data.grams = ev.grams;
       setDoc(ref, data).catch(fail);
       return ref.id;
     },
@@ -407,7 +427,7 @@ function firebaseStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onE
       return {
         plan: plan.exists() ? plain(plan.data()) : null,
         marks: await all('marks'), days: await all('days'), events: await all('events'), cards: await all('cards'),
-        pet: await all('pet'), health: await all('health'), stories: await all('stories'),
+        pet: await all('pet'), health: await all('health'), stories: await all('stories'), growth: await all('growth'),
       };
     },
 
@@ -438,6 +458,21 @@ function firebaseStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onE
       if (!ready()) return;
       const { doc, deleteDoc } = fb.fs;
       deleteDoc(doc(db, 'health', id)).catch(fail);
+    },
+    // Измерение: {date, weight (кг), height (см)}; пустое поле не сохраняется
+    saveGrowth(id, rec) {
+      if (!ready()) return;
+      const { doc, collection, setDoc, serverTimestamp } = fb.fs;
+      const ref = id ? doc(db, 'growth', id) : doc(collection(db, 'growth'));
+      const data = { date: rec.date, updatedAt: serverTimestamp(), updatedBy: state.user.name };
+      if (rec.weight) data.weight = rec.weight;
+      if (rec.height) data.height = rec.height;
+      setDoc(ref, data).catch(fail);
+    },
+    deleteGrowth(id) {
+      if (!ready()) return;
+      const { doc, deleteDoc } = fb.fs;
+      deleteDoc(doc(db, 'growth', id)).catch(fail);
     },
 
     // ---------- Заметки о днях (дневник) ----------
