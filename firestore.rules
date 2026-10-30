@@ -162,6 +162,16 @@ service cloud.firestore {
       allow delete: if isAllowed();
     }
 
+    // Библиотека: что прочитано и лучший результат теста — у каждого свой документ, чужой не виден
+    match /reads/{uid} {
+      allow read, delete: if isAllowed() && request.auth.uid == uid;
+      allow create, update: if isAllowed() && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['items', 'quizBest', 'updatedAt'])
+        && (!('items' in request.resource.data) || (request.resource.data.items is map && request.resource.data.items.size() <= 500))
+        && (!('quizBest' in request.resource.data) || (request.resource.data.quizBest is int && request.resource.data.quizBest >= 0 && request.resource.data.quizBest <= 100))
+        && request.resource.data.updatedAt == request.time;
+    }
+
     // Дневник: заметка о дне (заголовок, текст и необязательное фото), один документ на дату
     match /stories/{day} {
       allow read: if isAllowed();

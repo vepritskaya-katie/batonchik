@@ -7,9 +7,10 @@ import {
   EVENT_TYPES, SUBS, TRAIN, dayKey, fmtTime, fmtDate, addDays, moscowDate, dayStats, eventRow, todaySummary, nightLine, nightFor, plural, mondayOf, dayTitle,
   rhythmHtml, weekStatsHtml, dayFeedHtml,
 } from './diary.js';
-import { HEALTH_KINDS, NEXT_OPTIONS, nextDate, suggestNext, dueText, ageText, upcoming, doneRecords, googleCalendarUrl, icsText, healthRowHtml, daysBetween, ageShort } from './passport.js';
+import { HEALTH_KINDS, NEXT_OPTIONS, nextDate, suggestNext, dueText, ageText, upcoming, doneRecords, googleCalendarUrl, icsText, healthRowHtml, daysBetween, ageShort, ageMonths } from './passport.js';
 import { pickPhoto, compressPhoto } from './photo.js';
 import { fmtNum, parseNum, series, deltaText, lineChartSvg } from './growth.js';
+import { RUBRICS, parseLibrary, quizOrder, readKey, readCount, readBtn, metaChips, articleBody, foldList, agesHtml, dictHtml, booksHtml, quizHtml, introHtml } from './library.js';
 import { pickIdeas } from './ideas.js';
 import { parseNotes, notesListHtml, noteHtml, noteMatches, countText } from './notes.js';
 
@@ -85,6 +86,10 @@ const S = {
   photo: '',          // фото Батончика (data:image/jpeg…)
   health: [],         // паспорт: прививки, обработки, таблетки, врач — { id, title, kind, date, done, note }
   growth: [],         // рост и вес: { id, date, weight (кг), height (см) }
+  lib: null,          // Библиотека (content/biblioteka.md)
+  reads: { items: {}, quizBest: null }, // что прочитано в Библиотеке и лучший результат теста — у каждого свои
+  quiz: { i: 0, picked: null, score: 0, done: false },
+  factShift: 0,       // «Ещё факт» в «Факте дня»
   stories: {},        // дневник: заметки о днях { 'ГГГГ-ММ-ДД': { title, text, photo } } за загруженные дни
 };
 
@@ -152,6 +157,7 @@ const store = createStore({
   onPhoto(data) { S.photo = data || ''; render(); },
   onHealth(list) { S.health = list || []; render(); },
   onGrowth(list) { S.growth = list || []; render(); },
+  onReads(r) { S.reads = r || { items: {}, quizBest: null }; render(); },
   onError(message) { toast(message); },
 }, firebaseConfig);
 
@@ -261,6 +267,9 @@ async function loadContent() {
   tasks.push(loadText('kanaly.md').then((t) => {
     try { S.notes = parseNotes(t); } catch (err) { console.error(err); S.notes = { error: true }; }
   }).catch(() => { S.notes = { error: true }; }));
+  tasks.push(loadText('biblioteka.md').then((t) => {
+    try { S.lib = parseLibrary(t); } catch (err) { console.error(err); S.lib = { error: true }; }
+  }).catch(() => { S.lib = { error: true }; }));
   tasks.push(loadText('rasporyadok.md').then((t) => {
     try { S.today = parseToday(t); } catch { S.today = { raw: t }; }
   }).catch(() => { S.today = { error: true }; }));
@@ -883,6 +892,7 @@ function renderDayPage() {
   const days = diaryDays();
   return `${pageHead({ eyebrow: cap(dayTitle(S.day)), title: 'День', sub: 'Всё, что отметили за день. Новый день начнётся после «Легли вечером».', plus: { action: 'ev-menu', label: 'Новая запись' } })}
     ${statusBanner()}
+    ${factHtml()}
     ${journalHtml()}
     ${rhythmHtml(st, { trainsDone: p.done, trainsTotal: p.total })}
     ${canWrite() ? weekStatsHtml({ days, prevWeek: days.slice(7, 14), loading: S.diary.loading || !S.diary.from }) : ''}`;
@@ -918,20 +928,118 @@ function renderTrainingsPage() {
 
 function tipsSwitch(on) {
   const a = (key, href, label) => `<a class="seg${on === key ? ' on' : ''}" href="${href}"${on === key ? ' aria-current="page"' : ''}>${label}</a>`;
-  return `<nav class="segmented two" aria-label="Советы или Каналы">${a('t', '#/t', 'Наши советы')}${a('c', '#/c', 'Каналы')}</nav>`;
+  return `<nav class="segmented three" aria-label="Разделы советов">${a('t', '#/t', 'Практика')}${a('lib', '#/lib', 'Библиотека')}${a('c', '#/c', 'Каналы')}</nav>`;
 }
+const TIPS_SUB = 'Что делать, почему это работает и заметки из каналов.';
 
 function renderTipsPage() {
-  return `${pageHead({ title: 'Советы', sub: 'Правила, протоколы и заметки из каналов.', plus: { action: 'new-tip', label: 'Новый совет' } })}
+  return `${pageHead({ title: 'Советы', sub: TIPS_SUB, plus: { action: 'new-tip', label: 'Новый совет' } })}
     ${tipsSwitch('t')}
     ${catalogBody('t')}`;
 }
 
 function renderNotesPage() {
-  const head = `${pageHead({ title: 'Советы', sub: 'Правила, протоколы и заметки из каналов.' })}${tipsSwitch('c')}`;
+  const head = `${pageHead({ title: 'Советы', sub: TIPS_SUB })}${tipsSwitch('c')}`;
   if (!S.notes) return `${head}<p class="muted">Загружаем…</p>`;
   if (S.notes.error) return `${head}<div class="banner warn">Не удалось загрузить заметки. Проверьте интернет.</div>`;
   return head + notesListHtml(S.notes, S.notesFilter);
+}
+
+// ---------- Библиотека ----------
+
+const BACK_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>';
+
+// Подпись под рубрикой: сколько прочитано, текущий этап, лучший результат
+function rubricNote(key) {
+  const lib = S.lib;
+  const r = RUBRICS.find((x) => x.key === key);
+  if (r.read) { const c = readCount(lib, key, S.reads.items); return c.done ? `прочитано ${c.done} из ${c.total}` : `${c.total} ${key === 'a' ? plural(c.total, 'статья', 'статьи', 'статей') : key === 'qa' ? plural(c.total, 'вопрос', 'вопроса', 'вопросов') : plural(c.total, 'миф', 'мифа', 'мифов')}`; }
+  if (key === 'ages') { const m = ageMonths(S.pet && S.pet.birth, S.day); const now = m != null && lib.ages.find((s) => s.range && m >= s.range.from && m < s.range.to); return now ? `сейчас: ${now.label}` : r.sub; }
+  if (key === 'dict') return `${lib.dict.length} ${plural(lib.dict.length, 'термин', 'термина', 'терминов')}`;
+  if (key === 'quiz') return S.reads.quizBest != null ? `лучший результат: ${S.reads.quizBest} из ${lib.quiz.length}` : `${lib.quiz.length} вопросов`;
+  return r.sub;
+}
+
+function renderLibrary(r) {
+  const head = `${pageHead({ title: 'Советы', sub: TIPS_SUB })}${tipsSwitch('lib')}`;
+  if (!S.lib) return `${head}<p class="muted">Загружаем…</p>`;
+  if (S.lib.error) return `${head}<div class="banner warn">Не удалось загрузить Библиотеку. Проверьте интернет.</div>`;
+  const rubric = RUBRICS.find((x) => x.key === r.id);
+  if (!rubric) {
+    const tiles = RUBRICS.map((x) => `<a class="lib-tile" href="#/lib/${x.key}"><span class="lib-icon" aria-hidden="true">${x.icon}</span>
+      <strong>${x.title}</strong><span>${escapeHtml(rubricNote(x.key))}</span></a>`).join('');
+    return `${head}<div class="prose lib-intro">${introHtml(S.lib)}</div><div class="lib-grid">${tiles}</div>`;
+  }
+  if (rubric.key === 'a' && r.sub) return renderArticle(r.sub);
+  const can = canWrite();
+  const back = `<a class="back" href="#/lib">${BACK_SVG}Библиотека</a>`;
+  const top = `${back}<div class="page-head"><div class="page-head-text"><p class="eyebrow">Библиотека</p><h1>${rubric.title}</h1>
+    <p class="page-sub">${escapeHtml(rubricNote(rubric.key))}${rubric.read && can ? ' · кружок справа — «прочитано»' : ''}</p></div></div>`;
+  let body = '';
+  if (rubric.key === 'a') {
+    body = `<ul class="lib-list">${S.lib.a.map((c) => {
+      const on = !!S.reads.items[readKey('a', c.id)];
+      return `<li class="lib-row${on ? ' read' : ''}"><a class="lib-link" href="#/lib/a/${c.id}"><strong>${inline(c.title)}</strong>
+        <span class="lib-chips">${metaChips(c)}</span></a>${readBtn('a', c.id, on, can)}</li>`;
+    }).join('')}</ul>`;
+  } else if (rubric.key === 'qa' || rubric.key === 'myths') body = foldList(S.lib, rubric.key, S.reads.items, can, r.sub);
+  else if (rubric.key === 'ages') {
+    const m = ageMonths(S.pet && S.pet.birth, S.day);
+    body = `${m != null ? `<p class="muted">${escapeHtml(DOG())} сейчас ${ageText(S.pet.birth, S.day)}. Текущий этап открыт и отмечен.</p>` : ''}${agesHtml(S.lib, m)}`;
+  } else if (rubric.key === 'body') body = S.lib.body.map((c) => `<div class="prose lib-sheet">${articleBody(c)}</div>`).join('');
+  else if (rubric.key === 'dict') body = dictHtml(S.lib);
+  else if (rubric.key === 'quiz') {
+    if (!S.quiz.order) S.quiz.order = quizOrder(S.lib);
+    body = quizHtml(S.lib, S.quiz, S.reads.quizBest);
+  }
+  else if (rubric.key === 'books') body = booksHtml(S.lib);
+  return top + body;
+}
+
+function renderArticle(id) {
+  const list = S.lib.a;
+  const i = list.findIndex((c) => c.id === id);
+  const back = `<a class="back" href="#/lib/a">${BACK_SVG}Статьи</a>`;
+  if (i < 0) return `${back}<p class="empty">Статья не найдена.</p>`;
+  const c = list[i];
+  const on = !!S.reads.items[readKey('a', c.id)];
+  const next = list[i + 1];
+  return `${back}
+    <p class="eyebrow">Статья ${i + 1} из ${list.length}</p>
+    <h1 class="card-title">${inline(c.title)}</h1>
+    <div class="lib-chips big">${metaChips(c)}</div>
+    <div class="prose article">${articleBody(c)}</div>
+    <button class="btn wide read-toggle${on ? ' on' : ''}" data-action="lib-read" data-id="${readKey('a', c.id)}"${canWrite() ? '' : ' disabled'}>${on ? '✓ Прочитано' : 'Отметить прочитанной'}</button>
+    ${next ? `<a class="next-link" href="#/lib/a/${next.id}"><span class="muted small">Следующая статья</span><strong>${inline(next.title)}</strong></a>` : ''}`;
+}
+
+// «Факт дня» вверху вкладки «День»: каждый день следующий по кругу, по нажатию — ещё один
+function factHtml() {
+  const facts = S.lib && S.lib.facts;
+  if (!facts || !facts.length) return '';
+  const dayNum = Math.floor(Date.parse(`${S.day}T00:00:00Z`) / 86400000);
+  const fact = facts[(((dayNum + S.factShift) % facts.length) + facts.length) % facts.length];
+  return `<button type="button" class="fact-day" data-action="fact-next" aria-label="Факт дня. Нажмите, чтобы показать следующий">
+    <span class="fact-head"><span aria-hidden="true">✨</span> Факт дня <span class="fact-more">ещё ›</span></span>
+    <span class="fact-text">${inline(fact)}</span></button>`;
+}
+
+// Поиск по словарю — без перерисовки страницы
+function filterDict(input) {
+  const words = input.value.toLowerCase().replace(/ё/g, 'е').split(/\s+/).filter(Boolean);
+  let shown = 0;
+  let letter = null;
+  let letterHas = false;
+  const flush = () => { if (letter) letter.hidden = !letterHas; };
+  view.querySelectorAll('.dict > li').forEach((li) => {
+    if (li.hasAttribute('data-letter')) { flush(); letter = li; letterHas = false; return; }
+    const ok = words.every((w) => li.dataset.search.includes(w));
+    li.hidden = !ok;
+    if (ok) { shown++; letterHas = true; }
+  });
+  flush();
+  const empty = view.querySelector('.dict-empty');
+  if (empty) empty.hidden = shown > 0;
 }
 
 // ---------- Каналы ----------
@@ -963,6 +1071,7 @@ function applyNotesFilter() {
   if (empty) empty.hidden = shown > 0;
 }
 
+view.addEventListener('input', (e) => { if (e.target.matches('.dict-search')) filterDict(e.target); });
 view.addEventListener('input', (e) => {
   if (!e.target.matches('.notes-search')) return;
   S.notesFilter.q = e.target.value;
@@ -1539,7 +1648,7 @@ function renderMe() {
 function route() {
   const parts = location.hash.replace(/^#\/?/, '').split('/').filter(Boolean).map(decodeURIComponent);
   if (parts[0] === 'edit') return { page: 'edit', tab: parts[1], id: parts[2] || 'new' };
-  return { page: parts[0] || 'today', tab: parts[0] || 'today', id: parts[1] || null };
+  return { page: parts[0] || 'today', tab: parts[0] || 'today', id: parts[1] || null, sub: parts[2] || null };
 }
 
 let lastRouteKey = '';
@@ -1559,9 +1668,9 @@ function onHashChange() {
 }
 
 // Название страницы для кнопки «Назад»; для правки карточки — нет (туда не возвращаемся)
-const PAGE_TITLES = { today: 'Главная', day: 'День', k: 'Тренировки', g: 'Тренировки', pass: 'Паспорт', growth: 'Рост и вес', t: 'Советы', c: 'Каналы', d: 'Дневник', me: 'Настройки' };
+const PAGE_TITLES = { today: 'Главная', day: 'День', k: 'Тренировки', g: 'Тренировки', pass: 'Паспорт', growth: 'Рост и вес', lib: 'Библиотека', t: 'Советы', c: 'Каналы', d: 'Дневник', me: 'Настройки' };
 // Какая вкладка внизу подсвечена: игры живут во вкладке «Тренировки», Каналы — в «Советах»
-const TAB_OF = { today: 'today', day: 'day', k: 'k', g: 'k', pass: 'pass', growth: 'pass', t: 't', c: 't', d: 'd' };
+const TAB_OF = { today: 'today', day: 'day', k: 'k', g: 'k', pass: 'pass', growth: 'pass', lib: 't', t: 't', c: 't', d: 'd' };
 
 function pageTitle(hash) {
   const parts = hash.replace(/^#\/?/, '').split('/').filter(Boolean);
@@ -1578,25 +1687,30 @@ function render(force) {
   if (r.page === 'edit' && !force && S.editor && S.editor.key === editorKey(r) && view.querySelector('[data-editor]')) return;
   // То же для поиска в «Каналах», пока в нём печатают
   if (r.page === 'c' && !r.id && !force && document.activeElement && document.activeElement.matches('.notes-search')) return;
+  if (r.page === 'lib' && r.id === 'dict' && !force && document.activeElement && document.activeElement.matches('.dict-search')) return;
   let html;
   if (r.page === 'me') html = renderMe();
   else if (r.page === 'edit') html = renderEditor(r);
   else if (r.page === 'day') html = renderDayPage();
   else if (r.page === 'pass') html = renderPassport();
   else if (r.page === 'growth') html = renderGrowth();
+  else if (r.page === 'lib') html = renderLibrary(r);
   else if (r.page === 'd') html = renderDiary();
   else if (r.page === 'c') html = r.id ? renderNote(r.id) : renderNotesPage();
   else if (TABS[r.tab]) html = r.id ? renderCard(r.tab, r.id) : (r.tab === 't' ? renderTipsPage() : renderTrainingsPage());
   else html = renderHome();
   view.innerHTML = html;
 
-  const routeKey = r.page + '/' + (r.tab || '') + '/' + (r.id || '');
+  const routeKey = r.page + '/' + (r.tab || '') + '/' + (r.id || '') + '/' + (r.sub || '');
   if (routeKey !== lastRouteKey) {
     lastRouteKey = routeKey;
     const saved = scrollMemory[currentHash];
-    const isCard = !!((TABS[r.tab] || r.page === 'c') && r.id);
+    const isCard = !!((TABS[r.tab] || r.page === 'c') && r.id) || !!(r.page === 'lib' && r.sub);
     pendingScroll = !isCard && saved ? { y: saved, until: Date.now() + 2000 } : null;
     window.scrollTo(0, pendingScroll ? saved : 0);
+    // Ссылка на вопрос или миф — раскрытый пункт сразу на экране
+    const target = r.page === 'lib' && r.sub && r.id !== 'a' && document.getElementById(`lib-${r.id}-${r.sub}`);
+    if (target) target.scrollIntoView({ block: 'start' });
   } else if (pendingScroll && Date.now() < pendingScroll.until) {
     // Страница дорисовалась (например, подгрузились данные) — дотягиваем до запомненного места
     window.scrollTo(0, pendingScroll.y);
@@ -1929,6 +2043,31 @@ const actions = {
     applyNotesFilter();
   },
   'tip-next': () => { S.tipShift++; render(); },
+  'fact-next': () => { S.factShift++; render(); },
+  // Библиотека
+  'lib-read': (el) => {
+    if (!canWrite()) return;
+    const on = !S.reads.items[el.dataset.id];
+    S.reads = { ...S.reads, items: { ...S.reads.items } };
+    if (on) S.reads.items[el.dataset.id] = true; else delete S.reads.items[el.dataset.id];
+    store.setRead(el.dataset.id, on);
+    render();
+  },
+  'quiz-pick': (el) => {
+    const q = S.lib.quiz[S.quiz.i];
+    if (S.quiz.picked != null || !q) return;
+    S.quiz.picked = +el.dataset.k;
+    if (S.quiz.picked === q.answer) S.quiz.score++;
+    render();
+  },
+  'quiz-next': () => {
+    if (S.quiz.i + 1 < S.lib.quiz.length) { S.quiz = { ...S.quiz, i: S.quiz.i + 1, picked: null }; render(); return; }
+    S.quiz = { ...S.quiz, done: true };
+    if (canWrite() && (S.reads.quizBest == null || S.quiz.score > S.reads.quizBest)) store.saveQuizBest(S.quiz.score);
+    render();
+    window.scrollTo(0, 0);
+  },
+  'quiz-restart': () => { S.quiz = { i: 0, picked: null, score: 0, done: false, order: quizOrder(S.lib) }; render(); },
   // Оформление текста совета: подзаголовок, список, жирный
   'ed-fmt': (el) => {
     const ta = view.querySelector('[data-editor] textarea[data-path="text"]');

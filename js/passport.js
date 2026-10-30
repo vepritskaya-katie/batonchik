@@ -92,6 +92,15 @@ export function ageText(birth, today) {
     .filter(Boolean).join(' ');
 }
 
+// Полных месяцев от рождения до даты; без даты рождения — null
+export function ageMonths(birth, today) {
+  if (!/^\d{4}-\d\d-\d\d$/.test(birth || '')) return null;
+  const [by, bm, bd] = birth.split('-').map(Number);
+  const [ty, tm, td] = today.split('-').map(Number);
+  const m = (ty - by) * 12 + (tm - bm) - (td < bd ? 1 : 0);
+  return m < 0 ? null : m;
+}
+
 // Возраст для плитки: { n: '5', unit: 'мес' }, { n: '11', unit: 'нед' }, { n: '1 г', unit: '3 мес' }
 export function ageShort(birth, today) {
   if (!/^\d{4}-\d\d-\d\d$/.test(birth || '')) return null;
