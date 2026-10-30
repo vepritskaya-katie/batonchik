@@ -558,16 +558,6 @@ button.ev-row { cursor: pointer; }
 /* Отступ между вступлением раздела и первой карточкой */
 .group > .prose, .group > details.intro { margin-bottom: 16px; }
 
-/* ---------- Совет дня ---------- */
-.daily-tip {
-  margin: 4px 0 22px; padding: 18px 18px 14px; border-radius: 22px;
-  background: color-mix(in srgb, var(--hint) 75%, transparent);
-}
-.daily-head { margin: 0 0 8px; font-size: 13px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: color-mix(in srgb, var(--text) 55%, var(--hint)); }
-.daily-text { margin: 0; font: 500 19px/1.45 "Manrope", sans-serif; letter-spacing: -.01em; }
-.daily-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
-.daily-actions .btn { border-color: color-mix(in srgb, var(--text) 16%, transparent); color: var(--text); }
-
 /* ---------- Каналы ---------- */
 .notes-intro { margin-bottom: 14px; }
 .notes-tools { display: grid; gap: 10px; margin-bottom: 8px; }
@@ -915,9 +905,9 @@ a.id-stat::after { content: "›"; position: absolute; top: 6px; right: 10px; co
 
 /* ---------- Факт дня ---------- */
 .fact-day {
-  display: grid; gap: 6px; width: 100%; margin: 0 0 18px; padding: 14px 16px; border-radius: 20px; text-align: left; cursor: pointer;
+  display: grid; gap: 8px; width: 100%; margin: 0 0 18px; padding: 16px 18px; border-radius: 20px; text-align: left; cursor: pointer;
   border: 0; background: color-mix(in srgb, var(--sage) 70%, transparent); color: var(--text); font: inherit;
 }
 .fact-head { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: color-mix(in srgb, var(--text) 60%, var(--sage)); }
 .fact-more { margin-left: auto; letter-spacing: 0; text-transform: none; font-weight: 600; color: var(--accent-text); }
-.fact-text { font: 500 17px/1.45 "Manrope", sans-serif; }
+.fact-text { font: 500 18px/1.45 "Manrope", sans-serif; letter-spacing: -.01em; }

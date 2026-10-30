@@ -81,7 +81,6 @@ const S = {
   edit: { trainings: false },
   notes: null,        // вкладка «Каналы»: заметки из Telegram-каналов (только чтение)
   notesFilter: { q: '', now: false, future: false, sci: false, exp: false },
-  tipShift: 0,        // «Ещё совет» в «Совете дня»
   pet: null,          // паспорт: { name, breed, birth, sex, chip, mdr1, weight }
   photo: '',          // фото Батончика (data:image/jpeg…)
   health: [],         // паспорт: прививки, обработки, таблетки, врач — { id, title, kind, date, done, note }
@@ -89,7 +88,7 @@ const S = {
   lib: null,          // Библиотека (content/biblioteka.md)
   reads: { items: {}, quizBest: null }, // что прочитано в Библиотеке и лучший результат теста — у каждого свои
   quiz: { i: 0, picked: null, score: 0, done: false },
-  factShift: 0,       // «Ещё факт» в «Факте дня»
+  factShift: 0,       // «Факт дня» на главной: нажатие — следующий
   stories: {},        // дневник: заметки о днях { 'ГГГГ-ММ-ДД': { title, text, photo } } за загруженные дни
 };
 
@@ -115,9 +114,6 @@ function eventDayFor(at, type) {
   if (type !== 'wake' && cal === dayKey() && S.day < cal) return S.day;
   return cal;
 }
-
-// Карточка в «Советах» со списком для окошка «Совет дня»: в общем списке советов её не показываем
-const DAILY_TIPS_ID = 'sovety-dnya';
 
 const $ = (sel) => document.querySelector(sel);
 const view = $('#view');
@@ -875,7 +871,7 @@ function renderHome() {
     ${statusBanner()}
     ${heroHtml()}
     ${homeJournalHtml()}
-    ${dailyTipHtml()}
+    ${factHtml()}
     ${homeTrainingsHtml()}
     ${homeHealthHtml()}`;
 }
@@ -892,7 +888,6 @@ function renderDayPage() {
   const days = diaryDays();
   return `${pageHead({ eyebrow: cap(dayTitle(S.day)), title: 'День', sub: 'Всё, что отметили за день. Новый день начнётся после «Легли вечером».', plus: { action: 'ev-menu', label: 'Новая запись' } })}
     ${statusBanner()}
-    ${factHtml()}
     ${journalHtml()}
     ${rhythmHtml(st, { trainsDone: p.done, trainsTotal: p.total })}
     ${canWrite() ? weekStatsHtml({ days, prevWeek: days.slice(7, 14), loading: S.diary.loading || !S.diary.from }) : ''}`;
@@ -928,9 +923,9 @@ function renderTrainingsPage() {
 
 function tipsSwitch(on) {
   const a = (key, href, label) => `<a class="seg${on === key ? ' on' : ''}" href="${href}"${on === key ? ' aria-current="page"' : ''}>${label}</a>`;
-  return `<nav class="segmented three" aria-label="Разделы советов">${a('t', '#/t', 'Практика')}${a('lib', '#/lib', 'Библиотека')}${a('c', '#/c', 'Каналы')}</nav>`;
+  return `<nav class="segmented three" aria-label="Разделы советов">${a('lib', '#/lib', 'Библиотека')}${a('t', '#/t', 'Практика')}${a('c', '#/c', 'Каналы')}</nav>`;
 }
-const TIPS_SUB = 'Что делать, почему это работает и заметки из каналов.';
+const TIPS_SUB = 'Почему это работает, что делать и заметки из каналов.';
 
 function renderTipsPage() {
   return `${pageHead({ title: 'Советы', sub: TIPS_SUB, plus: { action: 'new-tip', label: 'Новый совет' } })}
@@ -1013,7 +1008,7 @@ function renderArticle(id) {
     ${next ? `<a class="next-link" href="#/lib/a/${next.id}"><span class="muted small">Следующая статья</span><strong>${inline(next.title)}</strong></a>` : ''}`;
 }
 
-// «Факт дня» вверху вкладки «День»: каждый день следующий по кругу, по нажатию — ещё один
+// «Факт дня» на главной: каждый день следующий по кругу, по нажатию — ещё один
 function factHtml() {
   const facts = S.lib && S.lib.facts;
   if (!facts || !facts.length) return '';
@@ -1078,31 +1073,6 @@ view.addEventListener('input', (e) => {
   applyNotesFilter();
 });
 
-// ---------- Совет дня ----------
-
-function dailyTips() {
-  const card = findCard('t', DAILY_TIPS_ID);
-  if (!card) return [];
-  const items = (blocks) => blocks.flatMap((b) => (b.type === 'list' ? b.items.map((it) => it.text) : []));
-  return [...items(card.lead), ...card.blocks.flatMap((b) => items(b.content))].filter((s) => s.trim());
-}
-
-function dailyTipHtml() {
-  const tips = dailyTips();
-  if (!tips.length) return '';
-  // Новый совет каждый день по порядку списка; «Ещё совет» листает дальше
-  const dayNum = Math.floor(Date.parse(`${S.day}T00:00:00Z`) / 86400000);
-  const tip = tips[(((dayNum + S.tipShift) % tips.length) + tips.length) % tips.length];
-  return `<section class="daily-tip" aria-label="Совет дня">
-    <p class="daily-head"><span aria-hidden="true">💡</span> Совет дня</p>
-    <p class="daily-text">${inline(tip)}</p>
-    <div class="daily-actions">
-      <button type="button" class="btn small" data-action="tip-next">Ещё совет</button>
-      <a class="btn small" href="#/t/${DAILY_TIPS_ID}">Все советы</a>
-    </div>
-  </section>`;
-}
-
 // ---------- Каталоги ----------
 
 function catalogBody(tab, { showTitle = false } = {}) {
@@ -1114,7 +1084,7 @@ function catalogBody(tab, { showTitle = false } = {}) {
   const loose = cat.loose.length ? `<div class="prose">${blocksHtml(cat.loose, tab, null)}</div>` : '';
   const groups = cat.groups.map((g) => {
     if (g.raw) return `<section class="group"><div class="raw">${escapeHtml(g.raw)}</div></section>`;
-    const cards = g.cards.filter((c) => !(tab === 't' && c.id === DAILY_TIPS_ID)).map((c) => {
+    const cards = g.cards.map((c) => {
       const p = cardProgress(tab, c);
       let prog = '';
       if (p.mastered) prog = '<span class="card-prog ok">✓ Освоено</span>';
@@ -2042,7 +2012,6 @@ const actions = {
     el.setAttribute('aria-pressed', String(S.notesFilter[key]));
     applyNotesFilter();
   },
-  'tip-next': () => { S.tipShift++; render(); },
   'fact-next': () => { S.factShift++; render(); },
   // Библиотека
   'lib-read': (el) => {
@@ -2213,7 +2182,7 @@ function switchDay(k) {
   S.recent = [...S.recent, ...S.events];
   S.events = [];
   S.ideaShift = { game: 0, training: 0 };
-  S.tipShift = 0;
+  S.factShift = 0;
   store.setDay(k);
   render();
 }

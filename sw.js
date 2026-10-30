@@ -1,7 +1,7 @@
 // Работа без интернета: файлы приложения и памятки хранятся на телефоне.
 // При наличии сети всегда берётся свежая версия, без сети — сохранённая.
 
-const VERSION = 'batonchik-v18';
+const VERSION = 'batonchik-v19';
 const SDK = 'https://www.gstatic.com/firebasejs/12.19.0/';
 const APP_FILES = [
   './', 'index.html', 'manifest.webmanifest', 'css/style.css',
