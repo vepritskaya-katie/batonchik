@@ -188,7 +188,7 @@ function miniChart(title, days, field) {
   return `<figure class="mini-chart"><figcaption>${title}</figcaption><div class="bars">${bars}</div></figure>`;
 }
 
-function trainsLine(st, cardName) {
+export function trainsLine(st, cardName) {
   if (!st.trains) return '';
   const parts = Object.entries(st.trainsByCard).sort((a, b) => b[1] - a[1])
     .map(([card, n]) => `${escapeHtml(cardName(card))} ${n}`);
@@ -249,44 +249,4 @@ export function weekStatsHtml({ days, prevWeek, loading }) {
 
 // Дневник: лента дней. У каждого дня — короткая строка из журнала, освоенное и, если написана, заметка о дне.
 // Последний день с заметкой — большой карточкой сверху.
-export function dayFeedHtml({ days, markLabels, hasMore, loading, cardName, stories, editable }) {
-  const featured = days.find((d) => stories[d.key] && (stories[d.key].text || stories[d.key].title));
-  const storyBtn = (key, has) => (editable ? `<button class="btn small" data-action="story-edit" data-day="${key}">${has ? 'Изменить заметку' : 'Написать о дне'}</button>` : '');
-  const feature = featured ? (() => {
-    const s = stories[featured.key];
-    const [, m, d] = featured.key.split('-').map(Number);
-    return `<article class="story-feature">
-      <div class="story-date"><strong>${d}</strong><span>${MONTHS_SHORT[m - 1]}</span></div>
-      <div class="story-body">
-        <p class="eyebrow">День, который хочется помнить</p>
-        ${s.title ? `<h2>${escapeHtml(s.title)}</h2>` : ''}
-        ${s.photo ? `<img class="story-photo" src="${escapeHtml(s.photo)}" alt="">` : ''}
-        <div class="story-text">${inline(s.text || '').replace(/\n/g, '<br>')}</div>
-        ${editable ? `<button class="btn small ghost" data-action="story-edit" data-day="${featured.key}">Изменить</button>` : ''}
-      </div></article>`;
-  })() : '';
-  const rows = days.filter((d) => !d.empty || (markLabels[d.key] || []).length || stories[d.key]).map((d) => {
-    const s = stories[d.key];
-    const mastered = markLabels[d.key] || [];
-    const line = daySummaryLine(d);
-    return `<article class="day-card">
-      <div class="day-card-head"><h3>${dayTitle(d.key)}</h3></div>
-      ${line ? `<p class="day-line">${line}</p>` : ''}
-      ${trainsLine(d, cardName)}
-      ${mastered.length ? `<p class="mastered">✓ Освоено: ${mastered.map(escapeHtml).join('; ')}</p>` : ''}
-      ${s && d !== featured ? `<div class="story-mini">${s.photo ? `<img src="${escapeHtml(s.photo)}" alt="">` : ''}<div>
-        ${s.title ? `<strong>${escapeHtml(s.title)}</strong>` : ''}<p>${inline(s.text || '').replace(/\n/g, '<br>')}</p></div></div>` : ''}
-      ${d.notes.length ? `<ul class="ev-list notes">${d.notes.map((e) => eventRow(e)).join('')}</ul>` : ''}
-      ${d.list.length ? `<details class="intro"><summary>Все записи (${d.list.length})</summary>
-        <ul class="ev-list">${d.list.map((e) => eventRow(e)).join('')}</ul></details>` : ''}
-      ${storyBtn(d.key, !!s)}
-    </article>`;
-  }).join('');
-  return `${feature}
-    <section class="section">
-      ${rows || `<p class="muted">${loading ? 'Загружаем…' : 'Пока пусто. Записи из журнала и ваши заметки о днях появятся здесь.'}</p>`}
-      ${hasMore ? '<button class="btn wide" data-action="diary-more">Показать ещё 4 недели</button>' : ''}
-    </section>`;
-}
-
-const MONTHS_SHORT = ['янв', 'фев', 'мар', 'апр', 'мая', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
+export const MONTHS_SHORT = ['янв', 'фев', 'мар', 'апр', 'мая', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];

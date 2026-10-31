@@ -193,15 +193,29 @@ service cloud.firestore {
       allow delete: if isAllowed();
     }
 
-    // Дневник: заметка о дне (заголовок, текст и необязательное фото), один документ на дату
+    // Дневник: заметка о дне (заголовок, текст, «день, который хочется помнить»), один документ на дату
     match /stories/{day} {
       allow read: if isAllowed();
       allow create, update: if isAllowed()
         && day.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
-        && request.resource.data.keys().hasOnly(['title', 'text', 'photo', 'updatedAt', 'updatedBy'])
+        && request.resource.data.keys().hasOnly(['title', 'text', 'photo', 'special', 'hasPhoto', 'updatedAt', 'updatedBy'])
         && request.resource.data.title is string && request.resource.data.title.size() <= 120
         && request.resource.data.text is string && request.resource.data.text.size() <= 5000
-        && request.resource.data.photo is string && request.resource.data.photo.size() <= 900000
+        && (!('photo' in request.resource.data) || (request.resource.data.photo is string && request.resource.data.photo.size() <= 900000))
+        && (!('special' in request.resource.data) || request.resource.data.special is bool)
+        && (!('hasPhoto' in request.resource.data) || request.resource.data.hasPhoto is bool)
+        && request.resource.data.updatedAt == request.time
+        && request.resource.data.updatedBy is string && request.resource.data.updatedBy.size() <= 40;
+      allow delete: if isAllowed();
+    }
+
+    // Фото к заметке о дне — отдельно, чтобы календарь и список заметок грузились быстро
+    match /storyPhotos/{day} {
+      allow read: if isAllowed();
+      allow create, update: if isAllowed()
+        && day.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+        && request.resource.data.keys().hasOnly(['data', 'updatedAt', 'updatedBy'])
+        && request.resource.data.data is string && request.resource.data.data.size() <= 900000
         && request.resource.data.updatedAt == request.time
         && request.resource.data.updatedBy is string && request.resource.data.updatedBy.size() <= 40;
       allow delete: if isAllowed();

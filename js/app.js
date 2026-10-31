@@ -5,7 +5,7 @@ import { createStore } from './store.js';
 import { cardToForm, emptyForm, formToMd, editorHtml, editorAction, setPath, formatText } from './editor.js';
 import {
   EVENT_TYPES, SUBS, TRAIN, dayKey, fmtTime, fmtDate, addDays, moscowDate, dayStats, eventRow, todaySummary, nightLine, nightFor, plural, mondayOf, dayTitle,
-  rhythmHtml, weekStatsHtml, dayFeedHtml,
+  rhythmHtml, weekStatsHtml, daySummaryLine, trainsLine, MONTHS_SHORT,
 } from './diary.js';
 import { HEALTH_KINDS, NEXT_OPTIONS, nextDate, suggestNext, dueText, ageText, upcoming, doneRecords, googleCalendarUrl, icsText, healthRowHtml, daysBetween, ageShort, ageMonths } from './passport.js';
 import { pickPhoto, compressPhoto } from './photo.js';
@@ -28,7 +28,7 @@ try {
 const TZ = 'Europe/Moscow';
 const DAY_START_HOUR = 6; // если «Легли вечером» не отметили, новый день начинается в 6:00
 const moscowHour = (d = new Date()) => Number(new Intl.DateTimeFormat('ru-RU', { timeZone: 'Europe/Moscow', hour: 'numeric', hourCycle: 'h23' }).format(d));
-const DIARY_STEP = 28; // дневник подгружает историю по 4 недели
+const DIARY_STEP = 14; // вкладка «День»: две недели истории для сводки и графиков
 const MIN_REPS = 5;   // цель по умолчанию для тренировки на сегодня: не меньше 5 повторов
 const MAX_REPS = 50;
 // Версия списка тренировок (v у пункта): 2 — цели подняты до MIN_REPS, 3 — добавлены ежедневные
@@ -91,7 +91,10 @@ const S = {
   vet: null,          // «Срочно к ветеринару»: круглосуточная клиника и наш ветеринар
   weeks: [],          // «Неделя Батончика»: { id: воскресенье, joy, choice, sleep, ribs, waist, notes }
   factShift: 0,       // «Факт дня» на главной: нажатие — следующий
-  stories: {},        // дневник: заметки о днях { 'ГГГГ-ММ-ДД': { title, text, photo } } за загруженные дни
+  stories: {},        // дневник: заметки о днях { 'ГГГГ-ММ-ДД': { title, text, special, hasPhoto } } — все, без фото
+  storyPhotos: {},    // фото к заметкам, загруженные по требованию: { день: data:image… или '' }
+  cal: { month: '', sel: '', memShift: 0 }, // календарь в Дневнике: месяц ГГГГ-ММ, выбранный день, «другое воспоминание»
+  months: {},         // журнал по месяцам для календаря: { 'ГГГГ-ММ': { events, loading, loadedAt } }
 };
 
 const DOG = () => (S.pet && S.pet.name) || 'Батончик';
@@ -158,6 +161,7 @@ const store = createStore({
   onReads(r) { S.reads = r || { items: {}, quiz: {} }; render(); },
   onVet(v) { S.vet = v; render(); },
   onWeeks(list) { S.weeks = list || []; render(); },
+  onStories(map) { S.stories = map || {}; render(); },
   onError(message) { toast(message); },
 }, firebaseConfig);
 
@@ -1344,9 +1348,8 @@ async function loadDiary(more) {
   S.diary.loading = true;
   render();
   try {
-    const [data, stories] = await Promise.all([store.loadHistory(from, today), store.loadStories(from, today)]);
+    const data = await store.loadHistory(from, today);
     S.diary = { from, events: withNewRefs(data.events), days: data.days, loading: false, loadedAt: Date.now() };
-    S.stories = { ...S.stories, ...stories };
   } catch (err) {
     console.error(err);
     S.diary.loading = false;
@@ -1385,41 +1388,207 @@ function diaryDays() {
   return days;
 }
 
-function renderDiary() {
-  const head = pageHead({ eyebrow: DOG(), title: 'Дневник', sub: 'Как прошёл каждый день: коротко из журнала и ваши заметки.', plus: { action: 'story-edit', label: 'Написать о сегодняшнем дне' } });
-  if (!canWrite()) return `${head}${statusBanner()}<p class="muted">Дневник появится после входа.</p>`;
-  if (!S.diary.from || (Date.now() - S.diary.loadedAt > 60000 && !S.diary.loading)) {
-    if (!S.diary.loading) setTimeout(() => loadDiary(false), 0);
+// ---------- Дневник: календарь ----------
+
+const isSpecial = (s) => !!s && (s.special != null ? s.special : !!s.title); // старые заметки с заголовком — памятные
+const hasStory = (s) => !!s && !!(s.title || s.text || s.hasPhoto);
+const monthOf = (day) => day.slice(0, 7);
+const MONTHS = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
+function addMonths(ym, n) {
+  const [y, m] = ym.split('-').map(Number);
+  const d = new Date(Date.UTC(y, m - 1 + n, 1));
+  return d.toISOString().slice(0, 7);
+}
+const daysIn = (ym) => { const [y, m] = ym.split('-').map(Number); return new Date(Date.UTC(y, m, 0)).getUTCDate(); };
+
+// Журнал месяца — один запрос на месяц; текущий месяц обновляем, если данные старше 5 минут
+async function loadMonth(ym) {
+  const m = S.months[ym];
+  if (!canWrite() || (m && (m.loading || (m.loadedAt && (ym !== monthOf(S.day) || Date.now() - m.loadedAt < 300000))))) return;
+  S.months[ym] = { events: m ? m.events : [], loading: true, loadedAt: m ? m.loadedAt : 0 };
+  const from = `${ym}-01`;
+  const last = `${ym}-${String(daysIn(ym)).padStart(2, '0')}`;
+  const to = last < S.day ? last : S.day;
+  try {
+    const data = from <= to ? await store.loadHistory(from, to) : { events: [] };
+    S.months[ym] = { events: withNewRefs(data.events), loading: false, loadedAt: Date.now() };
+  } catch (err) {
+    console.error(err);
+    S.months[ym] = { events: [], loading: false, loadedAt: 0 };
+    toast('Не удалось загрузить журнал за месяц. Проверьте интернет.');
   }
-  const days = diaryDays();
-  const markLabels = {};
-  for (const [id, m] of Object.entries(S.marks)) {
-    if (!m.at) continue;
-    const label = markLabel(id);
-    if (label) (markLabels[dayKey(m.at)] = markLabels[dayKey(m.at)] || []).push(label);
-  }
-  return head + dayFeedHtml({
-    days, markLabels, cardName, stories: S.stories, editable: canWrite(),
-    hasMore: !!S.diary.from && !S.diary.loading, loading: S.diary.loading || !S.diary.from,
-  });
+  render();
+}
+// Записи дня: сегодня — живые, остальное — из загруженного месяца
+function eventsOfDay(day) {
+  if (day === S.day) return S.events;
+  const m = S.months[monthOf(day)];
+  return m ? m.events.filter((e) => e.day === day) : [];
 }
 
-// Заметка о дне: заголовок, текст и фото
+// Фото заметки — только когда его показываем
+function storyPhotoOf(day) {
+  const s = S.stories[day];
+  if (!s || !s.hasPhoto) return '';
+  if (s.photo) return s.photo; // старые заметки: фото внутри
+  if (S.storyPhotos[day] === undefined) {
+    S.storyPhotos[day] = null;
+    store.loadStoryPhoto(day).then((data) => { S.storyPhotos[day] = data || ''; render(); }).catch(() => { S.storyPhotos[day] = ''; });
+  }
+  return S.storyPhotos[day] || '';
+}
+
+function calendarHtml(ym) {
+  const [y, m] = ym.split('-').map(Number);
+  const first = new Date(Date.UTC(y, m - 1, 1)).getUTCDay();
+  const lead = (first + 6) % 7; // понедельник — первый
+  const cells = [];
+  for (let i = 0; i < lead; i++) cells.push('<span class="cal-cell blank"></span>');
+  const monthReady = S.months[ym] && S.months[ym].loadedAt;
+  for (let d = 1; d <= daysIn(ym); d++) {
+    const day = `${ym}-${String(d).padStart(2, '0')}`;
+    const past = day <= S.day;
+    const st = past && (day === S.day || monthReady) ? dayStats(day, eventsOfDay(day), null, 0) : null;
+    const story = S.stories[day];
+    const health = S.health.some((r) => r.date === day);
+    const marks = [
+      st && (st.accident ? 'bad' : st.toilet ? 'ok' : ''),
+      st && st.trains ? 'train' : '',
+      health ? 'health' : '',
+      hasStory(story) ? 'story' : '',
+    ].filter(Boolean).map((k) => `<i class="mk mk-${k}"></i>`).join('');
+    const cls = ['cal-cell', day === S.day && 'today', isSpecial(story) && hasStory(story) && 'special', day === S.cal.sel && 'sel', !past && 'future'].filter(Boolean).join(' ');
+    cells.push(`<button type="button" class="${cls}" data-action="cal-pick" data-day="${day}" aria-label="${escapeHtml(dayTitle(day))}"${day === S.cal.sel ? ' aria-current="date"' : ''}>
+      <span class="cal-num">${d}</span><span class="cal-marks">${marks}</span></button>`);
+  }
+  const canNext = ym < addMonths(monthOf(S.day), 3);
+  return `<section class="cal">
+    <div class="cal-head">
+      <button type="button" class="cal-nav" data-action="cal-month" data-dir="-1" aria-label="Предыдущий месяц">‹</button>
+      <h2>${MONTHS[m - 1]} ${y}</h2>
+      <button type="button" class="cal-nav" data-action="cal-month" data-dir="1" aria-label="Следующий месяц"${canNext ? '' : ' disabled'}>›</button>
+    </div>
+    <div class="cal-grid">${['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'].map((w) => `<span class="cal-dow">${w}</span>`).join('')}${cells.join('')}</div>
+    <div class="cal-legend">
+      <span><i class="mk mk-ok"></i>туалет на улице</span><span><i class="mk mk-bad"></i>были аварии</span>
+      <span><i class="mk mk-train"></i>тренировки</span><span><i class="mk mk-health"></i>здоровье</span>
+      <span><i class="mk mk-story"></i>заметка</span><span><i class="ring-key"></i>день, который хочется помнить</span>
+    </div>
+  </section>`;
+}
+
+// Карточка выбранного дня под календарём
+function selectedDayHtml(day) {
+  const future = day > S.day;
+  const can = canWrite();
+  const st = !future && (day === S.day || (S.months[monthOf(day)] || {}).loadedAt) ? dayStats(day, eventsOfDay(day), null, 0) : null;
+  const loading = !future && !st;
+  const story = S.stories[day];
+  const health = S.health.filter((r) => r.date === day);
+  const line = st ? daySummaryLine(st) : '';
+  const photo = hasStory(story) ? storyPhotoOf(day) : '';
+  const storyHtml = hasStory(story) ? `<div class="day-story${isSpecial(story) ? ' special' : ''}">
+      ${isSpecial(story) ? '<p class="eyebrow">День, который хочется помнить</p>' : ''}
+      ${story.title ? `<h3>${escapeHtml(story.title)}</h3>` : ''}
+      ${photo ? `<img class="story-photo" src="${escapeHtml(photo)}" alt="">` : story.hasPhoto ? '<div class="story-photo ph"></div>' : ''}
+      ${story.text ? `<p>${inline(story.text).replace(/\n/g, '<br>')}</p>` : ''}
+      ${can ? `<button class="btn small" data-action="story-edit" data-day="${day}">Изменить заметку</button>` : ''}</div>`
+    : (!future && can ? `<button class="btn wide" data-action="story-edit" data-day="${day}">Написать о дне</button>` : '');
+  return `<section class="card day-sel" id="day-sel">
+    <div class="card-head"><h2>${escapeHtml(cap(dayTitle(day)))}</h2>${day === S.day ? '<span class="chip">сегодня</span>' : ''}</div>
+    ${future ? '<p class="muted">Этот день ещё впереди.</p>' : ''}
+    ${loading ? '<p class="muted">Загружаем…</p>' : ''}
+    ${line ? `<p class="day-line">${line}</p>` : ''}
+    ${st && !st.list.length && !st.trains && !hasStory(story) && !health.length ? '<p class="muted">В журнале за этот день записей нет.</p>' : ''}
+    ${st ? trainsLine(st, cardName) : ''}
+    ${health.length ? `<ul class="health-list">${health.map((r) => healthRowHtml(r, S.day)).join('')}</ul>` : ''}
+    ${storyHtml}
+    ${st && st.notes.length ? `<ul class="ev-list notes">${st.notes.map((e) => eventRow(e)).join('')}</ul>` : ''}
+    ${st && st.list.length ? `<details class="intro"><summary>Все записи (${st.list.length})</summary><ul class="ev-list">${st.list.map((e) => eventRow(e)).join('')}</ul></details>` : ''}
+  </section>`;
+}
+
+// Большая карточка вверху: заметка о сегодняшнем дне, а если её нет — воспоминание
+function memoryPool() {
+  const past = Object.keys(S.stories).filter((d) => d < S.day && (S.stories[d].title || S.stories[d].text)).sort();
+  const special = past.filter((d) => isSpecial(S.stories[d]));
+  return special.length ? special : past;
+}
+function featureHtml() {
+  const can = canWrite();
+  const today = S.stories[S.day];
+  let day = hasStory(today) ? S.day : '';
+  const pool = day ? [] : memoryPool();
+  if (!day && pool.length) {
+    const seed = Math.floor(Date.parse(`${S.day}T00:00:00Z`) / 86400000) + S.cal.memShift;
+    day = pool[((seed % pool.length) + pool.length) % pool.length];
+  }
+  if (!day) {
+    return `<article class="story-feature empty"><div class="story-body">
+      <p class="eyebrow">День, который хочется помнить</p>
+      <h2>Здесь будет запись сегодняшнего дня или воспоминание</h2>
+      <div class="story-text">Выберите день в календаре и напишите о нём — например, о дне, когда ${escapeHtml(DOG())} приехал в город.</div>
+      ${can ? `<button class="btn small ghost" data-action="story-edit" data-day="${S.day}">Написать о сегодня</button>` : ''}</div></article>`;
+  }
+  const s = S.stories[day];
+  const [, mm, dd] = day.split('-').map(Number);
+  const photo = storyPhotoOf(day);
+  const eyebrow = day === S.day ? (isSpecial(s) ? 'Сегодня · день, который хочется помнить' : 'Сегодня')
+    : (isSpecial(s) ? 'День, который хочется помнить' : 'Воспоминание');
+  return `<article class="story-feature">
+    <div class="story-date"><strong>${dd}</strong><span>${MONTHS_SHORT[mm - 1]}</span></div>
+    <div class="story-body">
+      <p class="eyebrow">${eyebrow}</p>
+      ${s.title ? `<h2>${escapeHtml(s.title)}</h2>` : ''}
+      ${photo ? `<img class="story-photo" src="${escapeHtml(photo)}" alt="">` : ''}
+      ${s.text ? `<div class="story-text">${inline(s.text).replace(/\n/g, '<br>')}</div>` : ''}
+      <div class="story-actions">
+        ${day === S.day ? (can ? `<button class="btn small ghost" data-action="story-edit" data-day="${day}">Изменить</button>` : '')
+          : `<button class="btn small ghost" data-action="cal-pick" data-day="${day}" data-scroll="1">Открыть день</button>${pool.length > 1 ? '<button class="btn small ghost" data-action="memory-next">Другое воспоминание</button>' : ''}`}
+      </div>
+    </div></article>`;
+}
+
+// Дневник: большая карточка и календарь; день открывается под календарём только по нажатию на число
+function renderDiary() {
+  if (!S.cal.month) S.cal.month = monthOf(S.day);
+  const sel = S.cal.sel;
+  const head = pageHead({ eyebrow: DOG(), title: 'Дневник', sub: 'Календарь дней и ваши заметки. Нажмите на число, чтобы открыть день.',
+    plus: !sel || sel <= S.day ? { action: 'story-edit', label: sel ? 'Написать о выбранном дне' : 'Написать о сегодняшнем дне' } : null });
+  if (!canWrite()) return `${head}${statusBanner()}<p class="muted">Дневник появится после входа.</p>`;
+  setTimeout(() => loadMonth(S.cal.month), 0);
+  if (sel && monthOf(sel) !== S.cal.month) setTimeout(() => loadMonth(monthOf(sel)), 0);
+  return `${head}${featureHtml()}${calendarHtml(S.cal.month)}${sel ? selectedDayHtml(sel) : ''}`;
+}
+
+// Заметка о дне: заголовок, текст, фото и «день, который хочется помнить»
 let storyPhoto = '';
-function storySheet(day) {
-  const s = S.stories[day] || { title: '', text: '', photo: '' };
-  storyPhoto = s.photo || '';
+let storyPhotoChanged = false;
+async function storySheet(day) {
+  const s = S.stories[day] || { title: '', text: '', special: null, hasPhoto: false };
+  storyPhoto = '';
+  storyPhotoChanged = false;
+  if (s.hasPhoto) {
+    storyPhoto = s.photo || S.storyPhotos[day] || '';
+    if (!storyPhoto) { toast('Загружаем фото…'); try { storyPhoto = await store.loadStoryPhoto(day); S.storyPhotos[day] = storyPhoto; } catch { storyPhoto = ''; } }
+  }
+  const special = s.special != null ? s.special : !!s.title;
   openSheet(`<form class="form story-form"><h2>${escapeHtml(cap(dayTitle(day)))}</h2>
     <label>Заголовок <span class="muted">(необязательно)</span><input name="title" maxlength="120" value="${escapeHtml(s.title)}" placeholder="Например: первый раз сам вышел из лифта"></label>
     <label>Как прошёл день<textarea name="text" rows="6" maxlength="5000" placeholder="Что было хорошего, что получилось, что запомнилось">${escapeHtml(s.text)}</textarea></label>
     <div class="story-photo-field">${storyPhotoFieldHtml()}</div>
+    <label class="check-row special-check"><input type="checkbox" name="special"${special ? ' checked' : ''}>День, который хочется помнить <span class="muted">— обведём в календаре</span></label>
     <div class="form-actions"><button type="button" class="btn" data-action="sheet-close">Отмена</button><button class="btn primary">Сохранить</button></div>
-    ${S.stories[day] ? `<button type="button" class="btn danger-outline wide" data-action="story-delete" data-day="${day}">Удалить заметку</button>` : ''}
+    ${hasStory(S.stories[day]) ? `<button type="button" class="btn danger-outline wide" data-action="story-delete" data-day="${day}">Удалить заметку</button>` : ''}
   </form>`, (fd) => {
-    const story = { title: String(fd.get('title') || '').trim(), text: String(fd.get('text') || '').trim(), photo: storyPhoto };
-    if (!story.title && !story.text && !story.photo) { delete S.stories[day]; store.saveStory(day, null); } else {
-      S.stories[day] = story;
-      store.saveStory(day, story);
+    const story = { title: String(fd.get('title') || '').trim(), text: String(fd.get('text') || '').trim(), special: fd.get('special') === 'on', photo: storyPhoto };
+    if (!story.title && !story.text && !story.photo) {
+      delete S.stories[day];
+      store.saveStory(day, null);
+    } else {
+      S.stories[day] = { title: story.title, text: story.text, special: story.special, hasPhoto: !!story.photo };
+      S.storyPhotos[day] = story.photo;
+      store.saveStory(day, story, { photoChanged: storyPhotoChanged });
     }
     render();
     toast('Заметка сохранена.');
@@ -1771,7 +1940,16 @@ let currentHash = location.hash || '#/';
 let prevHash = null;
 let pendingScroll = null; // { y, until } — дождаться, пока страница дорисуется до нужной высоты
 
+// Ссылки для виджета «Быстрые команды» на iPhone: #/add/meal, #/add/toilet … — сразу окно записи
+function takeAddLink() {
+  const m = location.hash.match(/^#\/add\/([a-z]+)/);
+  if (!m) return;
+  history.replaceState(null, '', `${location.pathname}${location.search}#/`);
+  if (EVENT_TYPES[m[1]]) S.pendingAdd = m[1];
+}
+
 function onHashChange() {
+  takeAddLink();
   scrollMemory[currentHash] = window.scrollY;
   prevHash = currentHash;
   currentHash = location.hash || '#/';
@@ -1834,6 +2012,12 @@ function render(force) {
     a.classList.toggle('on', on);
     if (on) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
   });
+  // Пришли по ссылке #/add/… — окно записи, как только можно записывать (после входа)
+  if (S.pendingAdd && canWrite() && sheet.hidden) {
+    const type = S.pendingAdd;
+    S.pendingAdd = null;
+    setTimeout(() => addEventFlow(type), 0);
+  }
 }
 
 function renderHeader() {
@@ -2120,16 +2304,29 @@ const actions = {
     const r = S.health.find((x) => x.id === el.dataset.id);
     if (r) download('batonchik-napominanie.ics', icsText(r, DOG()), 'text/calendar');
   },
-  'story-edit': (el) => storySheet(el.dataset.day || S.day),
+  'story-edit': (el) => storySheet(el.dataset.day || (route().page === 'd' && S.cal.sel && S.cal.sel <= S.day ? S.cal.sel : S.day)),
+  // Нажатие на число — день под календарём; повторное нажатие на то же число — скрыть
+  'cal-pick': (el) => {
+    const day = el.dataset.day;
+    S.cal.sel = S.cal.sel === day && !el.dataset.scroll ? '' : day;
+    S.cal.month = monthOf(day);
+    render();
+    const card = S.cal.sel && document.getElementById('day-sel');
+    if (card) card.scrollIntoView({ block: 'start', behavior: 'smooth' });
+  },
+  'cal-month': (el) => { S.cal.month = addMonths(S.cal.month, +el.dataset.dir); render(); },
+  'memory-next': () => { S.cal.memShift++; render(); },
   'story-photo': async () => {
     const data = await choosePhoto();
     if (!data) return;
     storyPhoto = data;
+    storyPhotoChanged = true;
     const box = sheet.querySelector('.story-photo-field');
     if (box) box.innerHTML = storyPhotoFieldHtml();
   },
   'story-photo-remove': () => {
     storyPhoto = '';
+    storyPhotoChanged = true;
     const box = sheet.querySelector('.story-photo-field');
     if (box) box.innerHTML = storyPhotoFieldHtml();
   },
@@ -2247,7 +2444,6 @@ const actions = {
       toast('Не удалось собрать резервную копию. Проверьте интернет.');
     }
   },
-  'diary-more': () => loadDiary(true),
   'back': () => history.back(),
   'toast-action': () => { const fn = toastAction; hideToast(); if (fn) fn(); },
   'sheet-close': () => closeSheet(),
@@ -2335,6 +2531,7 @@ function switchDay(k) {
   S.events = [];
   S.ideaShift = { game: 0, training: 0 };
   S.factShift = 0;
+  S.cal = { month: '', sel: '', memShift: 0 };
   store.setDay(k);
   render();
 }
@@ -2358,6 +2555,8 @@ document.addEventListener('visibilitychange', () => {
 setInterval(checkDay, 30000);
 setInterval(updateSince, 30000);
 updateNet();
+takeAddLink();
+currentHash = location.hash || '#/';
 renderHeader();
 render();
 store.setDay(S.day);
