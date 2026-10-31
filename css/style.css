@@ -815,7 +815,7 @@ a.id-stat::after { content: "›"; position: absolute; top: 6px; right: 10px; co
 .story-date span { font-size: 13px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
 .story-feature .eyebrow { color: rgba(255, 255, 255, .62); }
 .story-feature h2 { margin: 6px 0 10px; font-size: 24px; line-height: 1.15; color: #fff; }
-.story-text { color: rgba(255, 255, 255, .86); font-size: 16px; line-height: 1.55; }
+.story-text { color: rgba(255, 255, 255, .86); font-size: 15px; line-height: 1.55; }
 .story-feature .btn { margin-top: 14px; background: transparent; color: #fff; border-color: rgba(255, 255, 255, .4); }
 .story-photo { display: block; width: 100%; max-height: 320px; object-fit: cover; border-radius: 14px; margin: 4px 0 12px; }
 .day-line { margin: 4px 0 0; font-size: 15.5px; }
