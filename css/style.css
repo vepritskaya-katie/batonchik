@@ -141,8 +141,10 @@ code { font-size: .9em; background: var(--surface-2); padding: 1px 5px; border-r
 svg { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 
 /* ---------- Шапка и вкладки ---------- */
+/* --vv-top, --vv-bottom — поправка на ошибку iOS 26 после клавиатуры (см. fitViewport в app.js); обычно 0 */
+:root { --vv-top: 0px; --vv-bottom: 0px; }
 .topbar {
-  position: sticky; top: 0; z-index: 10;
+  position: sticky; top: var(--vv-top); z-index: 10;
   display: flex; align-items: center; gap: 10px;
   padding: calc(env(safe-area-inset-top) + 8px) 16px 8px;
   background: var(--bg);
@@ -160,7 +162,7 @@ svg { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; 
 .view { max-width: 720px; margin: 0 auto; padding: 12px 16px calc(env(safe-area-inset-bottom) + 96px); outline: none; }
 
 .tabbar {
-  position: fixed; left: 0; right: 0; bottom: 0; z-index: 10;
+  position: fixed; left: 0; right: 0; bottom: calc(0px - var(--vv-bottom)); z-index: 10;
   display: flex; justify-content: space-between;
   padding: 4px 4px calc(env(safe-area-inset-bottom) + 4px);
   background: var(--surface);
@@ -376,7 +378,7 @@ a.seg { display: grid; place-items: center; text-decoration: none; }
 
 /* ---------- Окно правки ---------- */
 .sheet {
-  position: fixed; inset: 0; z-index: 20; display: flex; align-items: flex-end; justify-content: center;
+  position: fixed; inset: 0; top: var(--vv-top); bottom: calc(0px - var(--vv-bottom)); z-index: 20; display: flex; align-items: flex-end; justify-content: center;
   background: rgba(0, 0, 0, .45);
 }
 .sheet[hidden] { display: none; }
@@ -412,7 +414,7 @@ a.seg { display: grid; place-items: center; text-decoration: none; }
 .form h3 { margin: 6px 0 0; font-size: 16px; color: var(--muted); }
 
 .toast {
-  position: fixed; left: 16px; right: 16px; bottom: calc(env(safe-area-inset-bottom) + 84px); z-index: 30;
+  position: fixed; left: 16px; right: 16px; bottom: calc(env(safe-area-inset-bottom) + 84px - var(--vv-bottom)); z-index: 30;
   max-width: 560px; margin: 0 auto; padding: 12px 16px; border-radius: 14px;
   background: var(--text); color: var(--bg); font-size: 15px; box-shadow: 0 6px 24px rgba(0, 0, 0, .25);
 }
@@ -838,7 +840,7 @@ a.id-stat::after { content: "›"; position: absolute; top: 6px; right: 10px; co
   background: rgba(0, 0, 0, .5); color: #fff; font-size: 13px; font-weight: 600;
 }
 /* Просмотр на весь экран */
-.viewer { position: fixed; inset: 0; z-index: 40; background: rgba(0, 0, 0, .94); }
+.viewer { position: fixed; inset: 0; top: var(--vv-top); bottom: calc(0px - var(--vv-bottom)); z-index: 40; background: rgba(0, 0, 0, .94); }
 .viewer-track {
   display: flex; height: 100%; overflow-x: auto; scroll-snap-type: x mandatory; scrollbar-width: none; overscroll-behavior: contain;
 }

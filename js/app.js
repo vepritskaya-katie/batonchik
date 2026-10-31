@@ -2117,6 +2117,9 @@ function openSheet(html, onSubmit) {
   document.body.classList.add('no-scroll');
 }
 function closeSheet() {
+  // Сначала убираем курсор из поля: клавиатура закрывается обычным путём, а не вместе с исчезнувшим окном
+  const focused = document.activeElement;
+  if (focused && sheet.contains(focused)) focused.blur();
   sheet.hidden = true;
   sheetSubmit = null;
   document.body.classList.remove('no-scroll');
@@ -2570,6 +2573,57 @@ sheet.addEventListener('submit', (e) => {
     sheet.hidden = false;
     document.body.classList.add('no-scroll');
   }
+});
+
+// ---------- Экран iPhone после клавиатуры ----------
+// Ошибка iOS 26: когда клавиатура спряталась, система иногда не возвращает экран на место
+// (visualViewport.offsetTop остаётся больше нуля). Тогда всё закреплённое съезжает вверх:
+// вкладки висят посреди экрана, шапка уходит за верхний край. Пока клавиатура закрыта,
+// сдвигаем закреплённые элементы ровно на эту разницу; когда iOS исправится, сдвиг станет нулевым.
+const isTyping = () => {
+  const a = document.activeElement;
+  return !!a && (a.isContentEditable || a.tagName === 'TEXTAREA' || a.tagName === 'SELECT'
+    || (a.tagName === 'INPUT' && !['checkbox', 'radio', 'file', 'button', 'submit'].includes(a.type)));
+};
+const vvShift = { top: 0, bottom: 0 };
+function fitViewport() {
+  const vv = window.visualViewport;
+  let top = 0;
+  let bottom = 0;
+  if (vv && !isTyping() && Math.abs(vv.scale - 1) < 0.02) {
+    top = Math.round(vv.offsetTop);
+    bottom = Math.round(vv.offsetTop + vv.height - window.innerHeight);
+    if (top < 2) top = 0;
+    if (Math.abs(bottom) < 2) bottom = 0;
+  }
+  if (top === vvShift.top && bottom === vvShift.bottom) return;
+  Object.assign(vvShift, { top, bottom });
+  document.documentElement.style.setProperty('--vv-top', `${top}px`);
+  document.documentElement.style.setProperty('--vv-bottom', `${bottom}px`);
+}
+if (window.visualViewport) {
+  window.visualViewport.addEventListener('resize', fitViewport);
+  window.visualViewport.addEventListener('scroll', fitViewport);
+}
+window.addEventListener('scroll', fitViewport, { passive: true });
+window.addEventListener('resize', fitViewport);
+window.addEventListener('pageshow', fitViewport);
+document.addEventListener('visibilitychange', fitViewport);
+document.addEventListener('focusin', fitViewport);
+// Клавиатура уезжает с анимацией — проверяем ещё раз, когда она точно скрылась
+document.addEventListener('focusout', () => { [60, 400, 900].forEach((ms) => setTimeout(fitViewport, ms)); });
+
+// Если экран всё же съехал: пять нажатий подряд на открытую вкладку — размеры экрана в сообщении (для скриншота)
+let diagTaps = [];
+document.querySelector('.tabbar').addEventListener('click', (e) => {
+  if (!e.target.closest('a[aria-current]')) return;
+  const now = Date.now();
+  diagTaps = [...diagTaps.filter((t) => now - t < 3000), now];
+  if (diagTaps.length < 5) return;
+  diagTaps = [];
+  const vv = window.visualViewport || { width: 0, height: 0, offsetTop: 0, scale: 1 };
+  const app = window.matchMedia('(display-mode: standalone)').matches || navigator.standalone ? 'с экрана «Домой»' : 'в браузере';
+  toast(`Экран: окно ${window.innerWidth}×${window.innerHeight}, видно ${Math.round(vv.width)}×${Math.round(vv.height)}, сдвиг ${Math.round(vv.offsetTop)}, масштаб ${(+vv.scale).toFixed(2)}, экран ${screen.width}×${screen.height}, поправка ${vvShift.top}/${vvShift.bottom}, ${app}`);
 });
 
 document.addEventListener('keydown', (e) => {
