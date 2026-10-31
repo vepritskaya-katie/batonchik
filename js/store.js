@@ -23,7 +23,14 @@ const newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2
 
 // ---------- Только этот телефон ----------
 
-function localStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onPet = () => {}, onPhoto = () => {}, onHealth = () => {}, onGrowth = () => {}, onReads = () => {}, onVet = () => {}, onWeeks = () => {} }) {
+// Заметки без фото (фото — по запросу): { день: { title, text, special, hasPhoto } }
+function localStories() {
+  return Object.fromEntries(Object.entries(read('bt.stories', {})).map(([d, s]) => [d, {
+    title: s.title || '', text: s.text || '', special: typeof s.special === 'boolean' ? s.special : null, hasPhoto: !!s.photo,
+  }]));
+}
+
+function localStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onPet = () => {}, onPhoto = () => {}, onHealth = () => {}, onGrowth = () => {}, onReads = () => {}, onVet = () => {}, onWeeks = () => {}, onStories = () => {} }) {
   let day = null;
   const state = { mode: 'local', status: 'ready', user: { name: '' } };
   const mark = () => ({ uid: 'local', name: '', at: new Date().toISOString() });
@@ -47,6 +54,7 @@ function localStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onPet 
       onReads(read('bt.reads', { items: {}, quiz: {} }));
       onVet(read('bt.vet', null));
       onWeeks(Object.entries(read('bt.weeks', {})).map(([id, w]) => ({ id, ...w })));
+      onStories(localStories());
     },
     setDay(key) {
       day = key;
@@ -157,13 +165,14 @@ function localStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onPet 
       write('bt.reads', r);
       onReads(r);
     },
-    async loadStories(from, to) {
-      return Object.fromEntries(Object.entries(read('bt.stories', {})).filter(([k]) => k >= from && k <= to));
-    },
+    // Заметки о днях: здесь фото хранится прямо в заметке
+    async loadStoryPhoto(day) { return (read('bt.stories', {})[day] || {}).photo || ''; },
     async saveStory(day, story) {
       const all = read('bt.stories', {});
-      if (story) all[day] = story; else delete all[day];
+      if (story) all[day] = { title: story.title || '', text: story.text || '', special: !!story.special, photo: story.photo || '' };
+      else delete all[day];
       write('bt.stories', all);
+      onStories(localStories());
     },
     signIn() {}, signOut() {},
   };
@@ -171,7 +180,7 @@ function localStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onPet 
 
 // ---------- Firebase ----------
 
-function firebaseStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onError, onPet = () => {}, onPhoto = () => {}, onHealth = () => {}, onGrowth = () => {}, onReads = () => {}, onVet = () => {}, onWeeks = () => {} }, firebaseConfig) {
+function firebaseStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onError, onPet = () => {}, onPhoto = () => {}, onHealth = () => {}, onGrowth = () => {}, onReads = () => {}, onVet = () => {}, onWeeks = () => {}, onStories = () => {} }, firebaseConfig) {
   const state = { mode: 'firebase', status: 'loading', user: null, message: '' };
   let fb = null; // модули SDK
   let db = null;
@@ -230,6 +239,15 @@ function firebaseStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onE
       onCards(cards);
     }, fail));
     unsubs.push(onSnapshot(doc(db, 'pet', 'profile'), (snap) => { onPet(snap.exists() ? plainPet(snap.data()) : null); }, fail));
+    // Заметки о днях — лёгкие (фото лежит отдельно, в storyPhotos); старые заметки могли хранить фото внутри
+    unsubs.push(onSnapshot(collection(db, 'stories'), (snap) => {
+      const out = {};
+      snap.forEach((d) => {
+        const v = d.data();
+        out[d.id] = { title: v.title || '', text: v.text || '', special: typeof v.special === 'boolean' ? v.special : null, hasPhoto: !!v.hasPhoto || !!v.photo, photo: v.photo || '' };
+      });
+      onStories(out);
+    }, fail));
     unsubs.push(onSnapshot(collection(db, 'weeks'), (snap) => {
       onWeeks(snap.docs.map((d) => { const v = d.data(); return { id: d.id, joy: !!v.joy, choice: !!v.choice, sleep: !!v.sleep, ribs: v.ribs || '', waist: v.waist || '', notes: v.notes || '', updatedBy: v.updatedBy || '' }; }));
     }, fail));
@@ -326,6 +344,7 @@ function firebaseStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onE
           onReads({ items: {}, quiz: {} });
           onVet(null);
           onWeeks([]);
+          onStories({});
           return emit({ status: 'signed-out', user: null });
         }
         checkAccess(user);
@@ -541,21 +560,25 @@ function firebaseStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onE
     },
 
     // ---------- Заметки о днях (дневник) ----------
-    async loadStories(from, to) {
-      if (!ready()) return {};
-      const { collection, query, where, getDocs, documentId } = fb.fs;
-      const snap = await getDocs(query(collection(db, 'stories'), where(documentId(), '>=', from), where(documentId(), '<=', to)));
-      const out = {};
-      snap.forEach((d) => { const v = d.data(); out[d.id] = { title: v.title || '', text: v.text || '', photo: v.photo || '' }; });
-      return out;
+    async loadStoryPhoto(day) {
+      if (!ready()) return '';
+      const { doc, getDoc } = fb.fs;
+      const snap = await getDoc(doc(db, 'storyPhotos', day));
+      return snap.exists() ? String(snap.data().data || '') : '';
     },
-    async saveStory(day, story) {
+    // story: { title, text, special, photo }; photoChanged: false — фото не трогаем (не перезаписываем 0,5 МБ при правке текста)
+    async saveStory(day, story, { photoChanged = true } = {}) {
       if (!ready()) return;
       const { doc, setDoc, deleteDoc, serverTimestamp } = fb.fs;
       const ref = doc(db, 'stories', day);
+      const photoRef = doc(db, 'storyPhotos', day);
+      const meta = { updatedAt: serverTimestamp(), updatedBy: state.user.name };
       try {
-        if (story) await setDoc(ref, { title: story.title || '', text: story.text || '', photo: story.photo || '', updatedAt: serverTimestamp(), updatedBy: state.user.name });
-        else await deleteDoc(ref);
+        if (!story) { await deleteDoc(ref); await deleteDoc(photoRef); return; }
+        const data = { title: story.title || '', text: story.text || '', special: !!story.special, ...meta };
+        if (!photoChanged) { await setDoc(ref, data, { merge: true }); return; }
+        if (story.photo) await setDoc(photoRef, { data: story.photo, ...meta }); else await deleteDoc(photoRef);
+        await setDoc(ref, { ...data, photo: '', hasPhoto: !!story.photo });
       } catch (err) { fail(err); }
     },
   };
