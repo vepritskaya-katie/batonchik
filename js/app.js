@@ -8,7 +8,7 @@ import {
   rhythmHtml, weekStatsHtml, daySummaryLine, trainsLine, MONTHS_SHORT,
 } from './diary.js';
 import { HEALTH_KINDS, NEXT_OPTIONS, nextDate, suggestNext, dueText, ageText, upcoming, doneRecords, googleCalendarUrl, icsText, healthRowHtml, daysBetween, ageShort, ageMonths } from './passport.js';
-import { pickPhoto, compressPhoto } from './photo.js';
+import { pickPhotos, compressPhoto } from './photo.js';
 import { fmtNum, parseNum, series, deltaText, lineChartSvg } from './growth.js';
 import { RUBRICS, parseLibrary, quizOrder, readKey, readCount, readBtn, metaChips, articleBody, foldList, agesHtml, dictHtml, booksHtml, quizHtml, introHtml } from './library.js';
 import { pickIdeas } from './ideas.js';
@@ -91,8 +91,8 @@ const S = {
   vet: null,          // «Срочно к ветеринару»: круглосуточная клиника и наш ветеринар
   weeks: [],          // «Неделя Батончика»: { id: воскресенье, joy, choice, sleep, ribs, waist, notes }
   factShift: 0,       // «Факт дня» на главной: нажатие — следующий
-  stories: {},        // дневник: заметки о днях { 'ГГГГ-ММ-ДД': { title, text, special, hasPhoto } } — все, без фото
-  storyPhotos: {},    // фото к заметкам, загруженные по требованию: { день: data:image… или '' }
+  stories: {},        // дневник: заметки о днях { 'ГГГГ-ММ-ДД': { title, text, special, hasPhoto, photoCount, photoKey } } — все, без фото
+  storyPhotos: {},    // фото к заметкам, загруженные по требованию: { день: { key, list: [data:image…], loading, failedAt } }
   cal: { month: '', sel: '', memShift: 0 }, // календарь в Дневнике: месяц ГГГГ-ММ, выбранный день, «другое воспоминание»
   months: {},         // журнал по месяцам для календаря: { 'ГГГГ-ММ': { events, loading, loadedAt } }
 };
@@ -1426,17 +1426,72 @@ function eventsOfDay(day) {
   return m ? m.events.filter((e) => e.day === day) : [];
 }
 
-// Фото заметки — только когда его показываем
-function storyPhotoOf(day) {
+// Фото заметки — только когда их показываем. Ключ меняется, когда фото меняют (в том числе на другом телефоне)
+const MAX_STORY_PHOTOS = 6;
+const photoKeyOf = (s) => `${(s && s.photoCount) || 0}:${(s && s.photoKey) || ''}`;
+function storyPhotosOf(day) {
   const s = S.stories[day];
-  if (!s || !s.hasPhoto) return '';
-  if (s.photo) return s.photo; // старые заметки: фото внутри
-  if (S.storyPhotos[day] === undefined) {
-    S.storyPhotos[day] = null;
-    store.loadStoryPhoto(day).then((data) => { S.storyPhotos[day] = data || ''; render(); }).catch(() => { S.storyPhotos[day] = ''; });
+  if (!s || !s.photoCount) return [];
+  if (s.photo) return [s.photo]; // старые заметки: фото внутри
+  const key = photoKeyOf(s);
+  const c = S.storyPhotos[day];
+  if (c && c.key === key && c.list) return c.list;
+  // Не загрузились (нет интернета) — пробуем снова не чаще раза в 30 секунд
+  if (!c || c.key !== key || (c.failedAt && Date.now() - c.failedAt > 30000)) {
+    S.storyPhotos[day] = { key, list: c ? c.list : null, loading: true };
+    store.loadStoryPhotos(day, s.photoCount)
+      .then((list) => { if (S.storyPhotos[day] && S.storyPhotos[day].key === key) { S.storyPhotos[day] = { key, list }; render(); } })
+      .catch(() => { if (S.storyPhotos[day] && S.storyPhotos[day].key === key) S.storyPhotos[day] = { key, list: null, failedAt: Date.now() }; });
   }
-  return S.storyPhotos[day] || '';
+  return (c && c.list) || [];
 }
+// Для формы: дождаться фото заметки. null — не загрузились (например, нет интернета)
+async function loadStoryPhotosNow(day) {
+  const s = S.stories[day];
+  if (!s || !s.photoCount) return [];
+  if (s.photo) return [s.photo];
+  const key = photoKeyOf(s);
+  const c = S.storyPhotos[day];
+  if (c && c.key === key && c.list) return c.list.slice();
+  toast('Загружаем фото…');
+  try {
+    const list = await store.loadStoryPhotos(day, s.photoCount);
+    S.storyPhotos[day] = { key, list };
+    hideToast();
+    return list.slice();
+  } catch { return null; }
+}
+
+// Фото в заметке: одно — во всю ширину, несколько — лента, которую листают пальцем. Нажатие — на весь экран
+function photosHtml(day) {
+  const s = S.stories[day];
+  const count = (s && s.photoCount) || 0;
+  if (!count) return '';
+  const list = storyPhotosOf(day);
+  if (!list.length) return '<div class="story-photo ph"></div>';
+  const item = (p, i) => `<button type="button" class="photo-open" data-action="photo-view" data-day="${day}" data-i="${i}" aria-label="Открыть фото ${i + 1} из ${list.length}">
+    <img src="${escapeHtml(p)}" alt="">${list.length > 1 ? `<span class="photo-n">${i + 1}/${list.length}</span>` : ''}</button>`;
+  return list.length === 1 ? `<div class="photo-one">${item(list[0], 0)}</div>` : `<div class="photo-strip">${list.map(item).join('')}</div>`;
+}
+
+// Просмотр фото на весь экран: листать пальцем, закрыть крестиком или нажатием на тёмный фон
+function openViewer(list, start = 0) {
+  closeViewer();
+  const v = document.createElement('div');
+  v.className = 'viewer';
+  v.setAttribute('role', 'dialog');
+  v.setAttribute('aria-label', 'Фото');
+  v.innerHTML = `<div class="viewer-track">${list.map((p) => `<figure><img src="${escapeHtml(p)}" alt=""></figure>`).join('')}</div>
+    <button type="button" class="viewer-x" data-action="viewer-close" aria-label="Закрыть">×</button>
+    ${list.length > 1 ? `<span class="viewer-n">${start + 1} / ${list.length}</span>` : ''}`;
+  document.body.appendChild(v);
+  const track = v.querySelector('.viewer-track');
+  track.scrollLeft = start * track.clientWidth;
+  const n = v.querySelector('.viewer-n');
+  if (n) track.addEventListener('scroll', () => { n.textContent = `${Math.round(track.scrollLeft / track.clientWidth) + 1} / ${list.length}`; }, { passive: true });
+  v.addEventListener('click', (e) => { if (e.target.tagName !== 'IMG' && !e.target.closest('.viewer-x')) closeViewer(); });
+}
+function closeViewer() { const v = document.querySelector('.viewer'); if (v) v.remove(); }
 
 function calendarHtml(ym) {
   const [y, m] = ym.split('-').map(Number);
@@ -1486,11 +1541,10 @@ function selectedDayHtml(day) {
   const story = S.stories[day];
   const health = S.health.filter((r) => r.date === day);
   const line = st ? daySummaryLine(st) : '';
-  const photo = hasStory(story) ? storyPhotoOf(day) : '';
   const storyHtml = hasStory(story) ? `<div class="day-story${isSpecial(story) ? ' special' : ''}">
       ${isSpecial(story) ? '<p class="eyebrow">День, который хочется помнить</p>' : ''}
       ${story.title ? `<h3>${escapeHtml(story.title)}</h3>` : ''}
-      ${photo ? `<img class="story-photo" src="${escapeHtml(photo)}" alt="">` : story.hasPhoto ? '<div class="story-photo ph"></div>' : ''}
+      ${photosHtml(day)}
       ${story.text ? `<p>${inline(story.text).replace(/\n/g, '<br>')}</p>` : ''}
       ${can ? `<button class="btn small" data-action="story-edit" data-day="${day}">Изменить заметку</button>` : ''}</div>`
     : (!future && can ? `<button class="btn wide" data-action="story-edit" data-day="${day}">Написать о дне</button>` : '');
@@ -1532,7 +1586,6 @@ function featureHtml() {
   }
   const s = S.stories[day];
   const [, mm, dd] = day.split('-').map(Number);
-  const photo = storyPhotoOf(day);
   const eyebrow = day === S.day ? (isSpecial(s) ? 'Сегодня · день, который хочется помнить' : 'Сегодня')
     : (isSpecial(s) ? 'День, который хочется помнить' : 'Воспоминание');
   return `<article class="story-feature">
@@ -1540,7 +1593,7 @@ function featureHtml() {
     <div class="story-body">
       <p class="eyebrow">${eyebrow}</p>
       ${s.title ? `<h2>${escapeHtml(s.title)}</h2>` : ''}
-      ${photo ? `<img class="story-photo" src="${escapeHtml(photo)}" alt="">` : ''}
+      ${photosHtml(day)}
       ${s.text ? `<div class="story-text">${inline(s.text).replace(/\n/g, '<br>')}</div>` : ''}
       <div class="story-actions">
         ${day === S.day ? (can ? `<button class="btn small ghost" data-action="story-edit" data-day="${day}">Изменить</button>` : '')
@@ -1561,17 +1614,14 @@ function renderDiary() {
   return `${head}${featureHtml()}${calendarHtml(S.cal.month)}${sel ? selectedDayHtml(sel) : ''}`;
 }
 
-// Заметка о дне: заголовок, текст, фото и «день, который хочется помнить»
-let storyPhoto = '';
-let storyPhotoChanged = false;
+// Заметка о дне: заголовок, текст, фото (до шести) и «день, который хочется помнить»
+const storyForm = { day: '', photos: [], changed: false, locked: false, busy: 0, token: 0 };
 async function storySheet(day) {
-  const s = S.stories[day] || { title: '', text: '', special: null, hasPhoto: false };
-  storyPhoto = '';
-  storyPhotoChanged = false;
-  if (s.hasPhoto) {
-    storyPhoto = s.photo || S.storyPhotos[day] || '';
-    if (!storyPhoto) { toast('Загружаем фото…'); try { storyPhoto = await store.loadStoryPhoto(day); S.storyPhotos[day] = storyPhoto; } catch { storyPhoto = ''; } }
-  }
+  const s = S.stories[day] || { title: '', text: '', special: null, hasPhoto: false, photoCount: 0 };
+  const token = ++storyForm.token;
+  const loaded = await loadStoryPhotosNow(day);
+  if (token !== storyForm.token) return;
+  Object.assign(storyForm, { day, photos: loaded || [], changed: false, locked: loaded === null, busy: 0 });
   const special = s.special != null ? s.special : !!s.title;
   openSheet(`<form class="form story-form"><h2>${escapeHtml(cap(dayTitle(day)))}</h2>
     <label>Заголовок <span class="muted">(необязательно)</span><input name="title" maxlength="120" value="${escapeHtml(s.title)}" placeholder="Например: первый раз сам вышел из лифта"></label>
@@ -1581,14 +1631,22 @@ async function storySheet(day) {
     <div class="form-actions"><button type="button" class="btn" data-action="sheet-close">Отмена</button><button class="btn primary">Сохранить</button></div>
     ${hasStory(S.stories[day]) ? `<button type="button" class="btn danger-outline wide" data-action="story-delete" data-day="${day}">Удалить заметку</button>` : ''}
   </form>`, (fd) => {
-    const story = { title: String(fd.get('title') || '').trim(), text: String(fd.get('text') || '').trim(), special: fd.get('special') === 'on', photo: storyPhoto };
-    if (!story.title && !story.text && !story.photo) {
+    // Фото ещё сжимаются — не закрываем, иначе они пропадут
+    if (storyForm.busy) { toast('Подождите пару секунд: фото ещё готовятся.'); return false; }
+    const { photos, changed, locked } = storyForm;
+    const story = { title: String(fd.get('title') || '').trim(), text: String(fd.get('text') || '').trim(), special: fd.get('special') === 'on',
+      photos, photoKey: changed ? Date.now().toString(36) : s.photoKey || '' };
+    const oldCount = s.photoCount || 0;
+    if (!story.title && !story.text && !photos.length && !locked) {
       delete S.stories[day];
-      store.saveStory(day, null);
+      delete S.storyPhotos[day];
+      store.saveStory(day, null, { oldCount });
     } else {
-      S.stories[day] = { title: story.title, text: story.text, special: story.special, hasPhoto: !!story.photo };
-      S.storyPhotos[day] = story.photo;
-      store.saveStory(day, story, { photoChanged: storyPhotoChanged });
+      const count = changed ? photos.length : oldCount;
+      S.stories[day] = { title: story.title, text: story.text, special: story.special, hasPhoto: count > 0, photoCount: count,
+        photoKey: story.photoKey, photo: changed ? '' : s.photo || '' };
+      if (changed) S.storyPhotos[day] = { key: photoKeyOf(S.stories[day]), list: photos.slice() };
+      store.saveStory(day, story, { photosChanged: changed, oldCount });
     }
     render();
     toast('Заметка сохранена.');
@@ -1596,9 +1654,19 @@ async function storySheet(day) {
 }
 
 function storyPhotoFieldHtml() {
-  return `${storyPhoto ? `<img class="story-photo" src="${escapeHtml(storyPhoto)}" alt="">` : ''}
-    <div class="edit-actions"><button type="button" class="btn small" data-action="story-photo">${storyPhoto ? 'Заменить фото' : 'Добавить фото'}</button>
-    ${storyPhoto ? '<button type="button" class="btn small danger" data-action="story-photo-remove">Убрать фото</button>' : ''}</div>`;
+  const { photos, locked, busy } = storyForm;
+  const n = photos.length;
+  if (locked) return '<p class="muted small">Фото к этой заметке сейчас не загрузились — их можно будет изменить, когда появится интернет. Текст можно править.</p>';
+  const thumbs = photos.map((p, i) => `<div class="thumb"><img src="${escapeHtml(p)}" alt="">
+    <button type="button" class="thumb-x" data-action="story-photo-remove" data-i="${i}" aria-label="Убрать фото ${i + 1}">×</button></div>`).join('')
+    + Array.from({ length: busy }, () => '<div class="thumb busy"><span>Готовим…</span></div>').join('');
+  return `${n || busy ? `<div class="thumbs">${thumbs}</div>` : ''}
+    <div class="edit-actions">${n + busy < MAX_STORY_PHOTOS ? `<button type="button" class="btn small" data-action="story-photo">${n ? 'Добавить ещё фото' : 'Добавить фото'}</button>` : ''}
+    <span class="muted small">${n ? `${n} из ${MAX_STORY_PHOTOS}` : `можно до ${MAX_STORY_PHOTOS} фото`}</span></div>`;
+}
+function refreshStoryPhotos() {
+  const box = sheet.querySelector('.story-photo-field');
+  if (box) box.innerHTML = storyPhotoFieldHtml();
 }
 
 // ---------- Паспорт ----------
@@ -1844,18 +1912,24 @@ function healthDoneSheet(id) {
   form.addEventListener('change', () => watchNextDate(form));
 }
 
-// Фото Батончика: выбрать, сжать и сохранить
-async function choosePhoto() {
-  const file = await pickPhoto();
-  if (!file) return null;
-  try {
-    return await compressPhoto(file);
-  } catch (err) {
-    console.error(err);
-    toast('Не получилось открыть фото. Попробуйте другое.');
-    return null;
+// Фото с телефона: выбрать (можно несколько) и сжать. onPicked(n) — сколько выбрано, пока они ещё сжимаются
+async function choosePhotos(max = 1, onPicked = () => {}) {
+  const picked = await pickPhotos({ multiple: max > 1 });
+  const files = picked.slice(0, max);
+  if (!files.length) return [];
+  onPicked(files.length);
+  toast(files.length > 1 ? `Готовим фото: ${files.length}…` : 'Готовим фото…');
+  const out = [];
+  for (const f of files) {
+    try { out.push(await compressPhoto(f)); } catch (err) { console.error(err); }
   }
+  const failed = files.length - out.length;
+  if (failed) toast(out.length ? `Не получилось открыть ${failed} фото из ${files.length}. Попробуйте другие.` : 'Не получилось открыть фото. Попробуйте другое.');
+  else if (picked.length > max) toast(`Добавили ${max} фото: больше в одну заметку не помещается.`);
+  else hideToast();
+  return out;
 }
+async function choosePhoto() { return (await choosePhotos(1))[0] || null; }
 
 // ---------- Резервная копия ----------
 
@@ -2043,6 +2117,9 @@ function openSheet(html, onSubmit) {
   document.body.classList.add('no-scroll');
 }
 function closeSheet() {
+  // Сначала убираем курсор из поля: клавиатура закрывается обычным путём, а не вместе с исчезнувшим окном
+  const focused = document.activeElement;
+  if (focused && sheet.contains(focused)) focused.blur();
   sheet.hidden = true;
   sheetSubmit = null;
   document.body.classList.remove('no-scroll');
@@ -2317,24 +2394,33 @@ const actions = {
   'cal-month': (el) => { S.cal.month = addMonths(S.cal.month, +el.dataset.dir); render(); },
   'memory-next': () => { S.cal.memShift++; render(); },
   'story-photo': async () => {
-    const data = await choosePhoto();
-    if (!data) return;
-    storyPhoto = data;
-    storyPhotoChanged = true;
-    const box = sheet.querySelector('.story-photo-field');
-    if (box) box.innerHTML = storyPhotoFieldHtml();
+    const f = storyForm;
+    const token = f.token;
+    let n = 0;
+    const list = await choosePhotos(MAX_STORY_PHOTOS - f.photos.length - f.busy, (k) => { n = k; f.busy += k; refreshStoryPhotos(); });
+    if (token !== f.token) return; // форму уже закрыли и открыли другую
+    f.busy = Math.max(0, f.busy - n);
+    if (list.length) { f.photos = [...f.photos, ...list].slice(0, MAX_STORY_PHOTOS); f.changed = true; }
+    refreshStoryPhotos();
   },
-  'story-photo-remove': () => {
-    storyPhoto = '';
-    storyPhotoChanged = true;
-    const box = sheet.querySelector('.story-photo-field');
-    if (box) box.innerHTML = storyPhotoFieldHtml();
+  'story-photo-remove': (el) => {
+    storyForm.photos = storyForm.photos.filter((_, i) => i !== +el.dataset.i);
+    storyForm.changed = true;
+    refreshStoryPhotos();
   },
+  'photo-view': (el) => {
+    const list = storyPhotosOf(el.dataset.day);
+    if (list.length) openViewer(list, +el.dataset.i || 0);
+  },
+  'viewer-close': () => closeViewer(),
   'story-delete': (el) => {
     if (!confirm('Удалить заметку о дне?')) return;
+    const day = el.dataset.day;
     closeSheet();
-    delete S.stories[el.dataset.day];
-    store.saveStory(el.dataset.day, null);
+    const oldCount = (S.stories[day] || {}).photoCount || 0;
+    delete S.stories[day];
+    delete S.storyPhotos[day];
+    store.saveStory(day, null, { oldCount });
     render();
   },
   'ev-sub': (el) => { closeSheet(); saveEvent(el.dataset.type, { sub: el.dataset.sub }); },
@@ -2489,7 +2575,62 @@ sheet.addEventListener('submit', (e) => {
   }
 });
 
-document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !sheet.hidden) closeSheet(); });
+// ---------- Экран iPhone после клавиатуры ----------
+// Ошибка iOS 26: когда клавиатура спряталась, система иногда не возвращает экран на место
+// (visualViewport.offsetTop остаётся больше нуля). Тогда всё закреплённое съезжает вверх:
+// вкладки висят посреди экрана, шапка уходит за верхний край. Пока клавиатура закрыта,
+// сдвигаем закреплённые элементы ровно на эту разницу; когда iOS исправится, сдвиг станет нулевым.
+const isTyping = () => {
+  const a = document.activeElement;
+  return !!a && (a.isContentEditable || a.tagName === 'TEXTAREA' || a.tagName === 'SELECT'
+    || (a.tagName === 'INPUT' && !['checkbox', 'radio', 'file', 'button', 'submit'].includes(a.type)));
+};
+const vvShift = { top: 0, bottom: 0 };
+function fitViewport() {
+  const vv = window.visualViewport;
+  let top = 0;
+  let bottom = 0;
+  if (vv && !isTyping() && Math.abs(vv.scale - 1) < 0.02) {
+    top = Math.round(vv.offsetTop);
+    bottom = Math.round(vv.offsetTop + vv.height - window.innerHeight);
+    if (top < 2) top = 0;
+    if (Math.abs(bottom) < 2) bottom = 0;
+  }
+  if (top === vvShift.top && bottom === vvShift.bottom) return;
+  Object.assign(vvShift, { top, bottom });
+  document.documentElement.style.setProperty('--vv-top', `${top}px`);
+  document.documentElement.style.setProperty('--vv-bottom', `${bottom}px`);
+}
+if (window.visualViewport) {
+  window.visualViewport.addEventListener('resize', fitViewport);
+  window.visualViewport.addEventListener('scroll', fitViewport);
+}
+window.addEventListener('scroll', fitViewport, { passive: true });
+window.addEventListener('resize', fitViewport);
+window.addEventListener('pageshow', fitViewport);
+document.addEventListener('visibilitychange', fitViewport);
+document.addEventListener('focusin', fitViewport);
+// Клавиатура уезжает с анимацией — проверяем ещё раз, когда она точно скрылась
+document.addEventListener('focusout', () => { [60, 400, 900].forEach((ms) => setTimeout(fitViewport, ms)); });
+
+// Если экран всё же съехал: пять нажатий подряд на открытую вкладку — размеры экрана в сообщении (для скриншота)
+let diagTaps = [];
+document.querySelector('.tabbar').addEventListener('click', (e) => {
+  if (!e.target.closest('a[aria-current]')) return;
+  const now = Date.now();
+  diagTaps = [...diagTaps.filter((t) => now - t < 3000), now];
+  if (diagTaps.length < 5) return;
+  diagTaps = [];
+  const vv = window.visualViewport || { width: 0, height: 0, offsetTop: 0, scale: 1 };
+  const app = window.matchMedia('(display-mode: standalone)').matches || navigator.standalone ? 'с экрана «Домой»' : 'в браузере';
+  toast(`Экран: окно ${window.innerWidth}×${window.innerHeight}, видно ${Math.round(vv.width)}×${Math.round(vv.height)}, сдвиг ${Math.round(vv.offsetTop)}, масштаб ${(+vv.scale).toFixed(2)}, экран ${screen.width}×${screen.height}, поправка ${vvShift.top}/${vvShift.bottom}, ${app}`);
+});
+
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  if (document.querySelector('.viewer')) closeViewer();
+  else if (!sheet.hidden) closeSheet();
+});
 
 // ---------- Тема ----------
 

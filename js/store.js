@@ -23,10 +23,12 @@ const newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2
 
 // ---------- Только этот телефон ----------
 
-// Заметки без фото (фото — по запросу): { день: { title, text, special, hasPhoto } }
+// Заметки без фото (фото — по запросу): { день: { title, text, special, hasPhoto, photoCount } }
+const localPhotos = (s) => (s.photos && s.photos.length ? s.photos : s.photo ? [s.photo] : []);
 function localStories() {
   return Object.fromEntries(Object.entries(read('bt.stories', {})).map(([d, s]) => [d, {
-    title: s.title || '', text: s.text || '', special: typeof s.special === 'boolean' ? s.special : null, hasPhoto: !!s.photo,
+    title: s.title || '', text: s.text || '', special: typeof s.special === 'boolean' ? s.special : null,
+    hasPhoto: localPhotos(s).length > 0, photoCount: localPhotos(s).length, photoKey: s.photoKey || '',
   }]));
 }
 
@@ -165,11 +167,11 @@ function localStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onPet 
       write('bt.reads', r);
       onReads(r);
     },
-    // Заметки о днях: здесь фото хранится прямо в заметке
-    async loadStoryPhoto(day) { return (read('bt.stories', {})[day] || {}).photo || ''; },
+    // Заметки о днях: здесь фото хранятся прямо в заметке
+    async loadStoryPhotos(day) { return localPhotos(read('bt.stories', {})[day] || {}); },
     async saveStory(day, story) {
       const all = read('bt.stories', {});
-      if (story) all[day] = { title: story.title || '', text: story.text || '', special: !!story.special, photo: story.photo || '' };
+      if (story) all[day] = { title: story.title || '', text: story.text || '', special: !!story.special, photos: story.photos || [], photoKey: story.photoKey || '' };
       else delete all[day];
       write('bt.stories', all);
       onStories(localStories());
@@ -244,7 +246,8 @@ function firebaseStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onE
       const out = {};
       snap.forEach((d) => {
         const v = d.data();
-        out[d.id] = { title: v.title || '', text: v.text || '', special: typeof v.special === 'boolean' ? v.special : null, hasPhoto: !!v.hasPhoto || !!v.photo, photo: v.photo || '' };
+        const count = typeof v.photoCount === 'number' ? v.photoCount : (v.hasPhoto || v.photo ? 1 : 0);
+        out[d.id] = { title: v.title || '', text: v.text || '', special: typeof v.special === 'boolean' ? v.special : null, hasPhoto: count > 0, photoCount: count, photoKey: v.photoKey || '', photo: v.photo || '' };
       });
       onStories(out);
     }, fail));
@@ -560,26 +563,34 @@ function firebaseStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onE
     },
 
     // ---------- Заметки о днях (дневник) ----------
-    async loadStoryPhoto(day) {
-      if (!ready()) return '';
+    // Фото к заметке: storyPhotos/{день}, {день}_2, {день}_3 …
+    async loadStoryPhotos(day, count) {
+      if (!ready() || !count) return [];
       const { doc, getDoc } = fb.fs;
-      const snap = await getDoc(doc(db, 'storyPhotos', day));
-      return snap.exists() ? String(snap.data().data || '') : '';
+      const snaps = await Promise.all(Array.from({ length: count }, (_, i) => getDoc(doc(db, 'storyPhotos', storyPhotoId(day, i)))));
+      return snaps.filter((x) => x.exists()).map((x) => String(x.data().data || '')).filter(Boolean);
     },
-    // story: { title, text, special, photo }; photoChanged: false — фото не трогаем (не перезаписываем 0,5 МБ при правке текста)
-    async saveStory(day, story, { photoChanged = true } = {}) {
+    // story: { title, text, special, photos: [] }; photosChanged: false — фото не трогаем (не перезаписываем их при правке текста).
+    // Всё одним пакетом: заметка и фото сохраняются вместе, даже если телефон заблокировали, пока фото ещё отправлялись
+    async saveStory(day, story, { photosChanged = true, oldCount = 0 } = {}) {
       if (!ready()) return;
-      const { doc, setDoc, deleteDoc, serverTimestamp } = fb.fs;
+      const { doc, writeBatch, serverTimestamp } = fb.fs;
       const ref = doc(db, 'stories', day);
-      const photoRef = doc(db, 'storyPhotos', day);
+      const photoRef = (i) => doc(db, 'storyPhotos', storyPhotoId(day, i));
       const meta = { updatedAt: serverTimestamp(), updatedBy: state.user.name };
-      try {
-        if (!story) { await deleteDoc(ref); await deleteDoc(photoRef); return; }
+      const batch = writeBatch(db);
+      const photos = story ? story.photos || [] : [];
+      if (!story) batch.delete(ref);
+      else {
         const data = { title: story.title || '', text: story.text || '', special: !!story.special, ...meta };
-        if (!photoChanged) { await setDoc(ref, data, { merge: true }); return; }
-        if (story.photo) await setDoc(photoRef, { data: story.photo, ...meta }); else await deleteDoc(photoRef);
-        await setDoc(ref, { ...data, photo: '', hasPhoto: !!story.photo });
-      } catch (err) { fail(err); }
+        if (!photosChanged) batch.set(ref, data, { merge: true });
+        else batch.set(ref, { ...data, photo: '', hasPhoto: photos.length > 0, photoCount: photos.length, photoKey: String(story.photoKey || '').slice(0, 24) });
+      }
+      if (!story || photosChanged) {
+        photos.forEach((p, i) => batch.set(photoRef(i), { data: p, ...meta }));
+        for (let i = photos.length; i < Math.max(oldCount, 1); i++) batch.delete(photoRef(i));
+      }
+      try { await batch.commit(); } catch (err) { fail(err); }
     },
   };
 }
@@ -587,6 +598,8 @@ function firebaseStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onE
 // Карточка собаки: только известные поля, строками
 const PET_FIELDS = ['name', 'breed', 'birth', 'sex', 'chip', 'mdr1', 'weight'];
 const VET_FIELDS = ['clinicName', 'clinicAddress', 'clinicPhone', 'vetName', 'vetPhone'];
+// Первое фото заметки — под датой дня, следующие — с номером: 2026-10-04, 2026-10-04_2 …
+const storyPhotoId = (day, i) => (i ? `${day}_${i + 1}` : day);
 
 function plainPet(v) {
   return Object.fromEntries(PET_FIELDS.map((k) => [k, typeof v[k] === 'string' ? v[k] : '']));
