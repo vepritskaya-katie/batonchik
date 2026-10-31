@@ -120,7 +120,7 @@
 
 /* ---------- Основа ---------- */
 * { box-sizing: border-box; }
-html { -webkit-text-size-adjust: 100%; }
+html { -webkit-text-size-adjust: 100%; touch-action: manipulation; } /* без приближения от двойного касания */
 body {
   margin: 0;
   background: var(--bg);
@@ -389,7 +389,8 @@ a.seg { display: grid; place-items: center; text-decoration: none; }
 .form { display: grid; gap: 14px; }
 .form h2 { margin: 0; }
 .form label { display: grid; gap: 6px; font-weight: 600; font-size: 15px; }
-.form input, .form textarea {
+/* Шрифт полей — не меньше 16 px: иначе iPhone сам приближает страницу при нажатии и не отдаляет обратно */
+.form input, .form textarea, .form select {
   width: 100%; min-height: 48px; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--border);
   background: var(--surface); color: var(--text); font: inherit; font-weight: 400; font-size: 17px;
 }
@@ -818,6 +819,50 @@ a.id-stat::after { content: "›"; position: absolute; top: 6px; right: 10px; co
 .story-text { color: rgba(255, 255, 255, .86); font-size: 15px; line-height: 1.55; }
 .story-feature .btn { margin-top: 14px; background: transparent; color: #fff; border-color: rgba(255, 255, 255, .4); }
 .story-photo { display: block; width: 100%; max-height: 320px; object-fit: cover; border-radius: 14px; margin: 4px 0 12px; }
+/* Фото в заметке: одно — во всю ширину, несколько — лента, которую листают пальцем */
+.photo-one, .photo-strip { margin: 4px 0 12px; }
+.photo-strip {
+  display: flex; gap: 8px; overflow-x: auto; scroll-snap-type: x mandatory; -webkit-overflow-scrolling: touch;
+  scrollbar-width: none; overscroll-behavior-x: contain;
+}
+.photo-strip::-webkit-scrollbar { display: none; }
+.photo-open {
+  position: relative; display: block; width: 100%; padding: 0; border: 0; border-radius: 14px; overflow: hidden;
+  background: var(--surface-2); cursor: zoom-in;
+}
+.photo-open img { display: block; width: 100%; height: 100%; max-height: 320px; object-fit: cover; }
+.photo-strip .photo-open { flex: none; width: 84%; height: 240px; scroll-snap-align: start; }
+.photo-strip .photo-open img { max-height: none; }
+.photo-n {
+  position: absolute; right: 8px; bottom: 8px; padding: 2px 8px; border-radius: 99px;
+  background: rgba(0, 0, 0, .5); color: #fff; font-size: 13px; font-weight: 600;
+}
+/* Просмотр на весь экран */
+.viewer { position: fixed; inset: 0; z-index: 40; background: rgba(0, 0, 0, .94); }
+.viewer-track {
+  display: flex; height: 100%; overflow-x: auto; scroll-snap-type: x mandatory; scrollbar-width: none; overscroll-behavior: contain;
+}
+.viewer-track::-webkit-scrollbar { display: none; }
+.viewer figure { flex: none; width: 100%; height: 100%; margin: 0; display: grid; place-items: center; scroll-snap-align: center; }
+.viewer img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.viewer-x {
+  position: absolute; top: calc(env(safe-area-inset-top) + 12px); right: 12px; width: 44px; height: 44px; border: 0; border-radius: 50%;
+  background: rgba(255, 255, 255, .16); color: #fff; font-size: 28px; line-height: 1; cursor: pointer;
+}
+.viewer-n {
+  position: absolute; left: 50%; bottom: calc(env(safe-area-inset-bottom) + 20px); transform: translateX(-50%);
+  padding: 4px 12px; border-radius: 99px; background: rgba(255, 255, 255, .16); color: #fff; font-size: 14px;
+}
+/* Фото в форме заметки: плитки с крестиком */
+.thumbs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 0 0 12px; }
+.thumb { position: relative; aspect-ratio: 1; border-radius: 12px; overflow: hidden; background: var(--surface-2); }
+.thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.thumb.busy { display: grid; place-items: center; color: var(--muted); font-size: 13px; }
+.thumb-x {
+  position: absolute; top: 4px; right: 4px; width: 36px; height: 36px; border: 0; border-radius: 50%;
+  background: rgba(0, 0, 0, .55); color: #fff; font-size: 20px; line-height: 1; cursor: pointer;
+}
+.story-photo-field .edit-actions { align-items: center; }
 .day-line { margin: 4px 0 0; font-size: 15.5px; }
 .story-mini { display: flex; gap: 12px; margin: 10px 0 0; padding: 12px; border-radius: 14px; background: var(--surface-2); }
 .story-mini img { flex: none; width: 72px; height: 72px; object-fit: cover; border-radius: 10px; }

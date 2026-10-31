@@ -1,21 +1,34 @@
 // Фото с телефона: выбрать и сжать до JPEG разумного размера (строка data:image/jpeg;base64,…),
 // чтобы оно поместилось в документ Firestore (до ~0,9 МБ) и быстро загружалось.
 
-export function pickPhoto() {
+// Выбор фото с телефона. Поле выбора добавляем на страницу: на iPhone у поля вне страницы
+// событие «фото выбраны» иногда не приходит — и кажется, что ничего не произошло.
+export function pickPhotos({ multiple = false } = {}) {
   return new Promise((resolve) => {
     const input = document.createElement('input');
     input.type = 'file';
     input.accept = 'image/*';
-    input.addEventListener('change', () => resolve(input.files && input.files[0] ? input.files[0] : null), { once: true });
+    input.multiple = multiple;
+    input.style.cssText = 'position:fixed;left:-1000px;top:0;width:1px;height:1px;opacity:0';
+    document.body.appendChild(input);
+    const done = (files) => { input.remove(); resolve(files); };
+    input.addEventListener('change', () => done([...(input.files || [])]), { once: true });
+    input.addEventListener('cancel', () => done([]), { once: true });
     input.click();
   });
+}
+
+export async function pickPhoto() {
+  const files = await pickPhotos();
+  return files[0] || null;
 }
 
 function loadImage(url) {
   return new Promise((resolve, reject) => {
     const img = new Image();
-    img.onload = () => resolve(img);
-    img.onerror = () => reject(new Error('Не удалось открыть фото'));
+    const timer = setTimeout(() => reject(new Error('Фото открывается слишком долго')), 30000);
+    img.onload = () => { clearTimeout(timer); resolve(img); };
+    img.onerror = () => { clearTimeout(timer); reject(new Error('Не удалось открыть фото')); };
     img.src = url;
   });
 }
