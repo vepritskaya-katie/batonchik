@@ -1549,29 +1549,16 @@ function featureHtml() {
     </div></article>`;
 }
 
-// «Дни, которые хочется помнить» — все по порядку, свежие сверху
-function specialListHtml() {
-  const days = Object.keys(S.stories).filter((d) => hasStory(S.stories[d]) && isSpecial(S.stories[d])).sort().reverse();
-  if (!days.length) return '';
-  return `<section class="section"><h2>Дни, которые хочется помнить</h2><ul class="special-list">${days.map((d) => {
-    const s = S.stories[d];
-    const [y, mm, dd] = d.split('-').map(Number);
-    return `<li><button class="special-row" data-action="cal-pick" data-day="${d}" data-scroll="1">
-      <span class="special-date"><strong>${dd}</strong><span>${MONTHS_SHORT[mm - 1]}${y !== Number(S.day.slice(0, 4)) ? ` ${y}` : ''}</span></span>
-      <span class="special-title">${escapeHtml(s.title || (s.text || '').slice(0, 80))}</span></button></li>`;
-  }).join('')}</ul></section>`;
-}
-
+// Дневник: большая карточка и календарь; день открывается под календарём только по нажатию на число
 function renderDiary() {
-  if (!S.cal.sel) S.cal.sel = S.day;
-  if (!S.cal.month) S.cal.month = monthOf(S.cal.sel);
+  if (!S.cal.month) S.cal.month = monthOf(S.day);
   const sel = S.cal.sel;
   const head = pageHead({ eyebrow: DOG(), title: 'Дневник', sub: 'Календарь дней и ваши заметки. Нажмите на число, чтобы открыть день.',
-    plus: sel <= S.day ? { action: 'story-edit', label: 'Написать о выбранном дне' } : null });
+    plus: !sel || sel <= S.day ? { action: 'story-edit', label: sel ? 'Написать о выбранном дне' : 'Написать о сегодняшнем дне' } : null });
   if (!canWrite()) return `${head}${statusBanner()}<p class="muted">Дневник появится после входа.</p>`;
   setTimeout(() => loadMonth(S.cal.month), 0);
-  if (monthOf(sel) !== S.cal.month) setTimeout(() => loadMonth(monthOf(sel)), 0);
-  return `${head}${featureHtml()}${calendarHtml(S.cal.month)}${selectedDayHtml(sel)}${specialListHtml()}`;
+  if (sel && monthOf(sel) !== S.cal.month) setTimeout(() => loadMonth(monthOf(sel)), 0);
+  return `${head}${featureHtml()}${calendarHtml(S.cal.month)}${sel ? selectedDayHtml(sel) : ''}`;
 }
 
 // Заметка о дне: заголовок, текст, фото и «день, который хочется помнить»
@@ -2318,11 +2305,14 @@ const actions = {
     if (r) download('batonchik-napominanie.ics', icsText(r, DOG()), 'text/calendar');
   },
   'story-edit': (el) => storySheet(el.dataset.day || (route().page === 'd' && S.cal.sel && S.cal.sel <= S.day ? S.cal.sel : S.day)),
+  // Нажатие на число — день под календарём; повторное нажатие на то же число — скрыть
   'cal-pick': (el) => {
-    S.cal.sel = el.dataset.day;
-    S.cal.month = monthOf(el.dataset.day);
+    const day = el.dataset.day;
+    S.cal.sel = S.cal.sel === day && !el.dataset.scroll ? '' : day;
+    S.cal.month = monthOf(day);
     render();
-    if (el.dataset.scroll) { const card = document.getElementById('day-sel'); if (card) card.scrollIntoView({ block: 'start', behavior: 'smooth' }); }
+    const card = S.cal.sel && document.getElementById('day-sel');
+    if (card) card.scrollIntoView({ block: 'start', behavior: 'smooth' });
   },
   'cal-month': (el) => { S.cal.month = addMonths(S.cal.month, +el.dataset.dir); render(); },
   'memory-next': () => { S.cal.memShift++; render(); },

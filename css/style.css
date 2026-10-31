@@ -1013,12 +1013,5 @@ a.id-stat::after { content: "›"; position: absolute; top: 6px; right: 10px; co
 .story-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
 .story-actions .btn { margin-top: 0; }
 .story-feature.empty { grid-template-columns: 1fr; }
-.special-list { list-style: none; margin: 0; padding: 0; }
-.special-row { display: flex; align-items: center; gap: 14px; width: 100%; padding: 10px 0; border: 0; border-top: 1px solid var(--line); background: none; color: var(--text); font: inherit; text-align: left; cursor: pointer; }
-.special-list li:first-child .special-row { border-top: 0; }
-.special-date { flex: none; display: grid; place-items: center; align-content: center; width: 52px; height: 52px; border-radius: 50%; box-shadow: inset 0 0 0 2px var(--mk-story); }
-.special-date strong { font: 700 18px/1 "Manrope", sans-serif; }
-.special-date span { font-size: 13px; color: var(--muted); }
-.special-title { font-weight: 600; }
 .special-check { font-weight: 500 !important; }
 .day-sel > .btn.wide { margin-top: 12px; }
