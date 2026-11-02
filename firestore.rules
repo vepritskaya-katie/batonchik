@@ -138,15 +138,17 @@ service cloud.firestore {
       allow delete: if isAllowed() && doc == 'photo';
     }
 
-    // Паспорт: прививки, обработки, таблетки, визиты к врачу. done == false — запланировано (напоминание)
+    // Паспорт: прививки, обработки, таблетки, визиты к врачу. done == false — запланировано (напоминание).
+    // time — время визита к врачу «ЧЧ:ММ» по Москве, необязательно
     match /health/{id} {
       allow read: if isAllowed();
       allow create, update: if isAllowed()
         && id.size() <= 40
-        && request.resource.data.keys().hasOnly(['title', 'kind', 'date', 'done', 'note', 'updatedAt', 'updatedBy'])
+        && request.resource.data.keys().hasOnly(['title', 'kind', 'date', 'time', 'done', 'note', 'updatedAt', 'updatedBy'])
         && request.resource.data.title is string && request.resource.data.title.size() > 0 && request.resource.data.title.size() <= 120
         && request.resource.data.kind in ['vaccine', 'ticks', 'worms', 'pill', 'vet', 'other']
         && request.resource.data.date is string && request.resource.data.date.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+        && (!('time' in request.resource.data) || (request.resource.data.time is string && request.resource.data.time.matches('^([01][0-9]|2[0-3]):[0-5][0-9]$')))
         && request.resource.data.done is bool
         && request.resource.data.note is string && request.resource.data.note.size() <= 1000
         && request.resource.data.updatedAt == request.time

@@ -397,6 +397,10 @@ a.seg { display: grid; place-items: center; text-decoration: none; }
   background: var(--surface); color: var(--text); font: inherit; font-weight: 400; font-size: 17px;
 }
 .form textarea { resize: vertical; }
+/* Дата и время визита — в одну строку; без времени дата на всю ширину */
+.date-time { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.date-time:has(> [hidden]) { grid-template-columns: 1fr; }
+.date-time input { min-width: 0; }
 .time-row { display: flex; gap: 10px; align-items: center; }
 .time-row input { flex: 1; }
 .form fieldset { border: 0; padding: 0; margin: 0; }
@@ -1062,3 +1066,32 @@ a.id-stat::after { content: "›"; position: absolute; top: 6px; right: 10px; co
 .story-feature.empty { grid-template-columns: 1fr; }
 .special-check { font-weight: 500 !important; }
 .day-sel > .btn.wide { margin-top: 12px; }
+
+/* ---------- Поиск по «Советам» ---------- */
+.tips-search-box { position: relative; margin: 0 0 14px; }
+.tips-search { padding-right: 52px; }
+.tips-search::-webkit-search-cancel-button { -webkit-appearance: none; appearance: none; }
+.search-clear {
+  position: absolute; right: 4px; top: 50%; transform: translateY(-50%); width: 44px; height: 44px; border: 0; border-radius: 50%;
+  background: transparent; color: var(--muted); font: inherit; font-size: 17px; cursor: pointer;
+}
+.tips-results .group { margin-top: 12px; }
+.search-count { margin: 0 0 4px; }
+.search-group > h2 { display: flex; align-items: center; gap: 8px; }
+.search-n { font: 600 13px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 4px 8px; border-radius: 99px; background: var(--surface-2); color: var(--muted); }
+.hit-src { font-size: 12px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: color-mix(in srgb, var(--accent) 85%, var(--bg)); }
+.hit-snip { color: var(--text-2); font-size: 15px; line-height: 1.45; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.tips-results mark, .lib-hit mark { background: color-mix(in srgb, var(--mk-health) 28%, transparent); color: inherit; border-radius: 3px; padding: 0 1px; }
+.search-more { margin-top: 10px; }
+.search-empty { margin-top: 8px; }
+/* Место, куда привёл поиск: под шапкой, с мягкой подсветкой */
+[id^="lib-"] { scroll-margin-top: 84px; }
+.lib-hit { background: color-mix(in srgb, var(--mk-health) 14%, transparent); border-radius: 10px; box-shadow: 0 0 0 8px color-mix(in srgb, var(--mk-health) 14%, transparent); }
+.vv-now { margin: 0 0 8px; color: var(--text-2); }
+.vv-log { margin: 0 0 10px; padding-left: 18px; color: var(--text-2); }
+.vv-log li { margin: 4px 0; }
+
+/* Приложение с экрана «Домой»: страница не «пружинит» у краёв — иначе iOS тянет за собой закреплённые шапку и вкладки */
+@media (display-mode: standalone) {
+  html, body { overscroll-behavior-y: none; }
+}

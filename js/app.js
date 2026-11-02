@@ -7,9 +7,10 @@ import {
   EVENT_TYPES, SUBS, TRAIN, dayKey, fmtTime, fmtDate, addDays, moscowDate, dayStats, eventRow, todaySummary, nightLine, nightFor, plural, mondayOf, dayTitle,
   rhythmHtml, weekStatsHtml, daySummaryLine, trainsLine, MONTHS_SHORT,
 } from './diary.js';
-import { HEALTH_KINDS, NEXT_OPTIONS, nextDate, suggestNext, dueText, ageText, upcoming, doneRecords, googleCalendarUrl, icsText, healthRowHtml, daysBetween, ageShort, ageMonths } from './passport.js';
+import { HEALTH_KINDS, NEXT_OPTIONS, nextDate, suggestNext, dueText, ageText, upcoming, doneRecords, googleCalendarUrl, icsText, healthRowHtml, daysBetween, ageShort, ageMonths, hasTime, TIME_RE } from './passport.js';
 import { pickPhotos, compressPhoto } from './photo.js';
 import { fmtNum, parseNum, series, deltaText, lineChartSvg } from './growth.js';
+import { buildIndex, resultsHtml } from './search.js';
 import { RUBRICS, parseLibrary, quizOrder, readKey, readCount, readBtn, metaChips, articleBody, foldList, agesHtml, dictHtml, booksHtml, quizHtml, introHtml } from './library.js';
 import { pickIdeas } from './ideas.js';
 import { parseNotes, notesListHtml, noteHtml, noteMatches, countText } from './notes.js';
@@ -81,9 +82,11 @@ const S = {
   edit: { trainings: false },
   notes: null,        // вкладка «Каналы»: заметки из Telegram-каналов (только чтение)
   notesFilter: { q: '', now: false, future: false, sci: false, exp: false },
+  tipsQ: '',          // поиск по «Советам» (Библиотека, Практика, Каналы); пока не очищен — результаты вместо раздела
+  tipsMore: {},       // разделы результатов, где нажали «Показать ещё»
   pet: null,          // паспорт: { name, breed, birth, sex, chip, mdr1, weight }
   photo: '',          // фото Батончика (data:image/jpeg…)
-  health: [],         // паспорт: прививки, обработки, таблетки, врач — { id, title, kind, date, done, note }
+  health: [],         // паспорт: прививки, обработки, таблетки, врач — { id, title, kind, date, time (у врача, «ЧЧ:ММ» или пусто), done, note }
   growth: [],         // рост и вес: { id, date, weight (кг), height (см) }
   lib: null,          // Библиотека (content/biblioteka.md)
   reads: { items: {}, quiz: {} }, // что прочитано в Библиотеке и лучшие результаты тестов — у каждого свои
@@ -937,18 +940,53 @@ function tipsSwitch(on) {
 }
 const TIPS_SUB = 'Почему это работает, что делать и заметки из каналов.';
 
+// Страница «Советов»: шапка, «Срочно к ветеринару», поиск, переключатель разделов и раздел.
+// Пока в поиске что-то написано, вместо раздела — найденное во всех трёх разделах
+function tipsPage(on, body, plus) {
+  const q = S.tipsQ.trim();
+  return `${pageHead({ title: 'Советы', sub: TIPS_SUB, plus })}${urgentBtn()}
+    <div class="tips-search-box"><input class="notes-search tips-search" type="search" enterkeyhint="search" autocomplete="off"
+      placeholder="Поиск: поводок, клещ, кусает…" aria-label="Поиск по советам" value="${escapeHtml(S.tipsQ)}">
+      <button type="button" class="search-clear" data-action="tips-clear" aria-label="Очистить поиск"${q ? '' : ' hidden'}>✕</button></div>
+    <div class="tips-results"${q ? '' : ' hidden'}>${q ? tipsResultsHtml() : ''}</div>
+    <div class="tips-body"${q ? ' hidden' : ''}>${tipsSwitch(on)}${body}</div>`;
+}
+
+// Что искать: собирается один раз, заново — когда обновились файлы или правки «Практики»
+let tipsIndex = null;
+function tipsResultsHtml() {
+  const src = { lib: S.lib, cat: S.catalogs.t, notes: S.notes };
+  if (!tipsIndex || tipsIndex.lib !== src.lib || tipsIndex.cat !== src.cat || tipsIndex.notes !== src.notes) {
+    tipsIndex = { ...src, items: buildIndex(src) };
+  }
+  const loading = !S.lib || !S.catalogs.t || !S.notes;
+  return `${resultsHtml(tipsIndex.items, S.tipsQ, S.tipsMore)}${loading ? '<p class="muted small">Ещё загружаем часть советов…</p>' : ''}`;
+}
+
+// Поиск обновляет только результаты, без перерисовки страницы: поле не теряет курсор
+function applyTipsSearch() {
+  const q = S.tipsQ.trim();
+  const results = view.querySelector('.tips-results');
+  if (!results) return;
+  results.innerHTML = q ? tipsResultsHtml() : '';
+  results.hidden = !q;
+  view.querySelector('.tips-body').hidden = !!q;
+  view.querySelector('.search-clear').hidden = !q;
+}
+
+// Пришли из поиска — «Назад» возвращает к найденному
+const isTipsTop = (hash) => /^#\/(lib|t|c)\/?$/.test(hash || '');
+const fromSearch = () => !!(S.tipsQ.trim() && isTipsTop(prevHash));
+const searchBack = (fallback) => (fromSearch() ? `<a class="back" href="${prevHash}" data-action="back">${BACK_SVG}Поиск</a>` : fallback);
+
 function renderTipsPage() {
-  return `${pageHead({ title: 'Советы', sub: TIPS_SUB, plus: { action: 'new-tip', label: 'Новый совет' } })}
-    ${urgentBtn()}
-    ${tipsSwitch('t')}
-    ${catalogBody('t')}`;
+  return tipsPage('t', catalogBody('t'), { action: 'new-tip', label: 'Новый совет' });
 }
 
 function renderNotesPage() {
-  const head = `${pageHead({ title: 'Советы', sub: TIPS_SUB })}${urgentBtn()}${tipsSwitch('c')}`;
-  if (!S.notes) return `${head}<p class="muted">Загружаем…</p>`;
-  if (S.notes.error) return `${head}<div class="banner warn">Не удалось загрузить заметки. Проверьте интернет.</div>`;
-  return head + notesListHtml(S.notes, S.notesFilter);
+  if (!S.notes) return tipsPage('c', '<p class="muted">Загружаем…</p>');
+  if (S.notes.error) return tipsPage('c', '<div class="banner warn">Не удалось загрузить заметки. Проверьте интернет.</div>');
+  return tipsPage('c', notesListHtml(S.notes, S.notesFilter));
 }
 
 // ---------- Неделя Батончика ----------
@@ -1044,19 +1082,18 @@ function rubricNote(key) {
 const urgentBtn = () => `<a class="urgent-btn" href="#/lib/vet"><span aria-hidden="true">🚑</span><span><strong>Срочно к ветеринару</strong><small>когда нельзя ждать и куда звонить</small></span><span aria-hidden="true">›</span></a>`;
 
 function renderLibrary(r) {
-  const head = `${pageHead({ title: 'Советы', sub: TIPS_SUB })}${urgentBtn()}${tipsSwitch('lib')}`;
-  if (!S.lib) return `${head}<p class="muted">Загружаем…</p>`;
-  if (S.lib.error) return `${head}<div class="banner warn">Не удалось загрузить Библиотеку. Проверьте интернет.</div>`;
+  if (!S.lib) return tipsPage('lib', '<p class="muted">Загружаем…</p>');
+  if (S.lib.error) return tipsPage('lib', '<div class="banner warn">Не удалось загрузить Библиотеку. Проверьте интернет.</div>');
   const rubric = RUBRICS.find((x) => x.key === r.id);
   if (!rubric) {
     const tiles = RUBRICS.filter((x) => !x.urgent).map((x) => `<a class="lib-tile" href="#/lib/${x.key}"><span class="lib-icon" aria-hidden="true">${x.icon}</span>
       <strong>${x.title}</strong><span>${escapeHtml(rubricNote(x.key))}</span></a>`).join('');
-    return `${head}<div class="prose lib-intro">${introHtml(S.lib)}</div><div class="lib-grid">${tiles}</div>`;
+    return tipsPage('lib', `<div class="prose lib-intro">${introHtml(S.lib)}</div><div class="lib-grid">${tiles}</div>`);
   }
   if (rubric.key === 'a' && r.sub) return renderArticle(r.sub);
   if (rubric.key === 'vet') return renderVet();
   const can = canWrite();
-  const back = rubric.key === 'quiz' && r.sub ? `<a class="back" href="#/lib/quiz">${BACK_SVG}Проверь себя</a>` : `<a class="back" href="#/lib">${BACK_SVG}Библиотека</a>`;
+  const back = rubric.key === 'quiz' && r.sub ? `<a class="back" href="#/lib/quiz">${BACK_SVG}Проверь себя</a>` : searchBack(`<a class="back" href="#/lib">${BACK_SVG}Библиотека</a>`);
   const top = `${back}<div class="page-head"><div class="page-head-text"><p class="eyebrow">Библиотека</p><h1>${rubric.title}</h1>
     <p class="page-sub">${escapeHtml(rubricNote(rubric.key))}${rubric.read && can ? ' · кружок справа — «прочитано»' : ''}</p></div></div>`;
   let body = '';
@@ -1069,8 +1106,11 @@ function renderLibrary(r) {
   } else if (rubric.key === 'qa' || rubric.key === 'myths') body = foldList(S.lib, rubric.key, S.reads.items, can, r.sub);
   else if (rubric.key === 'ages') {
     const m = ageMonths(S.pet && S.pet.birth, S.day);
-    body = `${m != null ? `<p class="muted">${escapeHtml(DOG())} сейчас ${ageText(S.pet.birth, S.day)}. Текущий этап открыт и отмечен.</p>` : ''}${agesHtml(S.lib, m)}`;
-  } else if (rubric.key === 'body') body = S.lib.body.map((c) => `<div class="prose lib-sheet">${articleBody(c)}</div>`).join('');
+    body = `${m != null ? `<p class="muted">${escapeHtml(DOG())} сейчас ${ageText(S.pet.birth, S.day)}. Текущий этап открыт и отмечен.</p>` : ''}${agesHtml(S.lib, m, r.sub)}`;
+  } else if (rubric.key === 'body') {
+    // У каждого подраздела шпаргалки — свой адрес (#/lib/body/карточка-номер), чтобы поиск вёл прямо к нему
+    body = S.lib.body.map((c) => { let k = 0; return `<div class="prose lib-sheet">${articleBody(c).replace(/<h3>/g, () => `<h3 id="lib-body-${c.id}-${++k}">`)}</div>`; }).join('');
+  }
   else if (rubric.key === 'dict') body = dictHtml(S.lib);
   else if (rubric.key === 'quiz') {
     const test = r.sub && S.lib.quizzes.find((t) => t.id === r.sub);
@@ -1112,7 +1152,7 @@ function vetContactsHtml() {
 
 function renderVet() {
   const c = S.lib.vet[0];
-  const back = `<a class="back" href="#/lib">${BACK_SVG}Библиотека</a>`;
+  const back = searchBack(`<a class="back" href="#/lib">${BACK_SVG}Библиотека</a>`);
   if (!c) return `${back}<p class="empty">Раздел не найден.</p>`;
   return `${back}<p class="eyebrow urgent-eyebrow">Библиотека · срочно</p>
     <h1 class="card-title">${inline(c.title)}</h1>
@@ -1139,7 +1179,7 @@ function vetSheet() {
 function renderArticle(id) {
   const list = S.lib.a;
   const i = list.findIndex((c) => c.id === id);
-  const back = `<a class="back" href="#/lib/a">${BACK_SVG}Статьи</a>`;
+  const back = searchBack(`<a class="back" href="#/lib/a">${BACK_SVG}Статьи</a>`);
   if (i < 0) return `${back}<p class="empty">Статья не найдена.</p>`;
   const c = list[i];
   const on = !!S.reads.items[readKey('a', c.id)];
@@ -1213,10 +1253,13 @@ function applyNotesFilter() {
 
 view.addEventListener('input', (e) => { if (e.target.matches('.dict-search')) filterDict(e.target); });
 view.addEventListener('input', (e) => {
-  if (!e.target.matches('.notes-search')) return;
-  S.notesFilter.q = e.target.value;
-  applyNotesFilter();
+  if (!e.target.matches('.tips-search')) return;
+  S.tipsQ = e.target.value;
+  S.tipsMore = {};
+  applyTipsSearch();
 });
+// «Найти» на клавиатуре — убрать клавиатуру, чтобы были видны результаты
+view.addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target.matches('.tips-search')) e.target.blur(); });
 
 // ---------- Каталоги ----------
 
@@ -1817,7 +1860,7 @@ function growthSheet(id) {
 
 // Новая запись о здоровье или правка: что, вид, дата, сделано / запланировано, следующий раз
 function healthFormSheet(id) {
-  const r = (id && S.health.find((x) => x.id === id)) || { title: '', kind: 'vaccine', date: S.day, done: true, note: '' };
+  const r = (id && S.health.find((x) => x.id === id)) || { title: '', kind: 'vaccine', date: S.day, time: '', done: true, note: '' };
   openSheet(`<form class="form health-form"><h2>${id ? 'Изменить запись' : 'Новая запись о здоровье'}</h2>
     <label>Что<input name="title" maxlength="120" required list="health-suggest" value="${escapeHtml(r.title)}" placeholder="Например: обработка от клещей"></label>
     <datalist id="health-suggest">${HEALTH_SUGGEST.map((s) => `<option value="${escapeHtml(s)}">`).join('')}</datalist>
@@ -1826,7 +1869,8 @@ function healthFormSheet(id) {
     <fieldset><legend>Статус</legend><div class="choices">
       <label class="choice"><input type="radio" name="done" value="1"${r.done ? ' checked' : ''}>Уже сделано</label>
       <label class="choice"><input type="radio" name="done" value="0"${r.done ? '' : ' checked'}>Запланировать</label></div></fieldset>
-    <label>Дата<input type="date" name="date" required value="${escapeHtml(r.date)}"></label>
+    <div class="date-time"><label>Дата<input type="date" name="date" required value="${escapeHtml(r.date)}"></label>
+      <label class="time-field"${r.kind === 'vet' ? '' : ' hidden'}>Время<input type="time" name="time" value="${escapeHtml(hasTime(r) ? r.time : '')}"></label></div>
     <div class="next-field"${r.done ? '' : ' hidden'}>${nextFieldHtml(suggestNext(r, S.health, S.pet && S.pet.birth))}</div>
     <label>Заметка <span class="muted">(необязательно)</span><textarea name="note" rows="2" maxlength="1000" placeholder="Препарат, доза, клиника">${escapeHtml(r.note)}</textarea></label>
     <div class="form-actions"><button type="button" class="btn" data-action="sheet-close">Отмена</button><button class="btn primary">Сохранить</button></div>
@@ -1836,6 +1880,9 @@ function healthFormSheet(id) {
       title: String(fd.get('title') || '').trim(), kind: String(fd.get('kind') || 'other'),
       date: String(fd.get('date') || S.day), done: fd.get('done') === '1', note: String(fd.get('note') || '').trim(),
     };
+    // Время — только у визита к врачу
+    const time = String(fd.get('time') || '').slice(0, 5);
+    rec.time = rec.kind === 'vet' && TIME_RE.test(time) ? time : '';
     if (!rec.title || !/^\d{4}-\d\d-\d\d$/.test(rec.date)) return;
     store.saveHealth(id || null, rec);
     const planned = rec.done ? planNext(rec, fd) : '';
@@ -1847,6 +1894,7 @@ function healthFormSheet(id) {
   form.addEventListener('change', () => {
     const fd = new FormData(form);
     form.querySelector('.next-field').hidden = fd.get('done') !== '1';
+    form.querySelector('.time-field').hidden = fd.get('kind') !== 'vet';
     if (!next.dataset.touched) {
       const rec = { id, title: String(fd.get('title') || ''), kind: String(fd.get('kind') || 'other'), date: String(fd.get('date') || S.day), done: true };
       next.value = suggestNext(rec, S.health, S.pet && S.pet.birth);
@@ -1879,7 +1927,7 @@ function healthSheet(id) {
   const r = S.health.find((x) => x.id === id);
   if (!r) return;
   const k = HEALTH_KINDS[r.kind] || HEALTH_KINDS.other;
-  const when = dayTitle(r.date, { day: 'numeric', month: 'long', year: 'numeric' });
+  const when = `${dayTitle(r.date, { day: 'numeric', month: 'long', year: 'numeric' })}${hasTime(r) ? `, ${r.time}` : ''}`;
   openSheet(`<div class="form"><h2>${k.icon} ${escapeHtml(r.title)}</h2>
     <p class="muted">${k.label} · ${r.done ? `сделано ${when}` : `${when} — ${dueText(r.date, S.day)}`}${r.updatedBy ? ` · записал(а) ${escapeHtml(r.updatedBy)}` : ''}</p>
     ${r.note ? `<p>${inline(r.note)}</p>` : ''}
@@ -1904,7 +1952,7 @@ function healthDoneSheet(id) {
   </form>`, (fd) => {
     const date = String(fd.get('date') || S.day);
     const rec = { ...r, date, done: true };
-    store.saveHealth(r.id, { title: rec.title, kind: rec.kind, date, done: true, note: rec.note });
+    store.saveHealth(r.id, { title: rec.title, kind: rec.kind, date, time: date === r.date ? r.time || '' : '', done: true, note: rec.note });
     const planned = planNext(rec, fd);
     toast(planned ? `Отмечено. Следующий раз — ${dayTitle(planned, { day: 'numeric', month: 'long' })}.` : 'Отмечено.');
   });
@@ -1994,7 +2042,8 @@ function renderMe() {
       </div></section>
     <section class="section panel"><h2>Содержание</h2>
       <p class="muted">Тексты берутся из файлов в папке content. После замены файла на GitHub нажмите кнопку ниже.</p>
-      <button class="btn wide" data-action="reload">Загрузить свежую версию</button></section>`;
+      <button class="btn wide" data-action="reload">Загрузить свежую версию</button></section>
+    ${viewportPanelHtml()}`;
 }
 
 // ---------- Маршруты и отрисовка ----------
@@ -2039,6 +2088,7 @@ function pageTitle(hash) {
   const parts = hash.replace(/^#\/?/, '').split('/').filter(Boolean);
   if (!parts.length) return 'Главная';
   if (parts[0] === 'edit') return null;
+  if (isTipsTop(hash) && S.tipsQ.trim()) return 'Поиск';
   if (parts[1] && (TABS[parts[0]] || parts[0] === 'c')) return 'Назад';
   return PAGE_TITLES[parts[0]] || null;
 }
@@ -2048,8 +2098,8 @@ function render(force) {
   if (r.page !== 'edit') S.editor = null;
   // Открытую форму правки не перерисовываем от обновлений с сервера, чтобы не стереть набранный текст
   if (r.page === 'edit' && !force && S.editor && S.editor.key === editorKey(r) && view.querySelector('[data-editor]')) return;
-  // То же для поиска в «Каналах», пока в нём печатают
-  if (r.page === 'c' && !r.id && !force && document.activeElement && document.activeElement.matches('.notes-search')) return;
+  // То же для поиска в «Советах», пока в нём печатают
+  if (['lib', 't', 'c'].includes(r.page) && !r.id && !force && document.activeElement && document.activeElement.matches('.tips-search')) return;
   if (r.page === 'lib' && r.id === 'dict' && !force && document.activeElement && document.activeElement.matches('.dict-search')) return;
   let html;
   if (r.page === 'me') html = renderMe();
@@ -2075,6 +2125,7 @@ function render(force) {
     // Ссылка на вопрос или миф — раскрытый пункт сразу на экране
     const target = r.page === 'lib' && r.sub && r.id !== 'a' && document.getElementById(`lib-${r.id}-${r.sub}`);
     if (target) target.scrollIntoView({ block: 'start' });
+    if (target && fromSearch()) target.classList.add('lib-hit');
   } else if (pendingScroll && Date.now() < pendingScroll.until) {
     // Страница дорисовалась (например, подгрузились данные) — дотягиваем до запомненного места
     window.scrollTo(0, pendingScroll.y);
@@ -2531,6 +2582,21 @@ const actions = {
     }
   },
   'back': () => history.back(),
+  'vv-clear': () => {
+    try { localStorage.removeItem(VV_LOG); } catch { /* ничего */ }
+    render(true);
+  },
+  'tips-clear': () => {
+    S.tipsQ = '';
+    S.tipsMore = {};
+    const input = view.querySelector('.tips-search');
+    if (input) input.value = '';
+    applyTipsSearch();
+  },
+  'tips-more': (el) => {
+    S.tipsMore[el.dataset.group] = true;
+    applyTipsSearch();
+  },
   'toast-action': () => { const fn = toastAction; hideToast(); if (fn) fn(); },
   'sheet-close': () => closeSheet(),
   'sign-in': () => store.signIn(),
@@ -2576,16 +2642,43 @@ sheet.addEventListener('submit', (e) => {
 });
 
 // ---------- Экран iPhone после клавиатуры ----------
-// Ошибка iOS 26: когда клавиатура спряталась, система иногда не возвращает экран на место
-// (visualViewport.offsetTop остаётся больше нуля). Тогда всё закреплённое съезжает вверх:
-// вкладки висят посреди экрана, шапка уходит за верхний край. Пока клавиатура закрыта,
-// сдвигаем закреплённые элементы ровно на эту разницу; когда iOS исправится, сдвиг станет нулевым.
+// Ошибка iOS 26 (и, по сообщениям, снова в iOS 27): когда клавиатура спряталась, система иногда
+// оставляет страницу сдвинутой. Тогда всё закреплённое съезжает вверх: вкладки висят посреди экрана,
+// шапка уходит за верхний край — особенно заметно при прокрутке вверх.
+// 1. Главное средство: прокрутка «на то же место». После неё iOS сбрасывает застрявший сдвиг —
+//    так это лечат в других веб-приложениях, проверено на iPhone. Делаем это, когда поле ввода теряет
+//    курсор, когда клавиатура уехала и когда прокрутка остановилась, а сдвиг виден.
+// 2. Запасное: если iOS сообщает сдвиг (visualViewport.offsetTop), смещаем шапку и вкладки
+//    на эту разницу — только вниз, вверх никогда.
+// 3. Что видел телефон, записывается (последние 8 случаев) — это видно в «Настройках» → «Экран iPhone».
 const isTyping = () => {
   const a = document.activeElement;
   return !!a && (a.isContentEditable || a.tagName === 'TEXTAREA' || a.tagName === 'SELECT'
-    || (a.tagName === 'INPUT' && !['checkbox', 'radio', 'file', 'button', 'submit'].includes(a.type)));
+    || (a.tagName === 'INPUT' && !['checkbox', 'radio', 'file', 'button', 'submit', 'range', 'color'].includes(a.type)));
 };
 const vvShift = { top: 0, bottom: 0 };
+const VV_LOG = 'bt.vvlog';
+function viewportNow() {
+  const vv = window.visualViewport || { width: window.innerWidth, height: window.innerHeight, offsetTop: 0, scale: 1 };
+  return { iw: window.innerWidth, ih: window.innerHeight, vw: Math.round(vv.width), vh: Math.round(vv.height), top: Math.round(vv.offsetTop), scale: +vv.scale || 1, y: Math.round(window.scrollY) };
+}
+const viewportText = (v) => `окно ${v.iw}×${v.ih}, видно ${v.vw}×${v.vh}, сдвиг ${v.top}, масштаб ${v.scale.toFixed(2)}, прокрутка ${v.y}`;
+const isApp = () => window.matchMedia('(display-mode: standalone)').matches || !!navigator.standalone;
+const iosVersion = () => { const m = navigator.userAgent.match(/OS (\d+)_(\d+)/); return m ? `iOS ${m[1]}.${m[2]}` : ''; };
+let vvLoggedAt = 0;
+function logViewport(what, v = viewportNow()) {
+  if (what === 'сдвиг' && Date.now() - vvLoggedAt < 15000) return; // одно и то же при прокрутке — не чаще раза в 15 секунд
+  vvLoggedAt = Date.now();
+  const at = new Date().toLocaleString('ru-RU', { day: 'numeric', month: 'numeric', hour: '2-digit', minute: '2-digit' });
+  try {
+    const list = JSON.parse(localStorage.getItem(VV_LOG) || '[]');
+    list.unshift(`${at} · ${what}: ${viewportText(v)}, поправка ${vvShift.top}/${vvShift.bottom}`);
+    localStorage.setItem(VV_LOG, JSON.stringify(list.slice(0, 8)));
+  } catch { /* ничего */ }
+}
+// Видна ли ошибка: страница сдвинута или видимая часть меньше окна, хотя клавиатуры нет
+const looksShifted = (v) => !isTyping() && Math.abs(v.scale - 1) < 0.02 && (v.top >= 2 || v.ih - v.vh >= 2);
+
 function fitViewport() {
   const vv = window.visualViewport;
   let top = 0;
@@ -2594,24 +2687,65 @@ function fitViewport() {
     top = Math.round(vv.offsetTop);
     bottom = Math.round(vv.offsetTop + vv.height - window.innerHeight);
     if (top < 2) top = 0;
-    if (Math.abs(bottom) < 2) bottom = 0;
+    if (bottom < 2) bottom = 0;
   }
   if (top === vvShift.top && bottom === vvShift.bottom) return;
   Object.assign(vvShift, { top, bottom });
   document.documentElement.style.setProperty('--vv-top', `${top}px`);
   document.documentElement.style.setProperty('--vv-bottom', `${bottom}px`);
+  if (top || bottom) logViewport('сдвиг');
 }
+
+// Прокрутка на то же место: iOS пересчитывает экран и сбрасывает застрявший сдвиг
+let lastHealAt = 0;
+function healViewport(why) {
+  if (isTyping()) return;
+  const before = viewportNow();
+  lastHealAt = Date.now();
+  window.scrollTo(window.scrollX, window.scrollY);
+  requestAnimationFrame(() => {
+    fitViewport();
+    if (looksShifted(before)) {
+      const after = viewportNow();
+      logViewport(`${why}: было`, before);
+      if (looksShifted(after)) logViewport('и осталось', after);
+    }
+  });
+}
+
 if (window.visualViewport) {
-  window.visualViewport.addEventListener('resize', fitViewport);
+  let vvHeight = window.visualViewport.height;
+  window.visualViewport.addEventListener('resize', () => {
+    fitViewport();
+    // Клавиатура уехала (видимая часть выросла), а курсора в поле уже нет
+    const h = window.visualViewport.height;
+    if (h > vvHeight + 60 && !isTyping()) setTimeout(() => healViewport('клавиатура скрылась'), 80);
+    vvHeight = h;
+  });
   window.visualViewport.addEventListener('scroll', fitViewport);
 }
-window.addEventListener('scroll', fitViewport, { passive: true });
+// Прокрутка остановилась, а страница сдвинута — лечим (во время прокрутки не трогаем, чтобы не сбить её)
+let scrollIdle = 0;
+let lastScrollAt = 0;
+window.addEventListener('scroll', () => {
+  lastScrollAt = Date.now();
+  fitViewport();
+  clearTimeout(scrollIdle);
+  scrollIdle = setTimeout(() => {
+    if (looksShifted(viewportNow()) && Date.now() - lastHealAt > 1500) healViewport('после прокрутки');
+  }, 250);
+}, { passive: true });
 window.addEventListener('resize', fitViewport);
-window.addEventListener('pageshow', fitViewport);
-document.addEventListener('visibilitychange', fitViewport);
+window.addEventListener('pageshow', () => { fitViewport(); healViewport('открыли снова'); });
+document.addEventListener('visibilitychange', () => { if (!document.hidden) { fitViewport(); healViewport('вернулись в приложение'); } });
 document.addEventListener('focusin', fitViewport);
-// Клавиатура уезжает с анимацией — проверяем ещё раз, когда она точно скрылась
-document.addEventListener('focusout', () => { [60, 400, 900].forEach((ms) => setTimeout(fitViewport, ms)); });
+// Поле ввода потеряло курсор и другое его не взяло — клавиатура уезжает. Лечим сразу и когда она точно скрылась
+document.addEventListener('focusout', () => {
+  setTimeout(() => healViewport('поле закрыто'), 50);
+  // Второй раз — если уже не листают: прокрутка «на место» остановила бы движение пальцем
+  setTimeout(() => { if (Date.now() - lastScrollAt > 300) healViewport('поле закрыто'); }, 450);
+  [60, 900].forEach((ms) => setTimeout(fitViewport, ms));
+});
 
 // Если экран всё же съехал: пять нажатий подряд на открытую вкладку — размеры экрана в сообщении (для скриншота)
 let diagTaps = [];
@@ -2621,10 +2755,22 @@ document.querySelector('.tabbar').addEventListener('click', (e) => {
   diagTaps = [...diagTaps.filter((t) => now - t < 3000), now];
   if (diagTaps.length < 5) return;
   diagTaps = [];
-  const vv = window.visualViewport || { width: 0, height: 0, offsetTop: 0, scale: 1 };
-  const app = window.matchMedia('(display-mode: standalone)').matches || navigator.standalone ? 'с экрана «Домой»' : 'в браузере';
-  toast(`Экран: окно ${window.innerWidth}×${window.innerHeight}, видно ${Math.round(vv.width)}×${Math.round(vv.height)}, сдвиг ${Math.round(vv.offsetTop)}, масштаб ${(+vv.scale).toFixed(2)}, экран ${screen.width}×${screen.height}, поправка ${vvShift.top}/${vvShift.bottom}, ${app}`);
+  const v = viewportNow();
+  logViewport('5 нажатий', v);
+  toast(`Экран: ${viewportText(v)}, экран ${screen.width}×${screen.height}, поправка ${vvShift.top}/${vvShift.bottom}, ${isApp() ? 'с экрана «Домой»' : 'в браузере'}${iosVersion() ? `, ${iosVersion()}` : ''}`);
 });
+
+// «Настройки» → «Экран iPhone»: что сейчас и последние сбои
+function viewportPanelHtml() {
+  let list = [];
+  try { list = JSON.parse(localStorage.getItem(VV_LOG) || '[]'); } catch { /* ничего */ }
+  return `<section class="section panel"><h2>Экран iPhone</h2>
+    <p class="muted">Если вкладки внизу снова повиснут посреди экрана, сделайте снимок этого раздела и пришлите его: по этим цифрам видно, что сделал телефон.</p>
+    <p class="vv-now small">Сейчас: ${escapeHtml(viewportText(viewportNow()))}, ${isApp() ? 'с экрана «Домой»' : 'в браузере'}${iosVersion() ? `, ${iosVersion()}` : ''}</p>
+    ${list.length ? `<ul class="vv-log small">${list.map((x) => `<li>${escapeHtml(x)}</li>`).join('')}</ul>
+      <button class="btn small" data-action="vv-clear">Очистить список</button>` : '<p class="muted small">Сбоев пока не замечено.</p>'}
+  </section>`;
+}
 
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;

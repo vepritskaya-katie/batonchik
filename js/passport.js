@@ -120,38 +120,57 @@ function plural(n, one, few, many) {
   return many;
 }
 
-// Запланированное — по дате, ближайшее первым; сделанное — свежее первым
+// Время визита к врачу: «ЧЧ:ММ» по Москве или пусто
+export const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
+export const hasTime = (rec) => TIME_RE.test(rec.time || '');
+const sortKey = (r) => `${r.date} ${hasTime(r) ? r.time : '99:99'}`;
+
+// Запланированное — по дате и времени, ближайшее первым; сделанное — свежее первым
 export function upcoming(records) {
-  return records.filter((r) => !r.done).sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+  return records.filter((r) => !r.done).sort((a, b) => (sortKey(a) < sortKey(b) ? -1 : sortKey(a) > sortKey(b) ? 1 : 0));
 }
 export function doneRecords(records) {
-  return records.filter((r) => r.done).sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+  return records.filter((r) => r.done).sort((a, b) => (sortKey(a) < sortKey(b) ? 1 : sortKey(a) > sortKey(b) ? -1 : 0));
 }
 
 const calDate = (key) => key.replace(/-/g, '');
+// Московское время (UTC+3, без перехода на летнее) → «20261103T123000Z»
+const utcStamp = (ms) => new Date(ms).toISOString().replace(/[-:]/g, '').replace(/\.\d+Z$/, 'Z');
+function moscowMs(date, time) {
+  const [y, m, d] = date.split('-').map(Number);
+  const [hh, mm] = time.split(':').map(Number);
+  return Date.UTC(y, m - 1, d, hh - 3, mm);
+}
+const VISIT_MS = 60 * 60 * 1000; // визит в календаре — на час
 
-// Событие на весь день в Google Календаре
+// Событие в Google Календаре: со временем — на час, без времени — на весь день
 export function googleCalendarUrl(rec, petName) {
   const title = `${petName || 'Батончик'}: ${rec.title}`;
+  const start = hasTime(rec) ? moscowMs(rec.date, rec.time) : 0;
   const params = new URLSearchParams({
     action: 'TEMPLATE', text: title,
-    dates: `${calDate(rec.date)}/${calDate(addDays(rec.date, 1))}`,
+    dates: start ? `${utcStamp(start)}/${utcStamp(start + VISIT_MS)}` : `${calDate(rec.date)}/${calDate(addDays(rec.date, 1))}`,
     details: rec.note || 'Напоминание из приложения «Батончик»',
   });
   return `https://calendar.google.com/calendar/render?${params}`;
 }
 
-// Файл календаря (.ics) с напоминанием в 10:00 в этот день — открывается календарём iPhone
+// Файл календаря (.ics) — открывается календарём iPhone.
+// Со временем: событие на час, напоминания за день и за 2 часа. Без времени: на весь день, напоминание в 10:00
 export function icsText(rec, petName) {
   const esc = (s) => String(s || '').replace(/([,;\\])/g, '\\$1').replace(/\n/g, '\\n');
-  const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d+Z$/, 'Z');
+  const stamp = utcStamp(Date.now());
+  const alarm = (trigger) => ['BEGIN:VALARM', 'ACTION:DISPLAY', `DESCRIPTION:${esc(rec.title)}`, `TRIGGER:${trigger}`, 'END:VALARM'];
+  const start = hasTime(rec) ? moscowMs(rec.date, rec.time) : 0;
+  const when = start
+    ? [`DTSTART:${utcStamp(start)}`, `DTEND:${utcStamp(start + VISIT_MS)}`]
+    : [`DTSTART;VALUE=DATE:${calDate(rec.date)}`, `DTEND;VALUE=DATE:${calDate(addDays(rec.date, 1))}`];
   return [
     'BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Batonchik//RU', 'CALSCALE:GREGORIAN', 'BEGIN:VEVENT',
-    `UID:${rec.id || stamp}@batonchik`, `DTSTAMP:${stamp}`,
-    `DTSTART;VALUE=DATE:${calDate(rec.date)}`, `DTEND;VALUE=DATE:${calDate(addDays(rec.date, 1))}`,
+    `UID:${rec.id || stamp}@batonchik`, `DTSTAMP:${stamp}`, ...when,
     `SUMMARY:${esc(`${petName || 'Батончик'}: ${rec.title}`)}`,
     `DESCRIPTION:${esc(rec.note || 'Напоминание из приложения «Батончик»')}`,
-    'BEGIN:VALARM', 'ACTION:DISPLAY', `DESCRIPTION:${esc(rec.title)}`, 'TRIGGER:PT10H', 'END:VALARM',
+    ...(start ? [...alarm('-P1D'), ...alarm('-PT2H')] : alarm('PT10H')),
     'END:VEVENT', 'END:VCALENDAR', '',
   ].join('\r\n');
 }
@@ -161,8 +180,9 @@ export function healthRowHtml(rec, today, { action = 'health-edit' } = {}) {
   const k = HEALTH_KINDS[rec.kind] || HEALTH_KINDS.other;
   const n = daysBetween(today, rec.date);
   const state = rec.done ? 'done' : n < 0 ? 'overdue' : n <= 7 ? 'soon' : 'planned';
-  const when = rec.done ? dayTitle(rec.date, { day: 'numeric', month: 'long', year: 'numeric' })
-    : `${dayTitle(rec.date, { day: 'numeric', month: 'long' })} · ${dueText(rec.date, today)}`;
+  const at = hasTime(rec) ? `, ${rec.time}` : '';
+  const when = rec.done ? `${dayTitle(rec.date, { day: 'numeric', month: 'long', year: 'numeric' })}${at}`
+    : `${dayTitle(rec.date, { day: 'numeric', month: 'long' })}${at} · ${dueText(rec.date, today)}`;
   return `<li><button class="health-row ${state}" data-action="${action}" data-id="${rec.id}">
     <span class="health-icon" aria-hidden="true">${k.icon}</span>
     <span class="health-main"><strong>${escapeHtml(rec.title)}</strong><span>${escapeHtml(when)}</span></span>
