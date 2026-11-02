@@ -82,8 +82,9 @@ const S = {
   edit: { trainings: false },
   notes: null,        // вкладка «Каналы»: заметки из Telegram-каналов (только чтение)
   notesFilter: { q: '', now: false, future: false, sci: false, exp: false },
-  tipsQ: '',          // поиск по «Советам» (Библиотека, Практика, Каналы); пока не очищен — результаты вместо раздела
-  tipsMore: {},       // разделы результатов, где нажали «Показать ещё»
+  searchQ: '',        // поиск (лупа в шапке): советы, тренировки и игры
+  searchMore: {},     // разделы результатов, где нажали «Показать ещё»
+  searchFrom: '',     // откуда открыли поиск — туда ведёт «Отмена»
   pet: null,          // паспорт: { name, breed, birth, sex, chip, mdr1, weight }
   photo: '',          // фото Батончика (data:image/jpeg…)
   health: [],         // паспорт: прививки, обработки, таблетки, врач — { id, title, kind, date, time (у врача, «ЧЧ:ММ» или пусто), done, note }
@@ -940,45 +941,62 @@ function tipsSwitch(on) {
 }
 const TIPS_SUB = 'Почему это работает, что делать и заметки из каналов.';
 
-// Страница «Советов»: шапка, «Срочно к ветеринару», поиск, переключатель разделов и раздел.
-// Пока в поиске что-то написано, вместо раздела — найденное во всех трёх разделах
+// Страница «Советов»: шапка, «Срочно к ветеринару», переключатель разделов и раздел
 function tipsPage(on, body, plus) {
-  const q = S.tipsQ.trim();
-  return `${pageHead({ title: 'Советы', sub: TIPS_SUB, plus })}${urgentBtn()}
-    <div class="tips-search-box"><svg class="search-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4 4"/></svg>
-      <input class="tips-search" type="search" enterkeyhint="search" autocomplete="off"
-      placeholder="Найти в советах" aria-label="Поиск по советам" value="${escapeHtml(S.tipsQ)}">
-      <button type="button" class="search-clear" data-action="tips-clear" aria-label="Очистить поиск"${q ? '' : ' hidden'}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 8l8 8M16 8l-8 8"/></svg></button></div>
-    <div class="tips-results"${q ? '' : ' hidden'}>${q ? tipsResultsHtml() : ''}</div>
-    <div class="tips-body"${q ? ' hidden' : ''}>${tipsSwitch(on)}${body}</div>`;
+  return `${pageHead({ title: 'Советы', sub: TIPS_SUB, plus })}${urgentBtn()}${tipsSwitch(on)}${body}`;
 }
 
-// Что искать: собирается один раз, заново — когда обновились файлы или правки «Практики»
-let tipsIndex = null;
-function tipsResultsHtml() {
-  const src = { lib: S.lib, cat: S.catalogs.t, notes: S.notes };
-  if (!tipsIndex || tipsIndex.lib !== src.lib || tipsIndex.cat !== src.cat || tipsIndex.notes !== src.notes) {
-    tipsIndex = { ...src, items: buildIndex(src) };
-  }
-  const loading = !S.lib || !S.catalogs.t || !S.notes;
-  return `${resultsHtml(tipsIndex.items, S.tipsQ, S.tipsMore)}${loading ? '<p class="muted small">Ещё загружаем часть советов…</p>' : ''}`;
+// ---------- Поиск (лупа в шапке) ----------
+// Отдельный экран #/search: поле, под ним — найденное в советах, тренировках и играх
+
+// Что искать: собирается один раз, заново — когда обновились файлы или правки карточек
+let searchIndex = null;
+function searchResultsHtml() {
+  const src = { lib: S.lib, cat: S.catalogs.t, notes: S.notes, k: S.catalogs.k, g: S.catalogs.g };
+  if (!searchIndex || Object.keys(src).some((key) => searchIndex[key] !== src[key])) searchIndex = { ...src, items: buildIndex(src) };
+  const loading = Object.values(src).some((x) => !x);
+  return `${resultsHtml(searchIndex.items, S.searchQ, S.searchMore)}${loading ? '<p class="muted small">Ещё загружаем часть текстов…</p>' : ''}`;
 }
 
-// Поиск обновляет только результаты, без перерисовки страницы: поле не теряет курсор
-function applyTipsSearch() {
-  const q = S.tipsQ.trim();
-  const results = view.querySelector('.tips-results');
+const SEARCH_HINT = `<div class="search-hint muted"><p>Ищет в советах (Библиотека, Практика, Каналы), тренировках и играх.</p>
+  <p>Можно писать часть слова: «повод» найдёт и «поводок», и «поводке». Несколько слов — найдутся места, где есть все.</p></div>`;
+
+function renderSearch() {
+  const q = S.searchQ.trim();
+  return `<div class="search-bar"><div class="search-box"><svg class="search-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4 4"/></svg>
+      <input class="search-input" type="search" enterkeyhint="search" autocomplete="off" placeholder="Найти" aria-label="Поиск" value="${escapeHtml(S.searchQ)}">
+      <button type="button" class="search-clear" data-action="search-clear" aria-label="Очистить"${q ? '' : ' hidden'}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 8l8 8M16 8l-8 8"/></svg></button></div>
+    <button type="button" class="search-cancel" data-action="search-cancel">Отмена</button></div>
+    <div class="search-results">${q ? searchResultsHtml() : SEARCH_HINT}</div>`;
+}
+
+// Пока печатают, обновляются только результаты: поле не теряет курсор
+function applySearch() {
+  const q = S.searchQ.trim();
+  const results = view.querySelector('.search-results');
   if (!results) return;
-  results.innerHTML = q ? tipsResultsHtml() : '';
-  results.hidden = !q;
-  view.querySelector('.tips-body').hidden = !!q;
+  results.innerHTML = q ? searchResultsHtml() : SEARCH_HINT;
   view.querySelector('.search-clear').hidden = !q;
 }
 
+// Лупа: поиск с чистого листа. Клавиатура на iPhone открывается, только если поле получило курсор
+// прямо во время нажатия, — поэтому сразу ставим курсор во временное поле, а после перехода переносим в настоящее
+function openSearch(e) {
+  if (route().page === 'search') { e.preventDefault(); const input = view.querySelector('.search-input'); if (input) input.focus(); return; }
+  S.searchFrom = currentHash;
+  S.searchQ = '';
+  S.searchMore = {};
+  const tmp = document.createElement('input');
+  tmp.className = 'focus-bridge';
+  tmp.setAttribute('aria-hidden', 'true');
+  document.body.appendChild(tmp);
+  tmp.focus();
+  S.searchFocus = tmp;
+}
+
 // Пришли из поиска — «Назад» возвращает к найденному
-const isTipsTop = (hash) => /^#\/(lib|t|c)\/?$/.test(hash || '');
-const fromSearch = () => !!(S.tipsQ.trim() && isTipsTop(prevHash));
-const searchBack = (fallback) => (fromSearch() ? `<a class="back" href="${prevHash}" data-action="back">${BACK_SVG}Поиск</a>` : fallback);
+const fromSearch = () => prevHash === '#/search';
+const searchBack = (fallback) => (fromSearch() ? `<a class="back" href="#/search" data-action="back">${BACK_SVG}Поиск</a>` : fallback);
 
 function renderTipsPage() {
   return tipsPage('t', catalogBody('t'), { action: 'new-tip', label: 'Новый совет' });
@@ -1254,13 +1272,13 @@ function applyNotesFilter() {
 
 view.addEventListener('input', (e) => { if (e.target.matches('.dict-search')) filterDict(e.target); });
 view.addEventListener('input', (e) => {
-  if (!e.target.matches('.tips-search')) return;
-  S.tipsQ = e.target.value;
-  S.tipsMore = {};
-  applyTipsSearch();
+  if (!e.target.matches('.search-input')) return;
+  S.searchQ = e.target.value;
+  S.searchMore = {};
+  applySearch();
 });
 // «Найти» на клавиатуре — убрать клавиатуру, чтобы были видны результаты
-view.addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target.matches('.tips-search')) e.target.blur(); });
+view.addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target.matches('.search-input')) e.target.blur(); });
 
 // ---------- Каталоги ----------
 
@@ -2081,15 +2099,14 @@ function onHashChange() {
 }
 
 // Название страницы для кнопки «Назад»; для правки карточки — нет (туда не возвращаемся)
-const PAGE_TITLES = { today: 'Главная', day: 'День', k: 'Тренировки', g: 'Тренировки', pass: 'Паспорт', growth: 'Рост и вес', lib: 'Библиотека', weeks: 'Неделя Батончика', t: 'Советы', c: 'Каналы', d: 'Дневник', me: 'Настройки' };
+const PAGE_TITLES = { search: 'Поиск', today: 'Главная', day: 'День', k: 'Тренировки', g: 'Тренировки', pass: 'Паспорт', growth: 'Рост и вес', lib: 'Библиотека', weeks: 'Неделя Батончика', t: 'Советы', c: 'Каналы', d: 'Дневник', me: 'Настройки' };
 // Какая вкладка внизу подсвечена: игры живут во вкладке «Тренировки», Каналы — в «Советах»
-const TAB_OF = { today: 'today', day: 'day', k: 'k', g: 'k', pass: 'pass', growth: 'pass', lib: 't', weeks: 'day', t: 't', c: 't', d: 'd' };
+const TAB_OF = { search: 'search', today: 'today', day: 'day', k: 'k', g: 'k', pass: 'pass', growth: 'pass', lib: 't', weeks: 'day', t: 't', c: 't', d: 'd' };
 
 function pageTitle(hash) {
   const parts = hash.replace(/^#\/?/, '').split('/').filter(Boolean);
   if (!parts.length) return 'Главная';
   if (parts[0] === 'edit') return null;
-  if (isTipsTop(hash) && S.tipsQ.trim()) return 'Поиск';
   if (parts[1] && (TABS[parts[0]] || parts[0] === 'c')) return 'Назад';
   return PAGE_TITLES[parts[0]] || null;
 }
@@ -2099,11 +2116,12 @@ function render(force) {
   if (r.page !== 'edit') S.editor = null;
   // Открытую форму правки не перерисовываем от обновлений с сервера, чтобы не стереть набранный текст
   if (r.page === 'edit' && !force && S.editor && S.editor.key === editorKey(r) && view.querySelector('[data-editor]')) return;
-  // То же для поиска в «Советах», пока в нём печатают
-  if (['lib', 't', 'c'].includes(r.page) && !r.id && !force && document.activeElement && document.activeElement.matches('.tips-search')) return;
+  // То же для поиска, пока в нём печатают
+  if (r.page === 'search' && !force && document.activeElement && document.activeElement.matches('.search-input')) return;
   if (r.page === 'lib' && r.id === 'dict' && !force && document.activeElement && document.activeElement.matches('.dict-search')) return;
   let html;
-  if (r.page === 'me') html = renderMe();
+  if (r.page === 'search') html = renderSearch();
+  else if (r.page === 'me') html = renderMe();
   else if (r.page === 'edit') html = renderEditor(r);
   else if (r.page === 'day') html = renderDayPage();
   else if (r.page === 'pass') html = renderPassport();
@@ -2115,6 +2133,15 @@ function render(force) {
   else if (TABS[r.tab]) html = r.id ? renderCard(r.tab, r.id) : (r.tab === 't' ? renderTipsPage() : renderTrainingsPage());
   else html = renderHome();
   view.innerHTML = html;
+  // Открыли поиск лупой — курсор из временного поля переходит в настоящее, клавиатура остаётся
+  if (S.searchFocus) {
+    const input = r.page === 'search' && view.querySelector('.search-input');
+    if (input) input.focus();
+    S.searchFocus.remove();
+    S.searchFocus = null;
+  }
+  const sb = $('#search-btn');
+  if (sb) { sb.classList.toggle('on', r.page === 'search'); if (r.page === 'search') sb.setAttribute('aria-current', 'page'); else sb.removeAttribute('aria-current'); }
 
   const routeKey = r.page + '/' + (r.tab || '') + '/' + (r.id || '') + '/' + (r.sub || '');
   if (routeKey !== lastRouteKey) {
@@ -2587,16 +2614,22 @@ const actions = {
     try { localStorage.removeItem(VV_LOG); } catch { /* ничего */ }
     render(true);
   },
-  'tips-clear': () => {
-    S.tipsQ = '';
-    S.tipsMore = {};
-    const input = view.querySelector('.tips-search');
-    if (input) input.value = '';
-    applyTipsSearch();
+  'search-clear': () => {
+    S.searchQ = '';
+    S.searchMore = {};
+    const input = view.querySelector('.search-input');
+    if (input) { input.value = ''; input.focus(); }
+    applySearch();
   },
-  'tips-more': (el) => {
-    S.tipsMore[el.dataset.group] = true;
-    applyTipsSearch();
+  'search-more': (el) => {
+    S.searchMore[el.dataset.group] = true;
+    applySearch();
+  },
+  // «Отмена» — туда, откуда открыли поиск
+  'search-cancel': () => {
+    const input = view.querySelector('.search-input');
+    if (input) input.blur();
+    location.hash = S.searchFrom && S.searchFrom !== '#/search' ? S.searchFrom : '#/';
   },
   'toast-action': () => { const fn = toastAction; hideToast(); if (fn) fn(); },
   'sheet-close': () => closeSheet(),
@@ -2747,6 +2780,8 @@ document.addEventListener('focusout', () => {
   setTimeout(() => { if (Date.now() - lastScrollAt > 300) healViewport('поле закрыто'); }, 450);
   [60, 900].forEach((ms) => setTimeout(fitViewport, ms));
 });
+
+document.querySelector('#search-btn').addEventListener('click', openSearch);
 
 // Если экран всё же съехал: пять нажатий подряд на открытую вкладку — размеры экрана в сообщении (для скриншота)
 let diagTaps = [];

@@ -1,4 +1,4 @@
-// Поиск по вкладке «Советы»: Библиотека, Практика и Каналы сразу.
+// Поиск (лупа в шапке): советы — Библиотека, Практика и Каналы, — а также тренировки и игры.
 // Ищет слова и части слов: без учёта регистра и «ё»; у длинных слов отбрасывает окончание,
 // поэтому «собаки» находит и «собака», и «собаку». Несколько слов — должны встретиться все.
 
@@ -35,8 +35,13 @@ const item = (group, src, title, href, text) => {
   return { group, src, title: t, href, text: x, nt: norm(t), nx: norm(x) };
 };
 
-// Всё, что можно найти. lib — Библиотека, cat — каталог «Практики» (с правками из приложения), notes — Каналы
-export function buildIndex({ lib, cat, notes }) {
+// Текст карточки без служебного блока «Повторов в день»
+const cardText = (c) => [c.subtitle, plainText(c.lead || []), ...(c.blocks || []).filter((b) => b.kind !== 'reps')
+  .map((b) => `${b.title}. ${plainText(b.content)}`)].join(' ');
+
+// Всё, что можно найти. lib — Библиотека, cat — каталог «Практики», k и g — тренировки и игры
+// (каталоги — с правками из приложения), notes — Каналы
+export function buildIndex({ lib, cat, notes, k, g }) {
   const out = [];
   if (lib && !lib.error) {
     const L = 'Библиотека';
@@ -64,10 +69,10 @@ export function buildIndex({ lib, cat, notes }) {
     }));
   }
   if (cat && cat.groups) {
-    cat.groups.forEach((g) => (g.cards || []).forEach((c) => {
-      const text = [c.subtitle, plainText(c.lead || []), ...(c.blocks || []).map((b) => `${b.title}. ${plainText(b.content)}`)].join(' ');
-      out.push(item('Практика', g.title || 'Советы', c.name, `#/t/${c.id}`, text));
-    }));
+    cat.groups.forEach((grp) => (grp.cards || []).forEach((c) => out.push(item('Практика', grp.title || 'Советы', c.name, `#/t/${c.id}`, cardText(c)))));
+  }
+  for (const [tab, name, cg] of [['k', 'Тренировки', k], ['g', 'Игры', g]]) {
+    if (cg && cg.groups) cg.groups.forEach((grp) => (grp.cards || []).forEach((c) => out.push(item(name, grp.title || name, c.name, `#/${tab}/${c.id}`, cardText(c)))));
   }
   if (notes && notes.all) {
     notes.all.forEach((n) => out.push(item('Каналы', [n.section, n.topic].filter(Boolean).join(' · '), n.title, `#/c/${n.id}`,
@@ -149,7 +154,7 @@ export function snippet(text, words, before = 50, after = 120) {
   return `${a > 0 ? '…' : ''}${text.slice(a, b)}${b < text.length ? '…' : ''}`;
 }
 
-const GROUPS = ['Библиотека', 'Практика', 'Каналы'];
+const GROUPS = ['Библиотека', 'Практика', 'Каналы', 'Тренировки', 'Игры'];
 const PAGE = 20; // столько находок в разделе показываем сразу, остальные — по кнопке
 
 // Результаты, по разделам. Раздел с лучшим совпадением — первым. more — разделы, где нажали «Показать все»
@@ -172,7 +177,7 @@ export function resultsHtml(index, q, more = {}) {
     const rest = list.length - shown.length;
     return `<section class="group search-group"><h2>${g} <span class="search-n">${list.length}</span></h2>
       <ul class="cards">${rows}</ul>
-      ${rest ? `<button type="button" class="btn wide search-more" data-action="tips-more" data-group="${g}">Показать ещё ${rest}</button>` : ''}</section>`;
+      ${rest ? `<button type="button" class="btn wide search-more" data-action="search-more" data-group="${g}">Показать ещё ${rest}</button>` : ''}</section>`;
   }).join('');
   return `<p class="muted small search-count" aria-live="polite">Найдено: ${hits.length}</p>${html}`;
 }
