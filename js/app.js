@@ -945,9 +945,10 @@ const TIPS_SUB = 'Почему это работает, что делать и �
 function tipsPage(on, body, plus) {
   const q = S.tipsQ.trim();
   return `${pageHead({ title: 'Советы', sub: TIPS_SUB, plus })}${urgentBtn()}
-    <div class="tips-search-box"><input class="notes-search tips-search" type="search" enterkeyhint="search" autocomplete="off"
-      placeholder="Поиск: поводок, клещ, кусает…" aria-label="Поиск по советам" value="${escapeHtml(S.tipsQ)}">
-      <button type="button" class="search-clear" data-action="tips-clear" aria-label="Очистить поиск"${q ? '' : ' hidden'}>✕</button></div>
+    <div class="tips-search-box"><svg class="search-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4 4"/></svg>
+      <input class="tips-search" type="search" enterkeyhint="search" autocomplete="off"
+      placeholder="Найти в советах" aria-label="Поиск по советам" value="${escapeHtml(S.tipsQ)}">
+      <button type="button" class="search-clear" data-action="tips-clear" aria-label="Очистить поиск"${q ? '' : ' hidden'}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 8l8 8M16 8l-8 8"/></svg></button></div>
     <div class="tips-results"${q ? '' : ' hidden'}>${q ? tipsResultsHtml() : ''}</div>
     <div class="tips-body"${q ? ' hidden' : ''}>${tipsSwitch(on)}${body}</div>`;
 }

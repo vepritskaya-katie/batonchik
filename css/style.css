@@ -1068,13 +1068,23 @@ a.id-stat::after { content: "›"; position: absolute; top: 6px; right: 10px; co
 .day-sel > .btn.wide { margin-top: 12px; }
 
 /* ---------- Поиск по «Советам» ---------- */
-.tips-search-box { position: relative; margin: 0 0 14px; }
-.tips-search { padding-right: 52px; }
-.tips-search::-webkit-search-cancel-button { -webkit-appearance: none; appearance: none; }
-.search-clear {
-  position: absolute; right: 4px; top: 50%; transform: translateY(-50%); width: 44px; height: 44px; border: 0; border-radius: 50%;
-  background: transparent; color: var(--muted); font: inherit; font-size: 17px; cursor: pointer;
+/* Тонкое поле: легче переключателя разделов под ним — без рамки, мягкая заливка, лупа слева */
+.tips-search-box { position: relative; margin: -2px 0 12px; }
+.tips-search {
+  display: block; width: 100%; height: 36px; padding: 0 40px 0 36px; border: 1px solid transparent; border-radius: 99px;
+  background: color-mix(in srgb, var(--text) 4%, transparent); color: var(--text);
+  font: inherit; font-size: 16px; /* не меньше 16 px — иначе iPhone приближает страницу */
+  -webkit-appearance: none; appearance: none; outline: none; transition: background-color .15s, box-shadow .15s;
 }
+.tips-search::placeholder { color: var(--muted); opacity: .85; }
+.tips-search:focus { background: var(--surface); border-color: var(--border); }
+.tips-search::-webkit-search-cancel-button, .tips-search::-webkit-search-decoration { -webkit-appearance: none; appearance: none; }
+.search-icon { position: absolute; left: 13px; top: 50%; width: 17px; height: 17px; margin-top: -8.5px; color: var(--muted); opacity: .8; pointer-events: none; }
+.search-clear {
+  position: absolute; right: 2px; top: 50%; transform: translateY(-50%); width: 40px; height: 36px; padding: 0; border: 0;
+  display: grid; place-items: center; background: transparent; color: var(--muted); cursor: pointer;
+}
+.search-clear svg { width: 20px; height: 20px; padding: 3px; border-radius: 50%; background: color-mix(in srgb, var(--text) 10%, transparent); stroke-width: 2.4; }
 .tips-results .group { margin-top: 12px; }
 .search-count { margin: 0 0 4px; }
 .search-group > h2 { display: flex; align-items: center; gap: 8px; }
