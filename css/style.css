@@ -397,10 +397,13 @@ a.seg { display: grid; place-items: center; text-decoration: none; }
   background: var(--surface); color: var(--text); font: inherit; font-weight: 400; font-size: 17px;
 }
 .form textarea { resize: vertical; }
-/* Дата и время визита — в одну строку; без времени дата на всю ширину */
-.date-time { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-.date-time:has(> [hidden]) { grid-template-columns: 1fr; }
-.date-time input { min-width: 0; }
+/* Дата и время визита — в одну строку; без времени дата на всю ширину.
+   iPhone не даёт полям даты и времени сжиматься — поэтому колонки minmax(0, 1fr), а поля без системного вида */
+.date-time { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
+.date-time:has(> [hidden]) { grid-template-columns: minmax(0, 1fr); }
+.date-time > label { min-width: 0; }
+.date-time input { display: block; min-width: 0; max-width: 100%; -webkit-appearance: none; appearance: none; }
+.date-time input::-webkit-date-and-time-value { text-align: left; }
 .time-row { display: flex; gap: 10px; align-items: center; }
 .time-row input { flex: 1; }
 .form fieldset { border: 0; padding: 0; margin: 0; }
@@ -749,6 +752,7 @@ button.mini-count { text-decoration: underline dotted; text-underline-offset: 3p
 .id-grid .wide { grid-column: 1 / -1; }
 .id-grid dt { font-size: 13px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: rgba(255, 255, 255, .5); }
 .id-grid dd { margin: 3px 0 0; font-size: 16px; font-weight: 500; color: rgba(255, 255, 255, .95); overflow-wrap: anywhere; }
+.id-link { display: inline-block; margin-top: 2px; font-size: 13px; font-weight: 600; color: rgba(255, 255, 255, .7); text-decoration: underline; text-underline-offset: 2px; }
 .id-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 20px; }
 .id-stat {
   position: relative; display: grid; justify-items: center; gap: 2px; padding: 14px 6px 12px; border-radius: 16px;
@@ -819,6 +823,8 @@ a.id-stat::after { content: "›"; position: absolute; top: 6px; right: 10px; co
   display: grid; place-items: center; align-content: center;
 }
 .story-date strong { font: 800 26px/1 "Manrope", sans-serif; }
+a.story-date { color: inherit; text-decoration: none; }
+.story-link { color: inherit; text-decoration: none; }
 .story-date span { font-size: 13px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
 .story-feature .eyebrow { color: rgba(255, 255, 255, .62); }
 .story-feature h2 { margin: 6px 0 10px; font-size: 24px; line-height: 1.15; color: #fff; }
@@ -1009,6 +1015,7 @@ a.id-stat::after { content: "›"; position: absolute; top: 6px; right: 10px; co
 .week-line { margin: 0 0 4px; }
 .week-notes { margin: 8px 0 0; color: var(--text-2); }
 .week-card-sun .btn { margin-top: 12px; }
+.week-invite { margin: 0 0 4px; font-weight: 600; }
 .weeks-list { list-style: none; margin: 0; padding: 0; }
 .weeks-list li { padding: 12px 0; border-top: 1px solid var(--line); }
 .weeks-list li:first-child { border-top: 0; }
@@ -1073,7 +1080,11 @@ a.id-stat::after { content: "›"; position: absolute; top: 6px; right: 10px; co
 .search-btn svg { width: 25px; height: 25px; stroke-width: 2; }
 .search-btn.on { color: var(--accent-text); }
 /* Временное поле: ловит курсор в момент нажатия на лупу, чтобы на iPhone открылась клавиатура */
-.focus-bridge { position: fixed; top: 0; left: 0; width: 1px; height: 1px; padding: 0; border: 0; opacity: 0; font-size: 16px; pointer-events: none; }
+/* Стоит там же, где потом окажется поле поиска, и того же размера — iPhone не приближает страницу к нему */
+.focus-bridge {
+  position: fixed; top: calc(env(safe-area-inset-top) + 76px); left: 16px; width: 200px; height: 40px; padding: 0; border: 0;
+  background: transparent; color: transparent; caret-color: transparent; opacity: 0; font-size: 16px; pointer-events: none;
+}
 .search-bar { display: flex; align-items: center; gap: 10px; margin: 2px 0 14px; }
 .search-box { position: relative; flex: 1; min-width: 0; }
 .search-input {
@@ -1114,3 +1125,17 @@ a.id-stat::after { content: "›"; position: absolute; top: 6px; right: 10px; co
 @media (display-mode: standalone) {
   html, body { overscroll-behavior-y: none; }
 }
+
+/* ---------- Страница записи в дневнике ---------- */
+.story-page-head { margin: 4px 0 20px; }
+.story-page-head .eyebrow { color: color-mix(in srgb, var(--mk-story) 80%, var(--text)); }
+.story-page-date { margin: 6px 0 0; color: var(--muted); font-size: 15px; line-height: 1.4; }
+.story-page-title { margin: 10px 0 0; font-size: 32px; line-height: 1.12; }
+.story-page-text { margin: 0 0 22px; font-size: 18px; line-height: 1.6; color: var(--text); overflow-wrap: anywhere; }
+.story-page-text p { margin: 0 0 14px; }
+/* Фото друг под другом во всю ширину, без обрезки; нажатие — на весь экран */
+.story-page-photos { display: grid; gap: 12px; margin: 0 0 24px; }
+.page-photo { display: block; width: 100%; padding: 0; border: 0; border-radius: 18px; overflow: hidden; background: var(--surface-2); cursor: zoom-in; }
+.page-photo img { display: block; width: 100%; height: auto; }
+.page-photo.ph { aspect-ratio: 4 / 3; }
+.story-page-nav { display: grid; gap: 0; margin-top: 8px; }

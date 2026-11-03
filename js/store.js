@@ -114,6 +114,7 @@ function localStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onPet 
       return {
         plan: read('bt.plan', null), marks: read('bt.marks', {}), days, events: read('bt.events', []), cards: read('bt.cards', {}),
         pet: read('bt.pet', null), health: read('bt.health', {}), stories: read('bt.stories', {}), growth: read('bt.growth', {}),
+        weeks: read('bt.weeks', {}),
       };
     },
     // Паспорт и дневник
@@ -488,6 +489,7 @@ function firebaseStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onE
         plan: plan.exists() ? plain(plan.data()) : null,
         marks: await all('marks'), days: await all('days'), events: await all('events'), cards: await all('cards'),
         pet: await all('pet'), health: await all('health'), stories: await all('stories'), growth: await all('growth'),
+        weeks: await all('weeks'),
       };
     },
 

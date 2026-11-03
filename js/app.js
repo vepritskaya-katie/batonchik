@@ -882,6 +882,7 @@ function renderHome() {
   return `${pageHead({ eyebrow: cap(dayTitle(S.day)), title: greeting() })}
     ${statusBanner()}
     ${heroHtml()}
+    ${weekCardHtml()}
     ${homeJournalHtml()}
     ${factHtml()}
     ${homeTrainingsHtml()}
@@ -900,7 +901,6 @@ function renderDayPage() {
   const days = diaryDays();
   return `${pageHead({ eyebrow: cap(dayTitle(S.day)), title: 'День', sub: 'Всё, что отметили за день. Новый день начнётся после «Легли вечером».', plus: { action: 'ev-menu', label: 'Новая запись' } })}
     ${statusBanner()}
-    ${weekCardHtml()}
     ${journalHtml()}
     ${rhythmHtml(st, { trainsDone: p.done, trainsTotal: p.total })}
     ${canWrite() ? weekStatsHtml({ days, prevWeek: days.slice(7, 14), loading: S.diary.loading || !S.diary.from }) : ''}
@@ -988,6 +988,7 @@ function openSearch(e) {
   S.searchMore = {};
   const tmp = document.createElement('input');
   tmp.className = 'focus-bridge';
+  tmp.style.fontSize = '16px'; // меньше 16 px — iPhone приближает страницу
   tmp.setAttribute('aria-hidden', 'true');
   document.body.appendChild(tmp);
   tmp.focus();
@@ -1029,15 +1030,14 @@ function weekSummaryHtml(w, day) {
     ${fig ? `<p class="muted small">${escapeHtml(cap(fig))}</p>` : ''}${w.notes ? `<p class="week-notes">${inline(w.notes)}</p>` : ''}`;
 }
 
-// Карточка на «Дне» — только по воскресеньям
+// Карточка на главной — только по воскресеньям и только пока неделя не заполнена; заполненная уходит в историю
 function weekCardHtml() {
-  if (!isSunday(S.day)) return '';
-  const w = weekOf(S.day);
-  const can = canWrite();
+  if (!isSunday(S.day) || weekOf(S.day)) return '';
   return `<section class="card week-card-sun">
     <div class="card-head"><h2>Неделя Батончика</h2><a class="text-link" href="#/weeks">История ›</a></div>
-    ${w ? weekSummaryHtml(w, S.day) : '<p class="muted">Раз в неделю — три вопроса о благополучии, вес и фигура. Ответы сохранятся с датой.</p>'}
-    ${can ? `<button class="btn${w ? '' : ' primary'} wide" data-action="week-edit" data-day="${S.day}">${w ? 'Изменить' : 'Заполнить'}</button>` : ''}
+    <p class="week-invite">Сегодня воскресенье — время подвести неделю.</p>
+    <p class="muted">Три вопроса о благополучии, вес и фигура — пара минут. Ответы сохранятся с датой, вес попадёт в «Рост и вес».</p>
+    ${canWrite() ? `<button class="btn primary wide" data-action="week-edit" data-day="${S.day}">Заполнить</button>` : ''}
   </section>`;
 }
 
@@ -1060,7 +1060,7 @@ function weekSheet(day) {
       const g = S.growth.find((x) => x.date === day);
       store.saveGrowth(g ? g.id : null, { date: day, weight, height: g ? g.height || 0 : 0 });
     }
-    toast('Неделя записана.');
+    toast(route().page === 'weeks' ? 'Неделя записана.' : 'Неделя записана — она в «Истории» на вкладке «День».');
   });
 }
 
@@ -1605,7 +1605,7 @@ function selectedDayHtml(day) {
   const line = st ? daySummaryLine(st) : '';
   const storyHtml = hasStory(story) ? `<div class="day-story${isSpecial(story) ? ' special' : ''}">
       ${isSpecial(story) ? '<p class="eyebrow">День, который хочется помнить</p>' : ''}
-      ${story.title ? `<h3>${escapeHtml(story.title)}</h3>` : ''}
+      ${story.title ? `<h3><a class="story-link" href="#/d/${day}">${escapeHtml(story.title)}</a></h3>` : ''}
       ${photosHtml(day)}
       ${story.text ? `<p>${inline(story.text).replace(/\n/g, '<br>')}</p>` : ''}
       ${can ? `<button class="btn small" data-action="story-edit" data-day="${day}">Изменить заметку</button>` : ''}</div>`
@@ -1650,11 +1650,12 @@ function featureHtml() {
   const [, mm, dd] = day.split('-').map(Number);
   const eyebrow = day === S.day ? (isSpecial(s) ? 'Сегодня · день, который хочется помнить' : 'Сегодня')
     : (isSpecial(s) ? 'День, который хочется помнить' : 'Воспоминание');
+  // Дата и заголовок открывают запись целиком — как страницу дневника
   return `<article class="story-feature">
-    <div class="story-date"><strong>${dd}</strong><span>${MONTHS_SHORT[mm - 1]}</span></div>
+    <a class="story-date" href="#/d/${day}" aria-label="Открыть запись за ${escapeHtml(dayTitle(day, { day: 'numeric', month: 'long' }))}"><strong>${dd}</strong><span>${MONTHS_SHORT[mm - 1]}</span></a>
     <div class="story-body">
       <p class="eyebrow">${eyebrow}</p>
-      ${s.title ? `<h2>${escapeHtml(s.title)}</h2>` : ''}
+      ${s.title ? `<h2><a class="story-link" href="#/d/${day}">${escapeHtml(s.title)}</a></h2>` : ''}
       ${photosHtml(day)}
       ${s.text ? `<div class="story-text">${inline(s.text).replace(/\n/g, '<br>')}</div>` : ''}
       <div class="story-actions">
@@ -1662,6 +1663,48 @@ function featureHtml() {
           : `<button class="btn small ghost" data-action="cal-pick" data-day="${day}" data-scroll="1">Открыть день</button>${pool.length > 1 ? '<button class="btn small ghost" data-action="memory-next">Другое воспоминание</button>' : ''}`}
       </div>
     </div></article>`;
+}
+
+// Страница записи (#/d/ГГГГ-ММ-ДД): открывается из большой карточки по дате или заголовку.
+// Дата, заголовок, текст абзацами и фото друг под другом во всю ширину; внизу — соседние записи
+const storyParagraphs = (text) => String(text || '').trim().split(/\n\s*\n/)
+  .map((p) => `<p>${inline(p.trim()).replace(/\n/g, '<br>')}</p>`).join('');
+const storyLabel = (s) => s.title || String(s.text || '').trim().split('\n')[0].slice(0, 70) || 'Фото дня';
+function storyNeighbors(day) {
+  const days = Object.keys(S.stories).filter((d) => hasStory(S.stories[d])).sort();
+  const i = days.indexOf(day);
+  return { prev: i > 0 ? days[i - 1] : '', next: i >= 0 && i < days.length - 1 ? days[i + 1] : '' };
+}
+function renderStoryPage(day) {
+  const back = `<a class="back" href="#/d">${BACK_SVG}Дневник</a>`;
+  if (!/^\d{4}-\d\d-\d\d$/.test(day)) return `${back}<p class="empty">Такой записи нет.</p>`;
+  if (!canWrite()) return `${back}${statusBanner()}<p class="muted">Дневник появится после входа.</p>`;
+  const s = S.stories[day];
+  const date = cap(dayTitle(day, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }));
+  if (!hasStory(s)) {
+    return `${back}<h1 class="story-page-title">${escapeHtml(date)}</h1><p class="empty">Записи об этом дне пока нет.</p>
+      ${day <= S.day ? `<button class="btn primary wide" data-action="story-edit" data-day="${day}">Написать о дне</button>` : ''}`;
+  }
+  const age = ageText(S.pet && S.pet.birth, day);
+  const count = s.photoCount || 0;
+  const list = count ? storyPhotosOf(day) : [];
+  const photos = list.length
+    ? list.map((p, i) => `<button type="button" class="page-photo" data-action="photo-view" data-day="${day}" data-i="${i}" aria-label="Открыть фото ${i + 1} из ${list.length}"><img src="${escapeHtml(p)}" alt=""></button>`).join('')
+    : Array.from({ length: count }, () => '<div class="page-photo ph"></div>').join('');
+  const { prev, next } = storyNeighbors(day);
+  const nav = (d, label) => (d ? `<a class="next-link" href="#/d/${d}"><span class="muted small">${label} · ${escapeHtml(dayTitle(d, { day: 'numeric', month: 'long' }))}</span>
+    <strong>${escapeHtml(storyLabel(S.stories[d]))}</strong></a>` : '');
+  return `${back}<article class="story-page">
+    <header class="story-page-head">
+      <p class="eyebrow">${isSpecial(s) ? 'День, который хочется помнить' : day === S.day ? 'Сегодня' : 'Запись в дневнике'}</p>
+      <p class="story-page-date">${escapeHtml(date)}${age ? ` · ${escapeHtml(DOG())}: ${escapeHtml(age)}` : ''}</p>
+      ${s.title ? `<h1 class="story-page-title">${escapeHtml(s.title)}</h1>` : ''}
+    </header>
+    ${s.text ? `<div class="story-page-text">${storyParagraphs(s.text)}</div>` : ''}
+    ${photos ? `<div class="story-page-photos">${photos}</div>` : ''}
+    <button class="btn wide" data-action="story-edit" data-day="${day}">Изменить запись</button>
+  </article>
+  ${prev || next ? `<nav class="story-page-nav" aria-label="Соседние записи">${nav(prev, 'Раньше')}${nav(next, 'Позже')}</nav>` : ''}`;
 }
 
 // Дневник: большая карточка и календарь; день открывается под календарём только по нажатию на число
@@ -1767,7 +1810,7 @@ function idStatsHtml(pet) {
 
 function renderPassport() {
   const pet = S.pet || {};
-  const field = (label, value, wide) => `<div${wide ? ' class="wide"' : ''}><dt>${label}</dt><dd>${value ? escapeHtml(value) : '—'}</dd></div>`;
+  const field = (label, value, wide, extra = '') => `<div${wide ? ' class="wide"' : ''}><dt>${label}</dt><dd>${value ? escapeHtml(value) : '—'}</dd>${extra}</div>`;
   const next = upcoming(S.health);
   const done = doneRecords(S.health);
   const birth = pet.birth ? dayTitle(pet.birth, { day: 'numeric', month: 'long', year: 'numeric' }) : '';
@@ -1780,7 +1823,7 @@ function renderPassport() {
           ${S.photo ? `<img src="${escapeHtml(S.photo)}" alt="${escapeHtml(DOG())}">` : `${PAW_SVG}<span>Добавить фото</span>`}</button>
         <p class="id-label">Кличка</p>
         <h2>${escapeHtml(DOG())}</h2>
-        <dl class="id-grid">${field('Порода', pet.breed, true)}${field('Дата рождения', birth)}${field('Пол', pet.sex)}${field('Чип', pet.chip)}${field('MDR1', pet.mdr1)}</dl>
+        <dl class="id-grid">${field('Порода', pet.breed, true)}${field('Дата рождения', birth)}${field('Пол', pet.sex)}${field('Чип', pet.chip)}${field('MDR1', pet.mdr1, false, '<a class="id-link" href="#/t/opasnye-lekarstva-pri-mdr1">опасные лекарства ›</a>')}</dl>
         ${idStatsHtml(pet)}
       </div>
       ${!S.pet && canWrite() ? '<button class="btn wide id-fill" data-action="pet-edit">Заполнить паспорт</button>' : ''}
@@ -2128,7 +2171,7 @@ function render(force) {
   else if (r.page === 'growth') html = renderGrowth();
   else if (r.page === 'lib') html = renderLibrary(r);
   else if (r.page === 'weeks') html = renderWeeks();
-  else if (r.page === 'd') html = renderDiary();
+  else if (r.page === 'd') html = r.id ? renderStoryPage(r.id) : renderDiary();
   else if (r.page === 'c') html = r.id ? renderNote(r.id) : renderNotesPage();
   else if (TABS[r.tab]) html = r.id ? renderCard(r.tab, r.id) : (r.tab === 't' ? renderTipsPage() : renderTrainingsPage());
   else html = renderHome();
@@ -2147,7 +2190,7 @@ function render(force) {
   if (routeKey !== lastRouteKey) {
     lastRouteKey = routeKey;
     const saved = scrollMemory[currentHash];
-    const isCard = !!((TABS[r.tab] || r.page === 'c') && r.id) || !!(r.page === 'lib' && r.sub);
+    const isCard = !!((TABS[r.tab] || r.page === 'c' || r.page === 'd') && r.id) || !!(r.page === 'lib' && r.sub);
     pendingScroll = !isCard && saved ? { y: saved, until: Date.now() + 2000 } : null;
     window.scrollTo(0, pendingScroll ? saved : 0);
     // Ссылка на вопрос или миф — раскрытый пункт сразу на экране
