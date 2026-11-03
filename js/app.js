@@ -1030,16 +1030,14 @@ function weekSummaryHtml(w, day) {
     ${fig ? `<p class="muted small">${escapeHtml(cap(fig))}</p>` : ''}${w.notes ? `<p class="week-notes">${inline(w.notes)}</p>` : ''}`;
 }
 
-// Карточка на главной — только по воскресеньям: не заполнено — предложение заполнить, заполнено — итог недели
+// Карточка на главной — только по воскресеньям и только пока неделя не заполнена; заполненная уходит в историю
 function weekCardHtml() {
-  if (!isSunday(S.day)) return '';
-  const w = weekOf(S.day);
-  const can = canWrite();
+  if (!isSunday(S.day) || weekOf(S.day)) return '';
   return `<section class="card week-card-sun">
     <div class="card-head"><h2>Неделя Батончика</h2><a class="text-link" href="#/weeks">История ›</a></div>
-    ${w ? weekSummaryHtml(w, S.day) : `<p class="week-invite">Сегодня воскресенье — время подвести неделю.</p>
-      <p class="muted">Три вопроса о благополучии, вес и фигура — пара минут. Ответы сохранятся с датой, вес попадёт в «Рост и вес».</p>`}
-    ${can ? `<button class="btn${w ? '' : ' primary'} wide" data-action="week-edit" data-day="${S.day}">${w ? 'Изменить' : 'Заполнить'}</button>` : ''}
+    <p class="week-invite">Сегодня воскресенье — время подвести неделю.</p>
+    <p class="muted">Три вопроса о благополучии, вес и фигура — пара минут. Ответы сохранятся с датой, вес попадёт в «Рост и вес».</p>
+    ${canWrite() ? `<button class="btn primary wide" data-action="week-edit" data-day="${S.day}">Заполнить</button>` : ''}
   </section>`;
 }
 
@@ -1062,7 +1060,7 @@ function weekSheet(day) {
       const g = S.growth.find((x) => x.date === day);
       store.saveGrowth(g ? g.id : null, { date: day, weight, height: g ? g.height || 0 : 0 });
     }
-    toast('Неделя записана.');
+    toast(route().page === 'weeks' ? 'Неделя записана.' : 'Неделя записана — она в «Истории» на вкладке «День».');
   });
 }
 
