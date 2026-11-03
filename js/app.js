@@ -1547,13 +1547,47 @@ function openViewer(list, start = 0) {
     <button type="button" class="viewer-x" data-action="viewer-close" aria-label="Закрыть">×</button>
     ${list.length > 1 ? `<span class="viewer-n">${start + 1} / ${list.length}</span>` : ''}`;
   document.body.appendChild(v);
+  pushOverlay('viewer');
   const track = v.querySelector('.viewer-track');
   track.scrollLeft = start * track.clientWidth;
   const n = v.querySelector('.viewer-n');
   if (n) track.addEventListener('scroll', () => { n.textContent = `${Math.round(track.scrollLeft / track.clientWidth) + 1} / ${list.length}`; }, { passive: true });
   v.addEventListener('click', (e) => { if (e.target.tagName !== 'IMG' && !e.target.closest('.viewer-x')) closeViewer(); });
+  swipeDownToClose(v, track);
 }
-function closeViewer() { const v = document.querySelector('.viewer'); if (v) v.remove(); }
+// fromHistory — фото закрыл свайп или кнопка «назад»
+function closeViewer(fromHistory) {
+  const v = document.querySelector('.viewer');
+  if (!v) return;
+  v.remove();
+  if (!fromHistory) dropOverlaySoon();
+}
+// Фото смахивается вниз (или вверх), как в «Фото» на iPhone; вбок — листаются фото
+function swipeDownToClose(v, track) {
+  let x0 = 0, y0 = 0, dy = 0, mode = '';
+  v.addEventListener('touchstart', (e) => {
+    if (e.touches.length !== 1) { mode = 'skip'; return; }
+    x0 = e.touches[0].clientX; y0 = e.touches[0].clientY; dy = 0; mode = '';
+  }, { passive: true });
+  v.addEventListener('touchmove', (e) => {
+    if (mode === 'skip' || e.touches.length !== 1) return;
+    const dx = e.touches[0].clientX - x0;
+    dy = e.touches[0].clientY - y0;
+    if (!mode && Math.hypot(dx, dy) > 10) mode = Math.abs(dy) > Math.abs(dx) ? 'v' : 'h';
+    if (mode !== 'v') return;
+    e.preventDefault();
+    track.style.transform = `translateY(${dy}px)`;
+    v.style.backgroundColor = `rgba(0, 0, 0, ${Math.max(0.2, 0.94 - Math.abs(dy) / 500)})`;
+  }, { passive: false });
+  v.addEventListener('touchend', () => {
+    if (mode !== 'v') return;
+    if (Math.abs(dy) > 90) { closeViewer(); return; }
+    track.style.transition = 'transform .2s';
+    track.style.transform = '';
+    v.style.backgroundColor = '';
+    setTimeout(() => { track.style.transition = ''; }, 220);
+  });
+}
 
 function calendarHtml(ym) {
   const [y, m] = ym.split('-').map(Number);
@@ -2237,15 +2271,47 @@ function openSheet(html, onSubmit) {
   sheetSubmit = onSubmit;
   sheet.hidden = false;
   document.body.classList.add('no-scroll');
+  pushOverlay('sheet');
 }
-function closeSheet() {
+// fromHistory — окно закрыл свайп или кнопка «назад»: запись в истории уже снята
+function closeSheet(fromHistory) {
   // Сначала убираем курсор из поля: клавиатура закрывается обычным путём, а не вместе с исчезнувшим окном
   const focused = document.activeElement;
   if (focused && sheet.contains(focused)) focused.blur();
   sheet.hidden = true;
   sheetSubmit = null;
   document.body.classList.remove('no-scroll');
+  if (!fromHistory) dropOverlaySoon();
 }
+
+// ---------- Свайп и кнопка «назад» ----------
+// Окно и фото на весь экран добавляют запись в историю (адрес тот же). Поэтому свайп «назад» на iPhone
+// и кнопка или жест «назад» на Android сначала закрывают окно или фото, а не листают страницы под ним
+// и не закрывают приложение.
+const overlayTop = () => (history.state && history.state.overlay) || '';
+function pushOverlay(kind) {
+  if (overlayTop() === kind) return; // окно сменило содержимое — запись та же
+  history.pushState({ overlay: kind }, '', location.href);
+}
+// Окно закрыли кнопкой — снимаем его запись, если сразу не открыли новое и не ушли на другую страницу
+function dropOverlaySoon() {
+  setTimeout(() => {
+    const top = overlayTop();
+    if ((top === 'viewer' && !document.querySelector('.viewer')) || (top === 'sheet' && sheet.hidden)) history.back();
+  }, 0);
+}
+window.addEventListener('popstate', () => {
+  const top = overlayTop();
+  if (top !== 'viewer' && document.querySelector('.viewer')) closeViewer(true);
+  if (!top && !sheet.hidden) closeSheet(true);
+  dropOverlaySoon(); // под фото было окно, которое уже закрыто, — снимаем и его запись
+});
+// Переход на другую страницу из окна: запись окна заменяется новой страницей, лишнего шага «назад» нет
+function goTo(hash) {
+  if (overlayTop()) location.replace(hash); else location.hash = hash;
+}
+// Открыли приложение заново, а наверху истории осталась запись окна — окна уже нет
+if (overlayTop()) history.replaceState(null, '', location.href);
 
 function saveEvent(type, extra = {}, at = new Date(), day = eventDayFor(at, type)) {
   const id = store.addEvent({ type, sub: '', text: '', ...extra, at, day });
@@ -2470,7 +2536,7 @@ const actions = {
     <a class="pick big" href="#/edit/g/new" data-action="sheet-close-link">🎲 Новая игра</a>
     <button type="button" class="pick big" data-action="tr-add">📅 Тренировка или игра только на сегодня</button>
     <div class="form-actions"><button type="button" class="btn" data-action="sheet-close">Отмена</button></div></div>`, null),
-  'sheet-close-link': (el) => { closeSheet(); location.hash = el.getAttribute('href'); },
+  'sheet-close-link': (el) => { closeSheet(); goTo(el.getAttribute('href')); },
   'new-tip': () => { location.hash = '#/edit/t/new'; },
   'photo-pick': async () => {
     if (!canWrite()) return;
