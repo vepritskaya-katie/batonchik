@@ -749,6 +749,7 @@ button.mini-count { text-decoration: underline dotted; text-underline-offset: 3p
 .id-grid .wide { grid-column: 1 / -1; }
 .id-grid dt { font-size: 13px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: rgba(255, 255, 255, .5); }
 .id-grid dd { margin: 3px 0 0; font-size: 16px; font-weight: 500; color: rgba(255, 255, 255, .95); overflow-wrap: anywhere; }
+.id-link { display: inline-block; margin-top: 2px; font-size: 13px; font-weight: 600; color: rgba(255, 255, 255, .7); text-decoration: underline; text-underline-offset: 2px; }
 .id-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 20px; }
 .id-stat {
   position: relative; display: grid; justify-items: center; gap: 2px; padding: 14px 6px 12px; border-radius: 16px;

@@ -1767,7 +1767,7 @@ function idStatsHtml(pet) {
 
 function renderPassport() {
   const pet = S.pet || {};
-  const field = (label, value, wide) => `<div${wide ? ' class="wide"' : ''}><dt>${label}</dt><dd>${value ? escapeHtml(value) : '—'}</dd></div>`;
+  const field = (label, value, wide, extra = '') => `<div${wide ? ' class="wide"' : ''}><dt>${label}</dt><dd>${value ? escapeHtml(value) : '—'}</dd>${extra}</div>`;
   const next = upcoming(S.health);
   const done = doneRecords(S.health);
   const birth = pet.birth ? dayTitle(pet.birth, { day: 'numeric', month: 'long', year: 'numeric' }) : '';
@@ -1780,7 +1780,7 @@ function renderPassport() {
           ${S.photo ? `<img src="${escapeHtml(S.photo)}" alt="${escapeHtml(DOG())}">` : `${PAW_SVG}<span>Добавить фото</span>`}</button>
         <p class="id-label">Кличка</p>
         <h2>${escapeHtml(DOG())}</h2>
-        <dl class="id-grid">${field('Порода', pet.breed, true)}${field('Дата рождения', birth)}${field('Пол', pet.sex)}${field('Чип', pet.chip)}${field('MDR1', pet.mdr1)}</dl>
+        <dl class="id-grid">${field('Порода', pet.breed, true)}${field('Дата рождения', birth)}${field('Пол', pet.sex)}${field('Чип', pet.chip)}${field('MDR1', pet.mdr1, false, '<a class="id-link" href="#/t/opasnye-lekarstva-pri-mdr1">опасные лекарства ›</a>')}</dl>
         ${idStatsHtml(pet)}
       </div>
       ${!S.pet && canWrite() ? '<button class="btn wide id-fill" data-action="pet-edit">Заполнить паспорт</button>' : ''}
