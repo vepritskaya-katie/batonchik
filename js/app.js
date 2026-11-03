@@ -882,6 +882,7 @@ function renderHome() {
   return `${pageHead({ eyebrow: cap(dayTitle(S.day)), title: greeting() })}
     ${statusBanner()}
     ${heroHtml()}
+    ${weekCardHtml()}
     ${homeJournalHtml()}
     ${factHtml()}
     ${homeTrainingsHtml()}
@@ -900,7 +901,6 @@ function renderDayPage() {
   const days = diaryDays();
   return `${pageHead({ eyebrow: cap(dayTitle(S.day)), title: 'День', sub: 'Всё, что отметили за день. Новый день начнётся после «Легли вечером».', plus: { action: 'ev-menu', label: 'Новая запись' } })}
     ${statusBanner()}
-    ${weekCardHtml()}
     ${journalHtml()}
     ${rhythmHtml(st, { trainsDone: p.done, trainsTotal: p.total })}
     ${canWrite() ? weekStatsHtml({ days, prevWeek: days.slice(7, 14), loading: S.diary.loading || !S.diary.from }) : ''}
@@ -1030,14 +1030,15 @@ function weekSummaryHtml(w, day) {
     ${fig ? `<p class="muted small">${escapeHtml(cap(fig))}</p>` : ''}${w.notes ? `<p class="week-notes">${inline(w.notes)}</p>` : ''}`;
 }
 
-// Карточка на «Дне» — только по воскресеньям
+// Карточка на главной — только по воскресеньям: не заполнено — предложение заполнить, заполнено — итог недели
 function weekCardHtml() {
   if (!isSunday(S.day)) return '';
   const w = weekOf(S.day);
   const can = canWrite();
   return `<section class="card week-card-sun">
     <div class="card-head"><h2>Неделя Батончика</h2><a class="text-link" href="#/weeks">История ›</a></div>
-    ${w ? weekSummaryHtml(w, S.day) : '<p class="muted">Раз в неделю — три вопроса о благополучии, вес и фигура. Ответы сохранятся с датой.</p>'}
+    ${w ? weekSummaryHtml(w, S.day) : `<p class="week-invite">Сегодня воскресенье — время подвести неделю.</p>
+      <p class="muted">Три вопроса о благополучии, вес и фигура — пара минут. Ответы сохранятся с датой, вес попадёт в «Рост и вес».</p>`}
     ${can ? `<button class="btn${w ? '' : ' primary'} wide" data-action="week-edit" data-day="${S.day}">${w ? 'Изменить' : 'Заполнить'}</button>` : ''}
   </section>`;
 }

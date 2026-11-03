@@ -1012,6 +1012,7 @@ a.story-date { color: inherit; text-decoration: none; }
 .week-line { margin: 0 0 4px; }
 .week-notes { margin: 8px 0 0; color: var(--text-2); }
 .week-card-sun .btn { margin-top: 12px; }
+.week-invite { margin: 0 0 4px; font-weight: 600; }
 .weeks-list { list-style: none; margin: 0; padding: 0; }
 .weeks-list li { padding: 12px 0; border-top: 1px solid var(--line); }
 .weeks-list li:first-child { border-top: 0; }
