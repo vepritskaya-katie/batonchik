@@ -260,7 +260,7 @@ function firebaseStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onE
     }, fail));
     unsubs.push(onSnapshot(doc(db, 'pet', 'photo'), (snap) => { onPhoto(snap.exists() ? String(snap.data().data || '') : ''); }, fail));
     unsubs.push(onSnapshot(collection(db, 'health'), (snap) => {
-      onHealth(snap.docs.map((d) => { const v = d.data(); return { id: d.id, title: v.title, kind: v.kind, date: v.date, done: !!v.done, note: v.note || '', updatedBy: v.updatedBy || '' }; }));
+      onHealth(snap.docs.map((d) => { const v = d.data(); return { id: d.id, title: v.title, kind: v.kind, date: v.date, time: v.time || '', done: !!v.done, note: v.note || '', updatedBy: v.updatedBy || '' }; }));
     }, fail));
     unsubs.push(onSnapshot(doc(db, 'reads', state.user.uid), (snap) => {
       const v = snap.exists() ? snap.data() : {};
@@ -503,13 +503,14 @@ function firebaseStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onE
       const ref = doc(db, 'pet', 'photo');
       (data ? setDoc(ref, { data, updatedAt: serverTimestamp(), updatedBy: state.user.name }) : deleteDoc(ref)).catch(fail);
     },
-    // Запись о здоровье: {title, kind, date, done, note}; возвращает id
+    // Запись о здоровье: {title, kind, date, time (необязательно, «ЧЧ:ММ»), done, note}; возвращает id
     saveHealth(id, rec) {
       if (!ready()) return null;
       const { doc, collection, setDoc, serverTimestamp } = fb.fs;
       const ref = id ? doc(db, 'health', id) : doc(collection(db, 'health'));
       setDoc(ref, {
         title: rec.title, kind: rec.kind, date: rec.date, done: !!rec.done, note: rec.note || '',
+        ...(rec.time ? { time: rec.time } : {}),
         updatedAt: serverTimestamp(), updatedBy: state.user.name,
       }).catch(fail);
       return ref.id;

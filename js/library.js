@@ -141,12 +141,12 @@ export function foldList(lib, rubric, items, can, open) {
   }).join('')}</ul>`;
 }
 
-// Календарь взросления: текущий этап — по возрасту в месяцах
-export function agesHtml(lib, months) {
+// Календарь взросления: текущий этап — по возрасту в месяцах; open — этап, открытый по ссылке (из поиска)
+export function agesHtml(lib, months, open) {
   return `<ol class="ages">${lib.ages.map((s) => {
     const now = months != null && s.range && months >= s.range.from && months < s.range.to;
     const past = months != null && s.range && months >= s.range.to;
-    return `<li class="age${now ? ' now' : ''}${past ? ' past' : ''}"><details${now ? ' open' : ''}>
+    return `<li class="age${now ? ' now' : ''}${past ? ' past' : ''}" id="lib-ages-${s.id}"><details${now || s.id === open ? ' open' : ''}>
       <summary><span class="age-label">${escapeHtml(s.label)}</span>${now ? '<span class="age-now">сейчас</span>' : ''}
         ${s.dates ? `<span class="age-dates">${escapeHtml(s.dates)}</span>` : ''}</summary>
       <div class="prose fold-body">${prose(s.blocks)}</div></details></li>`;
@@ -159,7 +159,7 @@ export function dictHtml(lib, q = '') {
     const first = d.term.charAt(0).toUpperCase();
     const head = /[А-ЯЁ]/.test(first) && first !== letter ? `<li class="dict-letter" data-letter>${(letter = first)}</li>` : '';
     const search = `${d.term} ${d.en} ${d.def}`.toLowerCase().replace(/ё/g, 'е');
-    return `${head}<li class="dict-item" data-search="${escapeHtml(search)}"><strong>${escapeHtml(d.term)}</strong>${d.en ? ` <span class="dict-en">${escapeHtml(d.en)}</span>` : ''}
+    return `${head}<li class="dict-item" id="lib-dict-${slug(d.term)}" data-search="${escapeHtml(search)}"><strong>${escapeHtml(d.term)}</strong>${d.en ? ` <span class="dict-en">${escapeHtml(d.en)}</span>` : ''}
       <p>${inline(d.def)}</p></li>`;
   }).join('');
   return `<input class="notes-search dict-search" type="search" enterkeyhint="search" placeholder="Поиск по-русски или по-английски" aria-label="Поиск по словарю" value="${escapeHtml(q)}">
@@ -167,12 +167,12 @@ export function dictHtml(lib, q = '') {
 }
 
 // Книги и сайты: «- ✅ **Название** (оригинал) · язык · о чём»
+export const bookLines = (c) => c.text.split('\n').filter((l) => /^-\s+/.test(l)).map((l) => l.replace(/^-\s+/, '').split(' · '));
 export function booksHtml(lib) {
   return lib.books.map((c) => {
-    const items = c.text.split('\n').filter((l) => /^-\s+/.test(l)).map((l) => {
-      const [title, lang, ...about] = l.replace(/^-\s+/, '').split(' · ');
+    const items = bookLines(c).map(([title, lang, ...about], k) => {
       const linked = inline(title).replace(/\(([a-z0-9.-]+\.[a-z]{2,})\)/, '(<a href="https://$1" target="_blank" rel="noopener">$1</a>)');
-      return `<li class="book"><div class="book-title">${linked}</div>${lang ? `<div class="book-lang">${escapeHtml(lang)}</div>` : ''}
+      return `<li class="book" id="lib-books-${c.id}-${k + 1}"><div class="book-title">${linked}</div>${lang ? `<div class="book-lang">${escapeHtml(lang)}</div>` : ''}
         ${about.length ? `<p>${inline(about.join(' · '))}</p>` : ''}</li>`;
     }).join('');
     return `<section class="section"><h2>${inline(c.title)}</h2><ul class="books">${items}</ul></section>`;

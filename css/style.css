@@ -397,6 +397,10 @@ a.seg { display: grid; place-items: center; text-decoration: none; }
   background: var(--surface); color: var(--text); font: inherit; font-weight: 400; font-size: 17px;
 }
 .form textarea { resize: vertical; }
+/* Дата и время визита — в одну строку; без времени дата на всю ширину */
+.date-time { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.date-time:has(> [hidden]) { grid-template-columns: 1fr; }
+.date-time input { min-width: 0; }
 .time-row { display: flex; gap: 10px; align-items: center; }
 .time-row input { flex: 1; }
 .form fieldset { border: 0; padding: 0; margin: 0; }
@@ -1062,3 +1066,51 @@ a.id-stat::after { content: "›"; position: absolute; top: 6px; right: 10px; co
 .story-feature.empty { grid-template-columns: 1fr; }
 .special-check { font-weight: 500 !important; }
 .day-sel > .btn.wide { margin-top: 12px; }
+
+/* ---------- Поиск (лупа в шапке) ---------- */
+.search-btn { margin-left: auto; }
+.search-btn + .me-btn { margin-left: 0; }
+.search-btn svg { width: 25px; height: 25px; stroke-width: 2; }
+.search-btn.on { color: var(--accent-text); }
+/* Временное поле: ловит курсор в момент нажатия на лупу, чтобы на iPhone открылась клавиатура */
+.focus-bridge { position: fixed; top: 0; left: 0; width: 1px; height: 1px; padding: 0; border: 0; opacity: 0; font-size: 16px; pointer-events: none; }
+.search-bar { display: flex; align-items: center; gap: 10px; margin: 2px 0 14px; }
+.search-box { position: relative; flex: 1; min-width: 0; }
+.search-input {
+  display: block; width: 100%; height: 40px; padding: 0 40px 0 38px; border: 1px solid transparent; border-radius: 99px;
+  background: color-mix(in srgb, var(--text) 5%, transparent); color: var(--text);
+  font: inherit; font-size: 16px; /* не меньше 16 px — иначе iPhone приближает страницу */
+  -webkit-appearance: none; appearance: none; outline: none; transition: background-color .15s, border-color .15s;
+}
+.search-input::placeholder { color: var(--muted); opacity: .85; }
+.search-input:focus { background: var(--surface); border-color: var(--border); }
+.search-input::-webkit-search-cancel-button, .search-input::-webkit-search-decoration { -webkit-appearance: none; appearance: none; }
+.search-icon { position: absolute; left: 13px; top: 50%; width: 18px; height: 18px; margin-top: -9px; color: var(--muted); opacity: .8; pointer-events: none; }
+.search-clear {
+  position: absolute; right: 2px; top: 50%; transform: translateY(-50%); width: 40px; height: 40px; padding: 0; border: 0;
+  display: grid; place-items: center; background: transparent; color: var(--muted); cursor: pointer;
+}
+.search-clear svg { width: 20px; height: 20px; padding: 3px; border-radius: 50%; background: color-mix(in srgb, var(--text) 10%, transparent); stroke-width: 2.4; }
+.search-cancel { flex: none; min-height: 44px; padding: 0 2px; border: 0; background: none; color: var(--accent-text); font: inherit; font-size: 16px; font-weight: 600; cursor: pointer; }
+.search-hint { font-size: 15px; line-height: 1.5; margin-top: 6px; }
+.search-hint p { margin: 0 0 8px; }
+.search-results .group:first-of-type { margin-top: 12px; }
+.search-count { margin: 0 0 4px; }
+.search-group > h2 { display: flex; align-items: center; gap: 8px; }
+.search-n { font: 600 13px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 4px 8px; border-radius: 99px; background: var(--surface-2); color: var(--muted); }
+.hit-src { font-size: 12px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: color-mix(in srgb, var(--accent) 85%, var(--bg)); }
+.hit-snip { color: var(--text-2); font-size: 15px; line-height: 1.45; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.search-results mark, .lib-hit mark { background: color-mix(in srgb, var(--mk-health) 28%, transparent); color: inherit; border-radius: 3px; padding: 0 1px; }
+.search-more { margin-top: 10px; }
+.search-empty { margin-top: 8px; }
+/* Место, куда привёл поиск: под шапкой, с мягкой подсветкой */
+[id^="lib-"] { scroll-margin-top: 84px; }
+.lib-hit { background: color-mix(in srgb, var(--mk-health) 14%, transparent); border-radius: 10px; box-shadow: 0 0 0 8px color-mix(in srgb, var(--mk-health) 14%, transparent); }
+.vv-now { margin: 0 0 8px; color: var(--text-2); }
+.vv-log { margin: 0 0 10px; padding-left: 18px; color: var(--text-2); }
+.vv-log li { margin: 4px 0; }
+
+/* Приложение с экрана «Домой»: страница не «пружинит» у краёв — иначе iOS тянет за собой закреплённые шапку и вкладки */
+@media (display-mode: standalone) {
+  html, body { overscroll-behavior-y: none; }
+}
