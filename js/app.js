@@ -2924,8 +2924,10 @@ window.addEventListener('popstate', () => {
   dropOverlaySoon(); // под фото было окно, которое уже закрыто, — снимаем и его запись
 });
 // Переход на другую страницу из окна: запись окна заменяется новой страницей, лишнего шага «назад» нет
+// Переход из открытого окна: запись окна наверху истории сразу подменяем адресом страницы.
+// Через location.replace Safari переходит не сразу — и «закрытое окно = шаг назад» успевало переход отменить
 function goTo(hash) {
-  if (overlayTop()) location.replace(hash); else location.hash = hash;
+  if (overlayTop()) { history.replaceState(null, '', hash); onHashChange(); } else location.hash = hash;
 }
 // Открыли приложение заново, а наверху истории осталась запись окна — окна уже нет
 if (overlayTop()) history.replaceState(null, '', location.href);
@@ -3253,7 +3255,8 @@ const actions = {
     <a class="pick big" href="#/edit/g/new" data-action="sheet-close-link">🎲 Новая игра</a>
     <button type="button" class="pick big" data-action="tr-add">📅 Тренировка или игра только на сегодня</button>
     <div class="form-actions"><button type="button" class="btn" data-action="sheet-close">Отмена</button></div></div>`, null),
-  'sheet-close-link': (el) => { closeSheet(); goTo(el.getAttribute('href')); },
+  // Ссылка из окна: окно закрываем без шага назад — его запись в истории станет страницей, куда ведёт ссылка
+  'sheet-close-link': (el) => { closeSheet(true); goTo(el.getAttribute('href')); },
   'new-tip': () => { location.hash = '#/edit/t/new'; },
   'photo-pick': async () => {
     if (!canWrite()) return;
