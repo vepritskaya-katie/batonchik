@@ -689,7 +689,8 @@ button.mini-count { text-decoration: underline dotted; text-underline-offset: 3p
 .since-cell strong { font: 700 19px/1.2 "Manrope", sans-serif; letter-spacing: -.02em; text-align: right; }
 
 /* ---------- Журнал: строка значков ---------- */
-.ev-icons { display: grid; grid-template-columns: repeat(auto-fill, minmax(72px, 1fr)); gap: 8px; margin: 0 0 4px; }
+/* Шесть значков — две ровные строки по три */
+.ev-icons { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 0 0 4px; }
 .ev-icon-btn {
   display: flex; flex-direction: column; align-items: center; gap: 4px; min-height: 68px; padding: 10px 2px 8px; border-radius: 14px;
   border: 0; background: color-mix(in srgb, var(--accent-soft) 70%, transparent); color: var(--text-2); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer;

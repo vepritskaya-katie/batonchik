@@ -8,15 +8,18 @@ const MSK_OFFSET_H = 3; // Москва круглый год UTC+3, без пе
 // form: запись обычно делают после события — сначала окно со временем и комментарием;
 // без form («Авария дома») запись сохраняется сразу с текущим временем; grams — в окне спрашиваем граммы корма
 // short — подпись под значком в строке быстрых кнопок на главной
+// retired — новых таких записей не делаем (кнопки нет), старые видны в журнале и открываются на правку
 export const EVENT_TYPES = {
   toilet: { icon: '🌳', label: 'Туалет на улице', short: 'Туалет', subs: true, form: true },
   accident: { icon: '💦', label: 'Авария дома', short: 'Авария', subs: true },
-  walk: { icon: '🦮', label: 'Прогулка', short: 'Прогулка', form: true },
+  walk: { icon: '🦮', label: 'Прогулка', short: 'Прогулка', form: true, retired: true },
   meal: { icon: '🍽', label: 'Кормление', short: 'Еда', form: true, grams: true },
   wake: { icon: '☀️', label: 'Встали утром', short: 'Встали', form: true },
   bed: { icon: '🌙', label: 'Легли вечером', short: 'Легли', form: true },
   note: { icon: '✏️', label: 'Заметка', short: 'Заметка', text: true, form: true },
 };
+// Что можно записать сейчас: кнопки журнала, значки на главной, «+» и ссылки #/add/…
+export const ADD_TYPES = Object.entries(EVENT_TYPES).filter(([, t]) => !t.retired);
 export const SUBS = { pee: 'пописал', poo: 'покакал', both: 'пописал и покакал' };
 // Повтор тренировки или игры: записывается кнопками «Тренировки на сегодня», в ленте журнала не показывается
 export const TRAIN = { icon: '🎯', label: 'Повтор' };
@@ -120,8 +123,6 @@ export function weekSummary(thisWeek, prevWeek) {
   const aCur = cur.reduce((a, d) => a + d.accident, 0);
   const aPrev = prev.length ? prev.reduce((a, d) => a + d.accident, 0) : null;
   lines.push(aCur ? `Аварий дома: ${aCur} за неделю${aPrev != null ? ` (неделей раньше — ${aPrev})` : ''}.` : 'Аварий дома не было.');
-  const wCur = avg(cur.map((d) => d.walk));
-  if (wCur) lines.push(`Прогулок: в среднем ${num(wCur)} в день${cmp(wCur, prev.length ? avg(prev.map((d) => d.walk)) : null)}.`);
   const trCur = avg(cur.map((d) => d.trains));
   if (trCur) lines.push(`Повторов на тренировках: в среднем ${num(trCur)} в день${cmp(trCur, prev.length ? avg(prev.map((d) => d.trains)) : null)}.`);
   const fed = cur.filter((d) => d.mealGrams);
@@ -223,7 +224,6 @@ export function rhythmHtml(st, { trainsDone, trainsTotal }) {
     <p class="muted">${all ? `Туалет на улице: ${st.toilet} из ${all}${st.accident ? `, дома ${st.accident}` : ''}.` : 'Сегодня туалет ещё не отмечали.'}</p>
     ${row('🌳 Туалет на улице', st.toilet)}
     ${row('💦 Аварии дома', st.accident)}
-    ${row('🦮 Прогулки', st.walk)}
     ${row('🍽 Кормления', `${st.meal}${st.mealGrams ? ` · ${st.mealGrams} г` : ''}`)}
     ${row('🌙 Ночной сон', sleep)}
     ${row('🎯 Повторы тренировок', trainsTotal ? `${trainsDone} из ${trainsTotal}` : st.trains)}
@@ -237,11 +237,10 @@ export function weekStatsHtml({ days, prevWeek, loading }) {
   return `<section class="card week-card">
       <h2>Последние 7 дней</h2>
       ${summary.length ? `<ul class="summary">${summary.map((l) => `<li>${escapeHtml(l)}</li>`).join('')}</ul>`
-        : `<p class="muted">${loading ? 'Загружаем…' : 'Записей пока нет. Отмечайте туалет, прогулки и кормления — здесь появится сводка.'}</p>`}
+        : `<p class="muted">${loading ? 'Загружаем…' : 'Записей пока нет. Отмечайте туалет, аварии и кормления — здесь появится сводка.'}</p>`}
       ${summary.length ? `<div class="charts">
         ${miniChart('🌳 Туалет на улице', week, 'toilet')}
         ${miniChart('💦 Аварии дома', week, 'accident')}
-        ${miniChart('🦮 Прогулки', week, 'walk')}
         ${miniChart('🎯 Повторы на тренировках', week, 'trains')}
       </div>` : ''}
     </section>`;

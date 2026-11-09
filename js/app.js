@@ -4,7 +4,7 @@ import { parseBlocks, parseCatalog, parseCardMd, parseToday, renderBlocks, inlin
 import { createStore } from './store.js';
 import { cardToForm, emptyForm, formToMd, editorHtml, editorAction, setPath, formatText } from './editor.js';
 import {
-  EVENT_TYPES, SUBS, TRAIN, dayKey, fmtTime, fmtDate, addDays, moscowDate, dayStats, eventRow, todaySummary, nightLine, nightFor, plural, mondayOf, dayTitle,
+  EVENT_TYPES, ADD_TYPES, SUBS, TRAIN, dayKey, fmtTime, fmtDate, addDays, moscowDate, dayStats, eventRow, todaySummary, nightLine, nightFor, plural, mondayOf, dayTitle,
   rhythmHtml, weekStatsHtml, daySummaryLine, trainsLine, MONTHS_SHORT,
 } from './diary.js';
 import { HEALTH_KINDS, NEXT_OPTIONS, nextDate, suggestNext, dueText, ageText, upcoming, doneRecords, googleCalendarUrl, icsText, healthRowHtml, daysBetween, ageShort, ageMonths, hasTime, TIME_RE } from './passport.js';
@@ -527,7 +527,7 @@ function scheduleItemHtml(it, opts = {}) {
 // Журнал: кнопки быстрых записей и лента за сегодня
 function journalHtml() {
   const can = canWrite();
-  const buttons = Object.entries(EVENT_TYPES).map(([type, t]) =>
+  const buttons = ADD_TYPES.map(([type, t]) =>
     `<button class="ev-btn" data-action="ev-add" data-type="${type}"${can ? '' : ' disabled'}><span class="ev-icon" aria-hidden="true">${t.icon}</span><span>${t.label}</span></button>`).join('');
   const st = dayStats(S.day, S.events, S.checks, 0);
   const night = nightFor(S.day, [...S.recent, ...S.events]);
@@ -545,7 +545,7 @@ function journalHtml() {
 // Строка значков быстрых записей (на главной): одно нажатие — как кнопки журнала
 function evIconsHtml() {
   const can = canWrite();
-  return `<div class="ev-icons">${Object.entries(EVENT_TYPES).map(([type, t]) =>
+  return `<div class="ev-icons">${ADD_TYPES.map(([type, t]) =>
     `<button class="ev-icon-btn" data-action="ev-add" data-type="${type}"${can ? '' : ' disabled'} aria-label="${t.label}">
       <span class="ev-icon" aria-hidden="true">${t.icon}</span><span>${t.short}</span></button>`).join('')}</div>`;
 }
@@ -553,7 +553,7 @@ function evIconsHtml() {
 // «+» вверху главной и «Дня»: выбор, что записать
 function evMenuSheet() {
   openSheet(`<div class="form"><h2>Новая запись</h2>
-    ${Object.entries(EVENT_TYPES).map(([type, t]) => `<button type="button" class="pick big" data-action="ev-add" data-type="${type}" data-close="1">${t.icon} ${t.label}</button>`).join('')}
+    ${ADD_TYPES.map(([type, t]) => `<button type="button" class="pick big" data-action="ev-add" data-type="${type}" data-close="1">${t.icon} ${t.label}</button>`).join('')}
     <div class="form-actions"><button type="button" class="btn" data-action="sheet-close">Отмена</button></div></div>`, null);
 }
 
@@ -2164,7 +2164,7 @@ function takeAddLink() {
   const m = location.hash.match(/^#\/add\/([a-z]+)/);
   if (!m) return;
   history.replaceState(null, '', `${location.pathname}${location.search}#/`);
-  if (EVENT_TYPES[m[1]]) S.pendingAdd = m[1];
+  if (EVENT_TYPES[m[1]] && !EVENT_TYPES[m[1]].retired) S.pendingAdd = m[1];
 }
 
 function onHashChange() {
