@@ -1237,12 +1237,6 @@ a.story-date { color: inherit; text-decoration: none; }
 .lost-steps li { margin: 0 0 10px; line-height: 1.45; }
 
 /* ---------- Фото месяца ---------- */
-.month-card h2 { margin: 4px 0 6px; }
-.month-card .muted { margin: 0 0 12px; }
-.month-prev { margin: 0 0 12px; display: grid; justify-items: start; gap: 4px; }
-.month-prev img { width: 120px; height: 120px; object-fit: cover; border-radius: 14px; }
-.month-prev figcaption { color: var(--muted); font-size: 13px; }
-.month-card .text-link { margin-top: 6px; }
 .month-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
 .month-tile {
   position: relative; display: block; aspect-ratio: 1; padding: 0; border: 0; border-radius: 18px; overflow: hidden; cursor: pointer;

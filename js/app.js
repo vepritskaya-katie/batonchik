@@ -108,7 +108,7 @@ const S = {
   socialFilter: 'all', // 'all' | 'new' — ещё не встречали | 'again' — повторить
   care: {},           // уход: { nails: { log: [дни], every } … }
   monthDates: null,   // фото месяца: { 5: 'ГГГГ-ММ-ДД' } — за какие месяцы есть фото и когда снято (null — ещё не знаем)
-  monthPhotos: { all: null, loading: false, thumbs: {}, thumbLoading: {} }, // все фото (для «Как рос») и уменьшенные — для календаря и главной
+  monthPhotos: { all: null, loading: false, thumbs: {}, thumbLoading: {} }, // все фото (для «Как рос») и уменьшенные — для календаря дневника
 };
 
 const DOG = () => (S.pet && S.pet.name) || 'Батончик';
@@ -934,7 +934,6 @@ function renderHome() {
     ${statusBanner()}
     ${heroHtml()}
     ${weekCardHtml()}
-    ${monthCardHtml()}
     ${homeJournalHtml()}
     ${factHtml()}
     ${homeTrainingsHtml()}
@@ -2293,18 +2292,7 @@ function monthBirthday(birth, n) {
   return `${yy}-${String(mm + 1).padStart(2, '0')}-${String(Math.min(d, last)).padStart(2, '0')}`;
 }
 
-// Сегодня — «месячный день рождения» (или прошло не больше трёх дней): { n, date }
-function monthNow() {
-  const birth = S.pet && S.pet.birth;
-  if (!/^\d{4}-\d\d-\d\d$/.test(birth || '')) return null;
-  const n = ageMonths(birth, S.day);
-  if (!n) return null;
-  const date = monthBirthday(birth, n);
-  const since = daysBetween(date, S.day);
-  return since >= 0 && since <= 3 ? { n, date } : null;
-}
-
-// Уменьшенное фото месяца (квадрат 240 точек) — для календаря и главной; грузится один раз по запросу
+// Уменьшенное фото месяца (квадрат 240 точек) — для календаря дневника; грузится один раз по запросу
 function monthThumb(n) {
   const mp = S.monthPhotos;
   if (mp.thumbs[n] || mp.thumbLoading[n] || !S.monthDates || !S.monthDates[n]) return mp.thumbs[n] || '';
@@ -2339,21 +2327,6 @@ function monthOnDay(day) {
   const d = S.monthDates || {};
   const n = Object.keys(d).find((k) => d[k] === day);
   return n ? +n : 0;
-}
-
-function monthCardHtml() {
-  if (!canWrite() || !S.monthDates) return '';
-  const m = monthNow();
-  if (!m || S.monthDates[m.n]) return '';
-  const prev = m.n > 1 ? monthThumb(m.n - 1) : '';
-  return `<section class="card month-card">
-    <p class="eyebrow">Фото месяца</p>
-    <h2>${escapeHtml(DOG())}: ${monthsText(m.n)}</h2>
-    <p class="muted">Сфотографируйте его там же и в той же позе, что в прошлый раз. Из таких фото в дневнике сложится лента — видно, как он рос.</p>
-    ${prev ? `<figure class="month-prev"><img src="${escapeHtml(prev)}" alt=""><figcaption>${monthsText(m.n - 1)}</figcaption></figure>` : ''}
-    <button class="btn primary wide" data-action="month-add" data-n="${m.n}">Добавить фото</button>
-    <a class="text-link" href="#/pass/months">Все месяцы ›</a>
-  </section>`;
 }
 
 async function loadAllMonthPhotos() {

@@ -293,7 +293,7 @@ function firebaseStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onE
     }, fail));
     unsubs.push(onSnapshot(doc(db, 'pet', 'photo'), (snap) => { onPhoto(snap.exists() ? String(snap.data().data || '') : ''); }, fail));
     unsubs.push(onSnapshot(doc(db, 'pet', 'lost'), (snap) => { onLost(snap.exists() ? plainLost(snap.data()) : null); }, fail));
-    // Даты фото месяца — лёгкий документ: по нему календарь и главная знают, где есть фото, не загружая сами фото
+    // Даты фото месяца — лёгкий документ: по нему календарь знает, где есть фото, не загружая сами фото
     unsubs.push(onSnapshot(doc(db, 'pet', 'months'), (snap) => {
       const dates = (snap.exists() && snap.data().dates) || {};
       onMonths(Object.fromEntries(Object.entries(dates).filter(([n, d]) => /^[1-9][0-9]?$/.test(n) && DAY_RE.test(d))));
