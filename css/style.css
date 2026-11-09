@@ -1304,3 +1304,23 @@ a.story-date { color: inherit; text-decoration: none; }
 .push-opt input { flex: none; width: 22px; height: 22px; margin: 1px 0 0; accent-color: var(--accent); }
 .push-opt strong { display: block; font-size: 16px; font-weight: 600; }
 .push-opt small { display: block; margin-top: 2px; color: var(--muted); font-size: 13.5px; line-height: 1.4; }
+
+/* ---------- Идеи на сегодня: две плитки, как план на неделю ---------- */
+.idea-top { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.idea-tile .idea-kind { font-size: 12.5px; font-weight: 700; letter-spacing: .02em; }
+.idea-next {
+  flex: none; width: 32px; height: 32px; margin: -6px -4px -6px 0; border-radius: 50%; border: 0; cursor: pointer;
+  background: color-mix(in srgb, var(--surface) 70%, transparent); color: var(--accent-text); font: 700 17px/1 "Manrope", sans-serif;
+}
+.idea-next:active { background: var(--surface); }
+.idea-reason {
+  color: var(--muted); font-size: 12.5px; line-height: 1.3;
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+}
+.idea-plan {
+  min-height: 34px; padding: 4px 12px; border-radius: 99px; cursor: pointer; white-space: nowrap;
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent); background: color-mix(in srgb, var(--surface) 70%, transparent);
+  color: var(--accent-text); font: inherit; font-size: 13.5px; font-weight: 700;
+}
+.idea-plan:active { background: var(--surface); }
+.idea-tile .tr-count { align-self: center; }

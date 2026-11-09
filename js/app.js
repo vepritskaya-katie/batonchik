@@ -776,24 +776,29 @@ function ideasHtml() {
     events: [...S.recent, ...S.events], progress: (c) => cardProgress('k', c), shift: S.ideaShift,
   });
   const counts = todayTrains();
+  // Плитка (по две в ряд, как план на неделю): вид, название, почему именно она, «+1» — повтор;
+  // у тренировки — «В план», у обеих — «Другая» (↻), если есть из чего выбрать
   const row = (kind, icon, label, idea, count) => {
     if (!idea) return '';
     const n = counts[idea.ref] || 0;
-    return `<div class="idea">
-      <div class="idea-head"><span class="idea-kind">${icon} ${label}</span>
-        <a class="idea-name" href="#/${idea.tab}/${idea.card.id}">${escapeHtml(idea.card.name)}</a></div>
-      <div class="muted small">${escapeHtml(idea.reason)}${n ? ` · сегодня ${n} ${plural(n, 'повтор', 'повтора', 'повторов')}` : ''}</div>
-      <div class="idea-actions">
-        <button class="btn small primary" data-action="tr-tap" data-card="${idea.ref}">${kind === 'game' ? 'Сыграли' : 'Сделали'}</button>
-        ${kind === 'training' ? `<button class="btn small" data-action="idea-plan" data-card="${idea.ref}">В план на сегодня</button>` : ''}
-        ${count > 1 ? `<button class="btn small" data-action="idea-next" data-kind="${kind}">Другая</button>` : ''}
+    const name = idea.card.name;
+    return `<div class="item tr-tile idea idea-tile">
+      <div class="tr-tile-top">
+        <div class="idea-top"><span class="idea-kind">${icon} ${label}</span>
+          ${count > 1 ? `<button class="idea-next" data-action="idea-next" data-kind="${kind}" aria-label="${kind === 'game' ? 'Другая игра' : 'Другая тренировка'}">↻</button>` : ''}</div>
+        <a class="item-title link" href="#/${idea.tab}/${idea.card.id}">${escapeHtml(name)}</a>
+        <span class="idea-reason">${escapeHtml(idea.reason)}</span>
+      </div>
+      <div class="tr-tile-foot">
+        ${kind === 'training' ? `<button class="idea-plan" data-action="idea-plan" data-card="${idea.ref}">В план</button>` : `<span class="tr-count">${n ? `сегодня ${n}` : ''}</span>`}
+        <button class="tr-tap" data-action="tr-tap" data-card="${idea.ref}" aria-label="${kind === 'game' ? 'Сыграли' : 'Сделали'}: ${escapeHtml(name)}${n ? `, сегодня ${n}` : ''}"><span class="tr-plus">+1</span></button>
       </div></div>`;
   };
   const html = row('game', '🎲', 'Игра', ideas.game, ideas.gameCount) + row('training', '🎯', 'Тренировка', ideas.training, ideas.trainingCount);
   return html ? `<section class="section">
     <div class="section-head"><h2>Идеи на сегодня</h2></div>
-    <p class="muted small">Игра и тренировка вне плана — если есть время и настроение.</p>
-    <div class="ideas">${html}</div></section>` : '';
+    <p class="muted small">Игра и тренировка вне плана — если есть время и настроение. «+1» — сыграли или сделали, ↻ — другая идея.</p>
+    <div class="ideas tr-tiles">${html}</div></section>` : '';
 }
 
 // Прогресс тренировок за день: сколько тренировок выполнено и сколько повторов сделано
