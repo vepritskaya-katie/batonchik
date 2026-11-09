@@ -11,9 +11,9 @@ import { daysBetween } from './passport.js';
 export const CARE_ITEMS = [
   { id: 'nails', icon: '✂️', name: 'Когти', every: 14, what: 'подстричь или подпилить', card: 'kogti' },
   { id: 'teeth', icon: '🪥', name: 'Зубы', every: 2, what: 'почистить', card: 'chistka-zubov-i-smena-zubov' },
-  { id: 'brush', icon: '🖌️', name: 'Вычёсывание', every: 3, what: 'вычесать: у аусси густой подшёрсток, колтуны — за ушами, на штанах и под мышками' },
+  { id: 'brush', icon: '🖌️', name: 'Вычёсывание', every: 3, what: 'вычесать: у аусси густой подшёрсток, колтуны — за ушами, на штанах и под мышками', card: 'vychesyvanie' },
   { id: 'ears', icon: '👂', name: 'Уши', every: 7, what: 'осмотреть: чистые, без запаха и покраснения', card: 'day-posmotryu' },
-  { id: 'bath', icon: '🛁', name: 'Купание', every: 0, what: 'только когда испачкался: частое мытьё сушит кожу' },
+  { id: 'bath', icon: '🛁', name: 'Купание', every: 0, what: 'только когда испачкался: частое мытьё сушит кожу', card: 'myte' },
 ];
 export const EVERY_OPTIONS = [0, 1, 2, 3, 7, 10, 14, 21, 30, 60, 90];
 export const everyText = (n) => (!n ? 'не напоминать' : n === 1 ? 'каждый день' : `раз в ${n} ${plural(n, 'день', 'дня', 'дней')}`);

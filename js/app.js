@@ -107,7 +107,8 @@ const S = {
   social: {},         // социализация: { пункт: { title (у своих), log: [{ d, r }] } }
   socialFilter: 'all', // 'all' | 'new' — ещё не встречали | 'again' — повторить
   care: {},           // уход: { nails: { log: [дни], every } … }
-  monthPhotos: { all: null, loading: false, checked: {}, prev: {} }, // фото месяца: все (для «Как рос»), есть ли за месяц, фото прошлого месяца
+  monthDates: null,   // фото месяца: { 5: 'ГГГГ-ММ-ДД' } — за какие месяцы есть фото и когда снято (null — ещё не знаем)
+  monthPhotos: { all: null, loading: false, thumbs: {}, thumbLoading: {} }, // все фото (для «Как рос») и уменьшенные — для календаря и главной
 };
 
 const DOG = () => (S.pet && S.pet.name) || 'Батончик';
@@ -178,6 +179,16 @@ const store = createStore({
   onLost(v) { S.lost = v; render(); },
   onSocial(map) { S.social = map || {}; render(); },
   onCare(map) { S.care = map || {}; render(); },
+  onMonths(dates) {
+    // Список фото месяца изменился (в том числе на другом телефоне): «Как рос» перечитает фото,
+    // а уменьшенные копии с другой датой или убранные — забываем
+    const mp = S.monthPhotos;
+    const next = dates || {};
+    Object.keys(mp.thumbs).forEach((n) => { if (!S.monthDates || S.monthDates[n] !== next[n]) delete mp.thumbs[n]; });
+    if (mp.all) mp.stale = true;
+    S.monthDates = next;
+    render();
+  },
   onError(message) { toast(message); },
 }, firebaseConfig);
 
@@ -1315,8 +1326,19 @@ function catalogBody(tab, { showTitle = false } = {}) {
   const loose = cat.loose.length ? `<div class="prose">${blocksHtml(cat.loose, tab, null)}</div>` : '';
   const groups = cat.groups.map((g) => {
     if (g.raw) return `<section class="group"><div class="raw">${escapeHtml(g.raw)}</div></section>`;
+    // Тренировки и игры — квадратные плитки по три в ряд: так список короче
+    const tiles = tab === 'k' || tab === 'g';
     const cards = g.cards.map((c) => {
       const p = cardProgress(tab, c);
+      if (tiles) {
+        const foot = p.mastered ? '<span class="tile-ok">✓ Освоено</span>'
+          : p.total ? `<span class="tile-prog"><span class="tile-bar"><span style="width:${Math.round(p.done / p.total * 100)}%"></span></span>${p.done}/${p.total}</span>` : '';
+        const label = `${c.name}${c.subtitle ? `. ${c.subtitle}` : ''}`.replace(/\*\*|\*|`/g, '');
+        return `<li><a class="tile${p.mastered ? ' ok' : ''}" href="#/${tab}/${c.id}" aria-label="${escapeHtml(label)}">
+          <span class="tile-name">${inline(c.name)}</span>
+          ${c.subtitle && c.name.length <= 20 ? `<span class="tile-sub">${inline(c.subtitle)}</span>` : ''}
+          ${foot || tab === 'k' ? `<span class="tile-foot">${foot}${tab === 'k' ? placesMini(tab, c) : ''}</span>` : ''}</a></li>`;
+      }
       let prog = '';
       if (p.mastered) prog = '<span class="card-prog ok">✓ Освоено</span>';
       else if (p.total) {
@@ -1336,7 +1358,7 @@ function catalogBody(tab, { showTitle = false } = {}) {
     return `<section class="group">
       ${g.title && !single ? `<h2>${inline(g.title)}</h2>` : ''}
       ${intro}
-      ${cards ? `<ul class="cards">${cards}</ul>` : (g.intro.length ? '' : '<p class="empty">Здесь пока пусто.</p>')}
+      ${cards ? `<ul class="cards${tiles ? ' tiles' : ''}">${cards}</ul>` : (g.intro.length ? '' : '<p class="empty">Здесь пока пусто.</p>')}
     </section>`;
   }).join('');
   return `${errors}${loose}${groups}`;
@@ -1633,9 +1655,11 @@ function calendarHtml(ym) {
       health ? 'health' : '',
       hasStory(story) ? 'story' : '',
     ].filter(Boolean).map((k) => `<i class="mk mk-${k}"></i>`).join('');
-    const cls = ['cal-cell', day === S.day && 'today', isSpecial(story) && hasStory(story) && 'special', day === S.cal.sel && 'sel', !past && 'future'].filter(Boolean).join(' ');
-    cells.push(`<button type="button" class="${cls}" data-action="cal-pick" data-day="${day}" aria-label="${escapeHtml(dayTitle(day))}"${day === S.cal.sel ? ' aria-current="date"' : ''}>
-      <span class="cal-num">${d}</span><span class="cal-marks">${marks}</span></button>`);
+    const mn = monthOnDay(day);
+    const thumb = mn ? monthThumb(mn) : '';
+    const cls = ['cal-cell', day === S.day && 'today', isSpecial(story) && hasStory(story) && 'special', day === S.cal.sel && 'sel', !past && 'future', mn && 'month-photo'].filter(Boolean).join(' ');
+    cells.push(`<button type="button" class="${cls}" data-action="cal-pick" data-day="${day}" aria-label="${escapeHtml(dayTitle(day))}${mn ? `, фото месяца: ${monthsText(mn)}` : ''}"${day === S.cal.sel ? ' aria-current="date"' : ''}>
+      <span class="cal-num"${thumb ? ` style="background-image:url('${thumb}')"` : ''}>${d}</span><span class="cal-marks">${marks}</span></button>`);
   }
   const canNext = ym < addMonths(monthOf(S.day), 3);
   return `<section class="cal">
@@ -1649,6 +1673,7 @@ function calendarHtml(ym) {
       <span><i class="mk mk-ok"></i>туалет на улице</span><span><i class="mk mk-bad"></i>были аварии</span>
       <span><i class="mk mk-train"></i>тренировки</span><span><i class="mk mk-health"></i>здоровье</span>
       <span><i class="mk mk-story"></i>заметка</span><span><i class="ring-key"></i>день, который хочется помнить</span>
+      ${S.monthDates && Object.keys(S.monthDates).length ? '<span><i class="photo-key"></i>фото месяца</span>' : ''}
     </div>
   </section>`;
 }
@@ -1662,6 +1687,11 @@ function selectedDayHtml(day) {
   const story = S.stories[day];
   const health = S.health.filter((r) => r.date === day);
   const line = st ? daySummaryLine(st) : '';
+  const mn = monthOnDay(day);
+  const thumb = mn ? monthThumb(mn) : '';
+  const monthHtml = mn ? `<div class="day-month">
+      <button type="button" class="day-month-img" data-action="month-day-view" data-n="${mn}" aria-label="Открыть фото месяца">${thumb ? `<img src="${thumb}" alt="">` : ''}</button>
+      <div><p class="eyebrow">Фото месяца</p><strong>${escapeHtml(DOG())}: ${monthsText(mn)}</strong><a class="text-link" href="#/pass/months">Все месяцы ›</a></div></div>` : '';
   const storyHtml = hasStory(story) ? `<div class="day-story${isSpecial(story) ? ' special' : ''}">
       ${isSpecial(story) ? '<p class="eyebrow">День, который хочется помнить</p>' : ''}
       ${story.title ? `<h3><a class="story-link" href="#/d/${day}">${escapeHtml(story.title)}</a></h3>` : ''}
@@ -1674,9 +1704,10 @@ function selectedDayHtml(day) {
     ${future ? '<p class="muted">Этот день ещё впереди.</p>' : ''}
     ${loading ? '<p class="muted">Загружаем…</p>' : ''}
     ${line ? `<p class="day-line">${line}</p>` : ''}
-    ${st && !st.list.length && !st.trains && !hasStory(story) && !health.length ? '<p class="muted">В журнале за этот день записей нет.</p>' : ''}
+    ${st && !st.list.length && !st.trains && !hasStory(story) && !health.length && !mn ? '<p class="muted">В журнале за этот день записей нет.</p>' : ''}
     ${st ? trainsLine(st, cardName) : ''}
     ${health.length ? `<ul class="health-list">${health.map((r) => healthRowHtml(r, S.day)).join('')}</ul>` : ''}
+    ${monthHtml}
     ${storyHtml}
     ${st && st.notes.length ? `<ul class="ev-list notes">${st.notes.map((e) => eventRow(e)).join('')}</ul>` : ''}
     ${st && st.list.length ? `<details class="intro"><summary>Все записи (${st.list.length})</summary><ul class="ev-list">${st.list.map((e) => eventRow(e)).join('')}</ul></details>` : ''}
@@ -1775,8 +1806,7 @@ function renderDiary() {
   if (!canWrite()) return `${head}${statusBanner()}<p class="muted">Дневник появится после входа.</p>`;
   setTimeout(() => loadMonth(S.cal.month), 0);
   if (sel && monthOf(sel) !== S.cal.month) setTimeout(() => loadMonth(monthOf(sel)), 0);
-  return `${head}${featureHtml()}${calendarHtml(S.cal.month)}${sel ? selectedDayHtml(sel) : ''}
-    ${linkCard('#/d/months', '📸', 'Как рос', 'фото месяца: по одному на каждый месяц')}`;
+  return `${head}${featureHtml()}${calendarHtml(S.cal.month)}${sel ? selectedDayHtml(sel) : ''}`;
 }
 
 // Заметка о дне: заголовок, текст, фото (до шести) и «день, который хочется помнить»
@@ -1863,7 +1893,7 @@ function idStatsHtml(pet) {
   };
   return `<div class="id-stats">
     ${tile(weight ? fmtNum(weight) : '', 'кг', 'вес', '#/growth')}
-    ${tile(age ? age.n : '', age ? age.unit : '', 'возраст', '')}
+    ${tile(age ? age.n : '', age ? age.unit : '', 'возраст', '#/pass/months')}
     ${tile(height ? fmtNum(height) : '', 'см', 'рост', '#/growth')}
   </div>`;
 }
@@ -1889,6 +1919,7 @@ function renderPassport() {
       ${!S.pet && canWrite() ? '<button class="btn wide id-fill" data-action="pet-edit">Заполнить паспорт</button>' : ''}
     </section>
     <div class="link-cards">
+      ${linkCard('#/pass/months', '📸', 'Как рос', 'фото по месяцам — они же в календаре дневника')}
       ${linkCard('#/pass/summary', '🩺', 'Для ветеринара', 'сводка на одной странице')}
       ${linkCard('#/pass/lost', '📣', 'Если потерялся', 'объявление и что делать', 'alarm')}
     </div>
@@ -2266,31 +2297,55 @@ function monthNow() {
   return since >= 0 && since <= 3 ? { n, date } : null;
 }
 
-async function checkMonthPhoto(n) {
+// Уменьшенное фото месяца (квадрат 240 точек) — для календаря и главной; грузится один раз по запросу
+function monthThumb(n) {
   const mp = S.monthPhotos;
-  try {
-    const [cur, prev] = await Promise.all([store.loadMonthPhoto(n), n > 1 ? store.loadMonthPhoto(n - 1) : null]);
-    mp.checked[n] = cur ? 'have' : 'none';
-    if (prev && prev.data) mp.prev[n] = prev.data;
-  } catch { mp.checked[n] = 'none'; }
-  render();
+  if (mp.thumbs[n] || mp.thumbLoading[n] || !S.monthDates || !S.monthDates[n]) return mp.thumbs[n] || '';
+  mp.thumbLoading[n] = true;
+  const full = mp.all && mp.all[n] && mp.all[n].data;
+  (full ? Promise.resolve({ data: full }) : store.loadMonthPhoto(n))
+    .then((p) => (p && p.data ? squareThumb(p.data, 240) : ''))
+    .then((t) => { if (t) { mp.thumbs[n] = t; render(); } })
+    .catch(() => {})
+    .finally(() => { mp.thumbLoading[n] = false; });
+  return '';
+}
+
+function squareThumb(src, size) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const c = document.createElement('canvas');
+      c.width = size;
+      c.height = size;
+      const k = Math.min(img.width, img.height);
+      c.getContext('2d').drawImage(img, (img.width - k) / 2, (img.height - k) / 2, k, k, 0, 0, size, size);
+      resolve(c.toDataURL('image/jpeg', 0.8));
+    };
+    img.onerror = reject;
+    img.src = src;
+  });
+}
+
+// День → номер месяца, если в этот день снято фото месяца
+function monthOnDay(day) {
+  const d = S.monthDates || {};
+  const n = Object.keys(d).find((k) => d[k] === day);
+  return n ? +n : 0;
 }
 
 function monthCardHtml() {
-  if (!canWrite()) return '';
+  if (!canWrite() || !S.monthDates) return '';
   const m = monthNow();
-  if (!m) return '';
-  const state = S.monthPhotos.checked[m.n];
-  if (!state) { S.monthPhotos.checked[m.n] = 'loading'; setTimeout(() => checkMonthPhoto(m.n), 0); return ''; }
-  if (state !== 'none') return '';
-  const prev = S.monthPhotos.prev[m.n];
+  if (!m || S.monthDates[m.n]) return '';
+  const prev = m.n > 1 ? monthThumb(m.n - 1) : '';
   return `<section class="card month-card">
     <p class="eyebrow">Фото месяца</p>
     <h2>${escapeHtml(DOG())}: ${monthsText(m.n)}</h2>
     <p class="muted">Сфотографируйте его там же и в той же позе, что в прошлый раз. Из таких фото в дневнике сложится лента — видно, как он рос.</p>
     ${prev ? `<figure class="month-prev"><img src="${escapeHtml(prev)}" alt=""><figcaption>${monthsText(m.n - 1)}</figcaption></figure>` : ''}
     <button class="btn primary wide" data-action="month-add" data-n="${m.n}">Добавить фото</button>
-    <a class="text-link" href="#/d/months">Все месяцы ›</a>
+    <a class="text-link" href="#/pass/months">Все месяцы ›</a>
   </section>`;
 }
 
@@ -2298,19 +2353,21 @@ async function loadAllMonthPhotos() {
   const mp = S.monthPhotos;
   if (mp.loading) return;
   mp.loading = true;
+  mp.stale = false;
   try { mp.all = await store.loadMonthPhotos(); } catch { mp.all = mp.all || {}; }
   mp.loading = false;
   render();
 }
 
 function renderMonths() {
-  const back = `<a class="back" href="#/d">${BACK_SVG}Дневник</a>`;
-  const head = pageHead({ eyebrow: DOG(), title: 'Как рос', sub: 'По фото на каждый месяц. Снимайте в одном месте и в одной позе — так разница виднее.' });
+  const back = `<a class="back" href="#/pass">${BACK_SVG}Паспорт</a>`;
+  const head = pageHead({ eyebrow: DOG(), title: 'Как рос', sub: 'По фото на каждый месяц. Снимайте в одном месте и в одной позе — так разница виднее. Фото видны и в календаре дневника.' });
   const birth = S.pet && S.pet.birth;
   if (!canWrite()) return `${back}${head}${statusBanner()}<p class="muted">Фото появятся после входа.</p>`;
   if (!/^\d{4}-\d\d-\d\d$/.test(birth || '')) return `${back}${head}<p class="muted">Укажите дату рождения в <a href="#/pass">паспорте</a> — тогда здесь появятся месяцы.</p>`;
   const mp = S.monthPhotos;
-  if (!mp.all) { setTimeout(loadAllMonthPhotos, 0); return `${back}${head}<p class="muted">Загружаем фото…</p>`; }
+  if (!mp.all || mp.stale) setTimeout(loadAllMonthPhotos, 0);
+  if (!mp.all) return `${back}${head}<p class="muted">Загружаем фото…</p>`;
   const age = ageMonths(birth, S.day) || 0;
   const max = Math.max(age, ...Object.keys(mp.all).map(Number));
   const tiles = [];
@@ -2323,16 +2380,24 @@ function renderMonths() {
   return `${back}${head}${tiles.length ? `<div class="month-grid">${tiles.join('')}</div>` : '<p class="muted">Первый месяц ещё не исполнился.</p>'}`;
 }
 
+// Дата снимка: за текущий месяц — сегодня, за прошлые — день, когда тому месяцу исполнилось
+function monthPhotoDate(n) {
+  const birth = S.pet && S.pet.birth;
+  if (!/^\d{4}-\d\d-\d\d$/.test(birth || '') || n >= (ageMonths(birth, S.day) || 0)) return S.day;
+  return monthBirthday(birth, n);
+}
+
 async function addMonthPhoto(n) {
   const data = await choosePhoto();
   if (!data) return;
-  const photo = { data, date: S.day };
-  await store.saveMonthPhoto(n, photo);
+  const photo = { data, date: monthPhotoDate(n) };
   const mp = S.monthPhotos;
+  delete mp.thumbs[n];
   if (mp.all) mp.all = { ...mp.all, [n]: photo };
-  mp.checked[n] = 'have';
+  S.monthDates = { ...(S.monthDates || {}), [n]: photo.date };
   render();
-  toast(`Фото за ${monthsText(n)} сохранено.`);
+  await store.saveMonthPhoto(n, photo);
+  toast(`Фото за ${monthsText(n)} сохранено — оно и в календаре дневника, ${dayTitle(photo.date, { day: 'numeric', month: 'long' })}.`);
 }
 
 function monthSheet(n) {
@@ -2631,7 +2696,7 @@ function onHashChange() {
 // Название страницы для кнопки «Назад»; для правки карточки — нет (туда не возвращаемся)
 const PAGE_TITLES = { search: 'Поиск', today: 'Главная', day: 'День', k: 'Тренировки', g: 'Тренировки', pass: 'Паспорт', growth: 'Рост и вес', lib: 'Библиотека', weeks: 'Неделя Батончика', t: 'Советы', c: 'Каналы', d: 'Дневник', me: 'Настройки', social: 'Новое' };
 // Вложенные страницы со своим названием для «Назад»
-const SUB_TITLES = { 'pass/summary': 'Для ветеринара', 'pass/lost': 'Если потерялся', 'd/months': 'Как рос' };
+const SUB_TITLES = { 'pass/summary': 'Для ветеринара', 'pass/lost': 'Если потерялся', 'pass/months': 'Как рос' };
 // Какая вкладка внизу подсвечена: игры живут во вкладке «Тренировки», Каналы — в «Советах»
 const TAB_OF = { search: 'search', today: 'today', day: 'day', k: 'k', g: 'k', pass: 'pass', growth: 'pass', lib: 't', weeks: 'day', t: 't', c: 't', d: 'd', social: 'k' };
 
@@ -2657,12 +2722,12 @@ function render(force) {
   else if (r.page === 'me') html = renderMe();
   else if (r.page === 'edit') html = renderEditor(r);
   else if (r.page === 'day') html = renderDayPage();
-  else if (r.page === 'pass') html = r.id === 'summary' ? renderSummary() : r.id === 'lost' ? renderLost() : renderPassport();
+  else if (r.page === 'pass') html = r.id === 'summary' ? renderSummary() : r.id === 'lost' ? renderLost() : r.id === 'months' ? renderMonths() : renderPassport();
   else if (r.page === 'social') html = renderSocial();
   else if (r.page === 'growth') html = renderGrowth();
   else if (r.page === 'lib') html = renderLibrary(r);
   else if (r.page === 'weeks') html = renderWeeks();
-  else if (r.page === 'd') html = r.id === 'months' ? renderMonths() : r.id ? renderStoryPage(r.id) : renderDiary();
+  else if (r.page === 'd') html = r.id ? renderStoryPage(r.id) : renderDiary();
   else if (r.page === 'c') html = r.id ? renderNote(r.id) : renderNotesPage();
   else if (TABS[r.tab]) html = r.id ? renderCard(r.tab, r.id) : (r.tab === 't' ? renderTipsPage() : renderTrainingsPage());
   else html = renderHome();
@@ -2992,6 +3057,11 @@ const actions = {
     setTimeout(() => openViewer(ns.map((n) => all[n].data), Math.max(0, ns.indexOf(+el.dataset.n))), 0);
   },
   'month-replace': (el) => { closeSheet(); addMonthPhoto(+el.dataset.n); },
+  'month-day-view': async (el) => {
+    const n = +el.dataset.n;
+    const p = (S.monthPhotos.all && S.monthPhotos.all[n]) || await store.loadMonthPhoto(n).catch(() => null);
+    if (p && p.data) openViewer([p.data]);
+  },
   'month-remove': async (el) => {
     const n = +el.dataset.n;
     if (!confirm(`Убрать фото за ${monthsText(n)}?`)) return;
@@ -3000,7 +3070,10 @@ const actions = {
     const all = { ...(S.monthPhotos.all || {}) };
     delete all[n];
     S.monthPhotos.all = all;
-    S.monthPhotos.checked[n] = 'none';
+    delete S.monthPhotos.thumbs[n];
+    const dates = { ...(S.monthDates || {}) };
+    delete dates[n];
+    S.monthDates = dates;
     render();
   },
   'mark': (el) => {

@@ -32,7 +32,10 @@ function localStories() {
   }]));
 }
 
-function localStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onPet = () => {}, onPhoto = () => {}, onHealth = () => {}, onGrowth = () => {}, onReads = () => {}, onVet = () => {}, onWeeks = () => {}, onStories = () => {}, onLost = () => {}, onSocial = () => {}, onCare = () => {} }) {
+// Фото месяца: только даты — { 5: '2026-10-29' } (сами фото — по запросу)
+const localMonthDates = () => Object.fromEntries(Object.entries(read('bt.monthPhotos', {})).map(([n, p]) => [n, p.date || '']));
+
+function localStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onPet = () => {}, onPhoto = () => {}, onHealth = () => {}, onGrowth = () => {}, onReads = () => {}, onVet = () => {}, onWeeks = () => {}, onStories = () => {}, onLost = () => {}, onSocial = () => {}, onCare = () => {}, onMonths = () => {} }) {
   let day = null;
   const state = { mode: 'local', status: 'ready', user: { name: '' } };
   const mark = () => ({ uid: 'local', name: '', at: new Date().toISOString() });
@@ -60,6 +63,7 @@ function localStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onPet 
       onLost(read('bt.lost', null));
       onSocial(cleanSocial(read('bt.social', {})));
       onCare(cleanCare(read('bt.care', {})));
+      onMonths(localMonthDates());
     },
     setDay(key) {
       day = key;
@@ -147,6 +151,7 @@ function localStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onPet 
       const all = read('bt.monthPhotos', {});
       if (photo) all[n] = { data: photo.data, date: photo.date }; else delete all[n];
       write('bt.monthPhotos', all);
+      onMonths(localMonthDates());
     },
     // «Неделя Батончика»: ответы за воскресенье day
     saveWeek(day, w) {
@@ -210,7 +215,7 @@ function localStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onPet 
 
 // ---------- Firebase ----------
 
-function firebaseStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onError, onPet = () => {}, onPhoto = () => {}, onHealth = () => {}, onGrowth = () => {}, onReads = () => {}, onVet = () => {}, onWeeks = () => {}, onStories = () => {}, onLost = () => {}, onSocial = () => {}, onCare = () => {} }, firebaseConfig) {
+function firebaseStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onError, onPet = () => {}, onPhoto = () => {}, onHealth = () => {}, onGrowth = () => {}, onReads = () => {}, onVet = () => {}, onWeeks = () => {}, onStories = () => {}, onLost = () => {}, onSocial = () => {}, onCare = () => {}, onMonths = () => {} }, firebaseConfig) {
   const state = { mode: 'firebase', status: 'loading', user: null, message: '' };
   let fb = null; // модули SDK
   let db = null;
@@ -288,6 +293,11 @@ function firebaseStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onE
     }, fail));
     unsubs.push(onSnapshot(doc(db, 'pet', 'photo'), (snap) => { onPhoto(snap.exists() ? String(snap.data().data || '') : ''); }, fail));
     unsubs.push(onSnapshot(doc(db, 'pet', 'lost'), (snap) => { onLost(snap.exists() ? plainLost(snap.data()) : null); }, fail));
+    // Даты фото месяца — лёгкий документ: по нему календарь и главная знают, где есть фото, не загружая сами фото
+    unsubs.push(onSnapshot(doc(db, 'pet', 'months'), (snap) => {
+      const dates = (snap.exists() && snap.data().dates) || {};
+      onMonths(Object.fromEntries(Object.entries(dates).filter(([n, d]) => /^[1-9][0-9]?$/.test(n) && DAY_RE.test(d))));
+    }, fail));
     unsubs.push(onSnapshot(collection(db, 'social'), (snap) => {
       const out = {};
       snap.forEach((d) => { out[d.id] = d.data(); });
@@ -390,6 +400,7 @@ function firebaseStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onE
           onLost(null);
           onSocial({});
           onCare({});
+          onMonths({});
           return emit({ status: 'signed-out', user: null });
         }
         checkAccess(user);
@@ -645,14 +656,17 @@ function firebaseStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onE
       const snap = await getDoc(doc(db, 'monthPhotos', String(n)));
       return snap.exists() ? { data: String(snap.data().data || ''), date: snap.data().date || '' } : null;
     },
+    // Фото и его дата в pet/months — одним пакетом: либо всё вместе, либо ничего
     async saveMonthPhoto(n, photo) {
       if (!ready()) return;
-      const { doc, setDoc, deleteDoc, serverTimestamp } = fb.fs;
+      const { doc, writeBatch, serverTimestamp, deleteField } = fb.fs;
       const ref = doc(db, 'monthPhotos', String(n));
-      try {
-        if (photo) await setDoc(ref, { data: photo.data, date: photo.date, updatedAt: serverTimestamp(), updatedBy: state.user.name });
-        else await deleteDoc(ref);
-      } catch (err) { fail(err); }
+      const meta = { updatedAt: serverTimestamp(), updatedBy: state.user.name };
+      const batch = writeBatch(db);
+      if (photo) batch.set(ref, { data: photo.data, date: photo.date, ...meta });
+      else batch.delete(ref);
+      batch.set(doc(db, 'pet', 'months'), { dates: { [String(n)]: photo ? photo.date : deleteField() }, ...meta }, { merge: true });
+      try { await batch.commit(); } catch (err) { fail(err); }
     },
 
     // ---------- Заметки о днях (дневник) ----------
