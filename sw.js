@@ -5,7 +5,7 @@ const VERSION = 'batonchik-v30';
 const SDK = 'https://www.gstatic.com/firebasejs/12.19.0/';
 const APP_FILES = [
   './', 'index.html', 'manifest.webmanifest', 'css/style.css',
-  'js/app.js', 'js/md.js', 'js/store.js', 'js/editor.js', 'js/diary.js', 'js/ideas.js', 'js/notes.js', 'js/passport.js', 'js/photo.js', 'js/growth.js', 'js/library.js', 'js/search.js', 'js/firebase-config.js',
+  'js/app.js', 'js/md.js', 'js/store.js', 'js/editor.js', 'js/diary.js', 'js/ideas.js', 'js/notes.js', 'js/passport.js', 'js/photo.js', 'js/growth.js', 'js/library.js', 'js/search.js', 'js/care.js', 'js/firebase-config.js',
   'fonts/manrope-cyrillic.woff2', 'fonts/manrope-latin.woff2',
   'content/komandy.md', 'content/igry.md', 'content/sovety.md', 'content/rasporyadok.md', 'content/kanaly.md', 'content/biblioteka.md',
   'content/priuchenie-k-kletke-14-dney.pdf',

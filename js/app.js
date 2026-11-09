@@ -5,7 +5,7 @@ import { createStore } from './store.js';
 import { cardToForm, emptyForm, formToMd, editorHtml, editorAction, setPath, formatText } from './editor.js';
 import {
   EVENT_TYPES, ADD_TYPES, SUBS, TRAIN, dayKey, fmtTime, fmtDate, addDays, moscowDate, dayStats, eventRow, todaySummary, nightLine, nightFor, plural, mondayOf, dayTitle,
-  rhythmHtml, weekStatsHtml, daySummaryLine, trainsLine, MONTHS_SHORT,
+  rhythmHtml, weekStatsHtml, daySummaryLine, trainsLine, MONTHS_SHORT, toiletRhythm, toiletHint, fmtDuration,
 } from './diary.js';
 import { HEALTH_KINDS, NEXT_OPTIONS, nextDate, suggestNext, dueText, ageText, upcoming, doneRecords, googleCalendarUrl, icsText, healthRowHtml, daysBetween, ageShort, ageMonths, hasTime, TIME_RE } from './passport.js';
 import { pickPhotos, compressPhoto } from './photo.js';
@@ -14,6 +14,10 @@ import { buildIndex, resultsHtml } from './search.js';
 import { RUBRICS, parseLibrary, quizOrder, readKey, readCount, readBtn, metaChips, articleBody, foldList, agesHtml, dictHtml, booksHtml, quizHtml, introHtml } from './library.js';
 import { pickIdeas } from './ideas.js';
 import { parseNotes, notesListHtml, noteHtml, noteMatches, countText } from './notes.js';
+import {
+  CARE_ITEMS, EVERY_OPTIONS, everyText, careState, daysAgoText, careDue, REACTIONS, SOCIAL_GROUPS, SOCIAL_ITEMS, isOwnSocial, socialState, addReaction,
+  socialSummary, reactionLine, LOST_STEPS, hasLostPhones, lostLines, lostText, lostPosterHtml, lostPosterImage,
+} from './care.js';
 
 // Настройки Firebase читаем отдельно: если в файле ошибка, приложение всё равно откроется
 let firebaseConfig = null;
@@ -99,6 +103,11 @@ const S = {
   storyPhotos: {},    // фото к заметкам, загруженные по требованию: { день: { key, list: [data:image…], loading, failedAt } }
   cal: { month: '', sel: '', memShift: 0 }, // календарь в Дневнике: месяц ГГГГ-ММ, выбранный день, «другое воспоминание»
   months: {},         // журнал по месяцам для календаря: { 'ГГГГ-ММ': { events, loading, loadedAt } }
+  lost: null,         // «Если потерялся»: { name1, phone1, name2, phone2, signs, note }
+  social: {},         // социализация: { пункт: { title (у своих), log: [{ d, r }] } }
+  socialFilter: 'all', // 'all' | 'new' — ещё не встречали | 'again' — повторить
+  care: {},           // уход: { nails: { log: [дни], every } … }
+  monthPhotos: { all: null, loading: false, checked: {}, prev: {} }, // фото месяца: все (для «Как рос»), есть ли за месяц, фото прошлого месяца
 };
 
 const DOG = () => (S.pet && S.pet.name) || 'Батончик';
@@ -166,6 +175,9 @@ const store = createStore({
   onVet(v) { S.vet = v; render(); },
   onWeeks(list) { S.weeks = list || []; render(); },
   onStories(map) { S.stories = map || {}; render(); },
+  onLost(v) { S.lost = v; render(); },
+  onSocial(map) { S.social = map || {}; render(); },
+  onCare(map) { S.care = map || {}; render(); },
   onError(message) { toast(message); },
 }, firebaseConfig);
 
@@ -842,6 +854,12 @@ function agoText(at, now = new Date()) {
 // Время «назад» на главной обновляется само, без перерисовки экрана
 function updateSince() {
   document.querySelectorAll('[data-since]').forEach((el) => { el.textContent = agoText(new Date(el.dataset.since)); });
+  // «Пора в туалет»: подсказка меняется, когда подошло обычное время
+  document.querySelectorAll('[data-due]').forEach((el) => {
+    const due = new Date(el.dataset.due) <= new Date();
+    el.classList.toggle('due', due);
+    el.textContent = due ? el.dataset.now : el.dataset.wait;
+  });
 }
 
 // Журнал на главной: значки записи, сколько прошло с последнего туалета и сколько еды отсыпали за сегодня
@@ -855,6 +873,8 @@ function homeJournalHtml() {
   const food = !meals.length ? 'ещё не кормили'
     : grams ? `${grams} г${noGrams ? ` + ${noGrams} без веса` : ''}` : `${meals.length} ${plural(meals.length, 'раз', 'раза', 'раз')}`;
   const home = toilet && toilet.type === 'accident';
+  const hint = toiletHint(toiletRhythm(all), all, S.day);
+  const hintDue = hint && hint.due <= new Date();
   const cell = (label, value) => `<div class="since-cell"><span>${label}</span><strong${value.at ? ` data-since="${new Date(value.at).toISOString()}"` : ''}>${value.text}</strong></div>`;
   return `<section class="card">
     <div class="card-head"><h2>Журнал</h2><a class="text-link" href="#/day">Весь день ›</a></div>
@@ -864,17 +884,19 @@ function homeJournalHtml() {
         toilet ? { at: toilet.at, text: agoText(new Date(toilet.at)) } : { text: 'ещё не было' })}
       ${cell(`${EVENT_TYPES.meal.icon} Еда сегодня`, { text: food })}
     </div>
+    ${hint ? `<p class="toilet-hint${hintDue ? ' due' : ''}" data-due="${hint.due.toISOString()}" data-wait="${escapeHtml(hint.wait)}" data-now="${escapeHtml(hint.now)}">${escapeHtml(hintDue ? hint.now : hint.wait)}</p>` : ''}
   </section>`;
 }
 
 // Здоровье на главной: только если до события неделя или меньше (или оно просрочено)
 function homeHealthHtml() {
   const soon = upcoming(S.health).filter((r) => daysBetween(S.day, r.date) <= 7).slice(0, 3);
-  if (!soon.length) return '';
+  const care = careDue(S.care, S.day).slice(0, 3);
+  if (!soon.length && !care.length) return '';
   return `<section class="health-strip">
     <div class="health-symbol" aria-hidden="true">🩺</div>
-    <div><p class="eyebrow">Здоровье</p><strong>Скоро</strong></div>
-    <ul class="health-list">${soon.map((r) => healthRowHtml(r, S.day)).join('')}</ul>
+    <div><p class="eyebrow">Здоровье и уход</p><strong>${soon.length ? 'Скоро' : 'Пора'}</strong></div>
+    <ul class="health-list">${soon.map((r) => healthRowHtml(r, S.day)).join('')}${care.map(({ item, st }) => careRowHtml(item, st)).join('')}</ul>
     <a class="btn small wide" href="#/pass">Открыть паспорт ›</a></section>`;
 }
 
@@ -883,6 +905,7 @@ function renderHome() {
     ${statusBanner()}
     ${heroHtml()}
     ${weekCardHtml()}
+    ${monthCardHtml()}
     ${homeJournalHtml()}
     ${factHtml()}
     ${homeTrainingsHtml()}
@@ -928,6 +951,7 @@ function renderTrainingsPage() {
     ${t.error ? '<p class="empty">Не удалось загрузить план. Проверьте интернет.</p>' : ''}
     ${ideasHtml()}
     ${daySectionsHtml()}
+    ${socialEntryHtml()}
     <h2 class="lib-title">Все тренировки и игры</h2>
     ${catalogBody('k')}
     ${catalogBody('g', { showTitle: true })}`;
@@ -1301,7 +1325,7 @@ function catalogBody(tab, { showTitle = false } = {}) {
       return `<li><a class="card-link" href="#/${tab}/${c.id}">
         <span class="card-name">${inline(c.name)}</span>
         ${c.subtitle ? `<span class="card-sub">${inline(c.subtitle)}</span>` : ''}
-        ${prog}
+        ${prog}${tab === 'k' ? placesMini(tab, c) : ''}
         <svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg></a></li>`;
     }).join('');
     const intro = g.intro.length
@@ -1348,6 +1372,7 @@ function renderCard(tab, id) {
     ${card.subtitle ? `<p class="card-sub big">${inline(card.subtitle)}</p>` : ''}
     ${tab === 'k' ? `<p class="reps-line">🎯 Повторов в день: <b>${card.reps || MIN_REPS}</b>${canWrite() ? ` <a href="#/edit/k/${card.id}">изменить</a>` : ''}</p>` : ''}
     ${prog}
+    ${tab === 'k' ? placesHtml(tab, card) : ''}
     ${card.steps.length || card.hasResult ? statusBanner() : ''}
     ${body}`;
 }
@@ -1750,7 +1775,8 @@ function renderDiary() {
   if (!canWrite()) return `${head}${statusBanner()}<p class="muted">Дневник появится после входа.</p>`;
   setTimeout(() => loadMonth(S.cal.month), 0);
   if (sel && monthOf(sel) !== S.cal.month) setTimeout(() => loadMonth(monthOf(sel)), 0);
-  return `${head}${featureHtml()}${calendarHtml(S.cal.month)}${sel ? selectedDayHtml(sel) : ''}`;
+  return `${head}${featureHtml()}${calendarHtml(S.cal.month)}${sel ? selectedDayHtml(sel) : ''}
+    ${linkCard('#/d/months', '📸', 'Как рос', 'фото месяца: по одному на каждый месяц')}`;
 }
 
 // Заметка о дне: заголовок, текст, фото (до шести) и «день, который хочется помнить»
@@ -1862,10 +1888,19 @@ function renderPassport() {
       </div>
       ${!S.pet && canWrite() ? '<button class="btn wide id-fill" data-action="pet-edit">Заполнить паспорт</button>' : ''}
     </section>
+    <div class="link-cards">
+      ${linkCard('#/pass/summary', '🩺', 'Для ветеринара', 'сводка на одной странице')}
+      ${linkCard('#/pass/lost', '📣', 'Если потерялся', 'объявление и что делать', 'alarm')}
+    </div>
     <section class="card">
       <div class="card-head"><h2>Напоминания</h2></div>
       ${next.length ? `<ul class="health-list">${next.map((r) => healthRowHtml(r, S.day)).join('')}</ul>`
         : '<p class="muted">Запланированных событий нет. Нажмите «+», чтобы добавить прививку, обработку от клещей, глистогонное или визит к врачу.</p>'}
+    </section>
+    <section class="card">
+      <div class="card-head"><h2>Уход</h2></div>
+      <ul class="health-list care-list">${CARE_ITEMS.map((item) => careRowHtml(item, careState(item, S.care[item.id], S.day))).join('')}</ul>
+      <p class="muted small care-note">«Сегодня» — отметить, что сделали. Нажмите на строку, чтобы выбрать другой день или как часто напоминать.</p>
     </section>
     <section class="card">
       <div class="card-head"><h2>История</h2></div>
@@ -1891,6 +1926,424 @@ function petSheet() {
     store.savePet({ name: v('name'), breed: v('breed'), birth: /^\d{4}-\d\d-\d\d$/.test(v('birth')) ? v('birth') : '', sex: v('sex'), chip: v('chip'), mdr1: v('mdr1'), weight: (S.pet && S.pet.weight) || '' });
     toast('Паспорт сохранён.');
   });
+}
+
+// ---------- Ссылка-карточка (паспорт, дневник, тренировки) ----------
+
+function linkCard(href, icon, title, sub, cls = '') {
+  return `<a class="link-card${cls ? ` ${cls}` : ''}" href="${href}"><span class="link-icon" aria-hidden="true">${icon}</span>
+    <span><strong>${title}</strong><small>${sub}</small></span><span class="link-arrow" aria-hidden="true">›</span></a>`;
+}
+
+// ---------- Уход ----------
+
+function careRowHtml(item, st) {
+  const today = st.last === S.day;
+  const when = `${daysAgoText(st.days)}${st.due && st.last ? ' · пора' : ''}`;
+  return `<li class="care-li"><button class="health-row care-row${st.due && st.last ? ' overdue' : ''}" data-action="care-open" data-id="${item.id}">
+      <span class="health-icon" aria-hidden="true">${item.icon}</span>
+      <span class="health-main"><strong>${item.name}</strong><span>${escapeHtml(when)}</span></span></button>
+    ${canWrite() ? `<button class="care-done${today ? ' on' : ''}" data-action="care-done" data-id="${item.id}" aria-label="${item.name}: ${today ? 'отмечено сегодня' : 'сделали сегодня'}"${today ? ' disabled' : ''}>${today ? '✓' : 'Сегодня'}</button>` : ''}</li>`;
+}
+
+const careItem = (id) => CARE_ITEMS.find((x) => x.id === id);
+function careSave(id, patch) {
+  const item = careItem(id);
+  const st = careState(item, S.care[id], S.day);
+  const data = { log: patch.log || st.log, every: patch.every != null ? patch.every : st.every };
+  S.care = { ...S.care, [id]: data };
+  store.saveCare(id, data);
+  return data;
+}
+function careMark(id, day) {
+  const item = careItem(id);
+  const before = careState(item, S.care[id], S.day).log;
+  if (before.includes(day)) return;
+  careSave(id, { log: [...before, day].sort() });
+  render();
+  toast(`Отмечено: ${item.name.toLowerCase()} — ${day === S.day ? 'сегодня' : dayTitle(day, { day: 'numeric', month: 'long' })}.`, {
+    label: 'Отменить', onClick: () => { careSave(id, { log: before }); render(); },
+  });
+}
+function careSheet(id) {
+  const item = careItem(id);
+  if (!item) return;
+  const st = careState(item, S.care[id], S.day);
+  const recent = st.log.slice(-6).reverse();
+  const every = EVERY_OPTIONS.includes(st.every) ? EVERY_OPTIONS : [...EVERY_OPTIONS, st.every].sort((a, b) => a - b);
+  openSheet(`<form class="form"><h2>${item.icon} ${item.name}</h2>
+    <p class="muted">${escapeHtml(cap(item.what))}.${item.card ? ` <a href="#/k/${item.card}" data-action="sheet-close-link">Как приучить ›</a>` : ''}</p>
+    <label>Напоминать<select name="every">${every.map((n) => `<option value="${n}"${n === st.every ? ' selected' : ''}>${everyText(n)}</option>`).join('')}</select></label>
+    ${canWrite() ? `<label>Когда сделали <input type="date" name="date" value="${S.day}" max="${S.day}" required></label>` : ''}
+    ${recent.length ? `<p class="care-hist"><b>Последние разы:</b> ${recent.map((d) => escapeHtml(dayTitle(d, { day: 'numeric', month: 'short' }))).join(', ')}</p>` : '<p class="muted">Пока ни разу не отмечали.</p>'}
+    ${recent.length && canWrite() ? `<button type="button" class="btn small" data-action="care-undo" data-id="${id}">Убрать отметку за ${escapeHtml(dayTitle(recent[0], { day: 'numeric', month: 'long' }))}</button>` : ''}
+    <div class="form-actions"><button type="button" class="btn" data-action="sheet-close">Закрыть</button>${canWrite() ? '<button class="btn primary">Отметить</button>' : ''}</div>
+  </form>`, (fd) => {
+    const day = String(fd.get('date') || '');
+    if (!/^\d{4}-\d\d-\d\d$/.test(day) || day > S.day) return toast('Выберите день не позже сегодняшнего.');
+    careMark(id, day);
+  });
+  const sel = sheet.querySelector('select[name=every]');
+  if (sel) sel.addEventListener('change', () => {
+    if (!canWrite()) return;
+    careSave(id, { every: +sel.value });
+    render();
+    toast(`${item.name}: ${everyText(+sel.value)}.`);
+  });
+}
+
+// ---------- Где команда получается ----------
+
+const PLACES = [['home', '🏠', 'Дома'], ['yard', '🌳', 'Во дворе'], ['street', '🏙️', 'Среди отвлечений']];
+const placeId = (tab, card, p) => `lvl_${tab}_${card.id}_${p}`;
+function placesHtml(tab, card) {
+  return `<section class="places">
+    <p class="places-title">Где уже получается</p>
+    <div class="places-row">${PLACES.map(([p, icon, label]) => {
+      const on = !!getMark(placeId(tab, card, p));
+      return `<button class="place-btn${on ? ' on' : ''}" data-action="mark" data-id="${placeId(tab, card, p)}" aria-pressed="${on}"${canWrite() ? '' : ' disabled'}>
+        <span aria-hidden="true">${on ? '✓' : icon}</span>${label}</button>`;
+    }).join('')}</div>
+    <p class="muted small">Отмечайте, когда получается 8 раз из 10. Сначала дома, потом во дворе, потом там, где люди, собаки и запахи.</p>
+  </section>`;
+}
+function placesMini(tab, card) {
+  const on = PLACES.filter(([p]) => getMark(placeId(tab, card, p)));
+  return on.length ? `<span class="card-places" aria-label="Получается: ${on.map(([, , l]) => l.toLowerCase()).join(', ')}">${on.map(([, icon]) => icon).join(' ')}</span>` : '';
+}
+
+// ---------- Социализация ----------
+
+function socialEntryHtml() {
+  const sum = socialSummary(S.social);
+  return `<h2 class="lib-title">Социализация</h2>
+    ${linkCard('#/social', '🧭', `Новое для ${escapeHtml(DOG() === 'Батончик' ? 'Батончика' : DOG())}`,
+      `встретили ${sum.met} из ${sum.total}${sum.again ? ` · повторить ${sum.again}` : ''}`)}`;
+}
+
+const socialName = (id) => (isOwnSocial(id) ? (S.social[id] && S.social[id].title) || 'Своё' : (SOCIAL_ITEMS.find((x) => x.id === id) || {}).name || id);
+
+function renderSocial() {
+  const back = `<a class="back" href="#/k">${BACK_SVG}Тренировки</a>`;
+  const sum = socialSummary(S.social);
+  const f = S.socialFilter;
+  const own = Object.keys(S.social).filter(isOwnSocial).map((id) => ({ id, name: socialName(id), card: '' }));
+  const groups = [...SOCIAL_GROUPS, ...(own.length ? [{ title: 'Своё', items: own }] : [])];
+  const fits = (st) => f === 'all' || (f === 'new' ? !st.count : st.again);
+  const body = groups.map((g) => {
+    const rows = g.items.map((item) => ({ item, st: socialState(S.social[item.id]) })).filter(({ st }) => fits(st));
+    if (!rows.length) return '';
+    return `<section class="group"><h2>${escapeHtml(g.title)}</h2><ul class="social-list">${rows.map(({ item, st }) => `<li>
+      <button class="social-row${st.again ? ' again' : ''}" data-action="social-open" data-id="${item.id}">
+        <span class="social-main"><strong>${escapeHtml(item.name)}</strong><span>${escapeHtml(reactionLine(st))}</span></span>
+        <span class="social-mark" aria-hidden="true">${st.last ? REACTIONS[st.last.r].icon : '＋'}</span></button></li>`).join('')}</ul></section>`;
+  }).join('');
+  const chip = (key, label, n) => `<button class="filter-chip${f === key ? ' on' : ''}" data-action="social-filter" data-f="${key}" aria-pressed="${f === key}">${label} <b>${n}</b></button>`;
+  return `${back}${pageHead({ eyebrow: 'Социализация', title: `Новое для ${escapeHtml(DOG() === 'Батончик' ? 'Батончика' : DOG())}`,
+    sub: 'Отмечайте, что он уже встретил и как отреагировал. Важно не количество, а чтобы встречи были спокойными.', plus: canWrite() ? { action: 'social-add', label: 'Своё новое' } : null })}
+    ${statusBanner()}
+    <details class="intro social-how"><summary>Как знакомить с новым</summary><div class="prose">
+      <p>Держите расстояние, на котором он может спокойно есть и смотреть. Посмотрел на новое — «Да!» и кусочек, как в игре «Посмотри на это».</p>
+      <p>Насторожился — отойдите подальше, дайте понюхать землю, похвалите. Испугался — уходите спокойно, без утешений и рывков поводка. В следующий раз начните издалека.</p>
+      <p>Не тяните ближе и не держите, «чтобы привык». Пусть он сам решает, подойти или нет.</p>
+      <p>Примерно с 6 до 14 месяцев у многих собак бывает второй период страхов: знакомое вдруг пугает. Это нормально — вернитесь к расстоянию, где ему спокойно.</p>
+      <p><a href="#/k/posmotri-na-eto">«Посмотри на это» ›</a></p></div></details>
+    <div class="filter-chips">${chip('all', 'Все', sum.total)}${chip('new', 'Ещё не было', sum.total - sum.met)}${chip('again', 'Повторить', sum.again)}</div>
+    ${body || `<p class="empty">${f === 'again' ? 'Повторять пока нечего: последние встречи прошли спокойно.' : 'Всё из списка уже встречали. Добавьте своё через «+».'}</p>`}`;
+}
+
+function socialSheet(id) {
+  const item = SOCIAL_ITEMS.find((x) => x.id === id) || { id, name: socialName(id), card: '' };
+  const st = socialState(S.social[id]);
+  const todayMark = st.log.find((x) => x.d === S.day);
+  const hist = st.log.slice(-8).reverse();
+  openSheet(`<div class="form"><h2>${escapeHtml(item.name)}</h2>
+    ${canWrite() ? `<p class="muted">Как он отреагировал${todayMark ? ' сегодня (можно изменить)' : ' сегодня'}?</p>
+    <div class="react-row">${Object.entries(REACTIONS).map(([r, x]) => `<button type="button" class="react-btn${todayMark && todayMark.r === r ? ' on' : ''}" data-action="social-react" data-id="${id}" data-r="${r}">
+      <span aria-hidden="true">${x.icon}</span>${x.label}</button>`).join('')}</div>` : ''}
+    ${st.again ? '<p class="hint-box">В прошлый раз было непросто. Начните издалека: там, где он может есть и смотреть, и уходите, пока ему ещё спокойно.</p>' : ''}
+    ${item.card ? `<p><a href="#/k/${item.card}" data-action="sheet-close-link">Тренировка по теме ›</a></p>` : ''}
+    ${hist.length ? `<ul class="react-hist">${hist.map((x) => `<li><span>${escapeHtml(dayTitle(x.d, { day: 'numeric', month: 'long' }))}</span><span>${REACTIONS[x.r].icon} ${REACTIONS[x.r].label}</span></li>`).join('')}</ul>` : ''}
+    ${todayMark && canWrite() ? `<button type="button" class="btn small" data-action="social-unreact" data-id="${id}">Убрать сегодняшнюю отметку</button>` : ''}
+    ${isOwnSocial(id) && canWrite() ? `<button type="button" class="btn small danger" data-action="social-del" data-id="${id}">Удалить пункт</button>` : ''}
+    <div class="form-actions"><button type="button" class="btn" data-action="sheet-close">Закрыть</button></div></div>`, null);
+}
+
+function socialSave(id, log) {
+  const title = isOwnSocial(id) ? socialName(id) : '';
+  const data = { title, log };
+  S.social = { ...S.social, [id]: data };
+  store.saveSocial(id, data);
+}
+
+function socialAddSheet() {
+  openSheet(`<form class="form"><h2>Своё новое</h2>
+    <label>Что он встретил<input name="title" maxlength="80" required placeholder="Например: человек в костюме Деда Мороза"></label>
+    <div class="form-actions"><button type="button" class="btn" data-action="sheet-close">Отмена</button><button class="btn primary">Добавить</button></div>
+  </form>`, (fd) => {
+    const title = String(fd.get('title') || '').trim().slice(0, 80);
+    if (!title) return;
+    const id = `my-${rid()}`;
+    S.social = { ...S.social, [id]: { title, log: [] } };
+    store.saveSocial(id, { title, log: [] });
+    S.socialFilter = 'all';
+    toast(`Добавлено: ${title}. Нажмите на пункт, чтобы отметить встречу.`);
+  });
+}
+
+// ---------- Сводка для ветеринара ----------
+
+function summaryData() {
+  const pet = S.pet || {};
+  const age = pet.birth ? ageText(pet.birth, S.day) : '';
+  const weights = series(S.growth, 'weight');
+  const lastW = weights[weights.length - 1];
+  const done = doneRecords(S.health);
+  const lastOf = (kind) => done.find((r) => r.kind === kind);
+  const fmt = (d) => dayTitle(d, { day: 'numeric', month: 'long', year: 'numeric' });
+  const all = [...S.recent, ...S.events];
+  const days = Array.from({ length: 7 }, (_, i) => addDays(S.day, -i));
+  const stats = days.map((d) => dayStats(d, all, {}, 0)).filter((st) => st.list.length);
+  const avg = (f) => (stats.length ? stats.reduce((a, st) => a + f(st), 0) / stats.length : 0);
+  const round1 = (x) => (Math.round(x * 10) / 10).toLocaleString('ru-RU');
+  const nights = stats.map((st) => st.night && st.night.ms).filter(Boolean);
+  const fed = stats.filter((st) => st.mealGrams);
+  const notes = all.filter((e) => days.includes(e.day) && e.text && e.type !== 'train')
+    .sort((a, b) => new Date(b.at) - new Date(a.at)).slice(0, 12)
+    .map((e) => `${dayTitle(e.day, { day: 'numeric', month: 'short' })}, ${fmtTime(new Date(e.at))} — ${EVENT_TYPES[e.type] ? EVENT_TYPES[e.type].label.toLowerCase() : e.type}: ${e.text}`);
+  const care = CARE_ITEMS.map((item) => ({ item, st: careState(item, S.care[item.id], S.day) })).filter(({ st }) => st.last)
+    .map(({ item, st }) => `${item.name}: ${daysAgoText(st.days)}`);
+  return {
+    title: `${DOG()}${pet.breed ? ` — ${pet.breed.toLowerCase()}` : ''}`,
+    about: [
+      [pet.sex, age && `возраст ${age}`, pet.birth && `дата рождения ${fmt(pet.birth)}`].filter(Boolean).join(', '),
+      pet.chip && `Чип: ${pet.chip}`,
+      pet.mdr1 && `MDR1: ${pet.mdr1}`,
+      lastW && `Вес: ${fmtNum(lastW.value)} кг (${dayTitle(lastW.date, { day: 'numeric', month: 'long' })})${weights.length > 1 ? `, ${deltaText(weights, 'кг')}` : ''}`,
+    ].filter(Boolean),
+    health: [
+      ...done.filter((r) => r.kind === 'vaccine').slice(0, 4).map((r) => `${r.title}: ${fmt(r.date)}`),
+      ...['ticks', 'worms', 'pill'].map(lastOf).filter(Boolean).map((r) => `${r.title}: ${fmt(r.date)}`),
+      ...((lastOf('vet') && [`Последний визит к врачу: ${fmt(lastOf('vet').date)}${lastOf('vet').note ? ` — ${lastOf('vet').note}` : ''}`]) || []),
+    ],
+    soon: upcoming(S.health).slice(0, 4).map((r) => `${r.title}: ${dayTitle(r.date, { day: 'numeric', month: 'long' })}`),
+    week: stats.length ? [
+      `Записано дней: ${stats.length} из 7`,
+      `Туалет на улице: в среднем ${round1(avg((st) => st.toilet))} в день`,
+      `Дома: ${stats.reduce((a, st) => a + st.accident, 0)} за неделю`,
+      `Стул: в среднем ${round1(avg((st) => st.toiletPoo + st.accidentPoo))} в день`,
+      fed.length && `Еда: в среднем ${Math.round(fed.reduce((a, st) => a + st.mealGrams, 0) / fed.length)} г в день`,
+      nights.length && `Ночной сон: в среднем ${fmtDuration(nights.reduce((a, b) => a + b, 0) / nights.length)}`,
+    ].filter(Boolean) : [],
+    notes,
+    care,
+  };
+}
+
+function summaryText(d) {
+  const block = (title, list) => (list.length ? `\n${title}\n${list.map((x) => `• ${x}`).join('\n')}` : '');
+  return `${d.title}\n${d.about.join('\n')}${block('Здоровье', d.health)}${block('Запланировано', d.soon)}${block('Последние 7 дней (по журналу)', d.week)}${block('Заметки из журнала', d.notes)}${block('Уход', d.care)}\n`;
+}
+
+function renderSummary() {
+  const d = summaryData();
+  const list = (title, items, empty) => `<section class="sum-block"><h2>${title}</h2>${items.length
+    ? `<ul>${items.map((x) => `<li>${escapeHtml(x)}</li>`).join('')}</ul>` : `<p class="muted">${empty}</p>`}</section>`;
+  return `<a class="back" href="#/pass">${BACK_SVG}Паспорт</a>
+    ${pageHead({ eyebrow: dayTitle(S.day, { day: 'numeric', month: 'long', year: 'numeric' }), title: 'Для ветеринара', sub: 'Всё главное на одной странице. Покажите с телефона или отправьте заранее.' })}
+    <div class="sum-actions">
+      <button class="btn primary" data-action="summary-share">Отправить</button>
+      <button class="btn" data-action="summary-print">Сохранить PDF</button>
+    </div>
+    <article class="card summary">
+      <h2 class="sum-title">${escapeHtml(d.title)}</h2>
+      <ul class="sum-about">${d.about.map((x) => `<li>${escapeHtml(x)}</li>`).join('')}</ul>
+      ${list('Здоровье', d.health, 'Прививок и обработок в паспорте пока нет.')}
+      ${d.soon.length ? list('Запланировано', d.soon, '') : ''}
+      ${list('Последние 7 дней', d.week, 'В журнале за неделю нет записей.')}
+      ${d.notes.length ? list('Заметки из журнала', d.notes, '') : ''}
+      ${d.care.length ? list('Уход', d.care, '') : ''}
+    </article>
+    <p class="muted small">Вопросы к врачу удобно записать заранее заметкой в журнале — они попадут сюда.</p>`;
+}
+
+// ---------- Если потерялся ----------
+
+function lostData() {
+  const pet = S.pet || {};
+  return lostLines(pet, S.lost, pet.birth ? ageText(pet.birth, S.day) : '');
+}
+
+function renderLost() {
+  const lines = lostData();
+  const ready = hasLostPhones(S.lost);
+  return `<a class="back" href="#/pass">${BACK_SVG}Паспорт</a>
+    ${pageHead({ eyebrow: DOG(), title: 'Если потерялся', sub: 'Объявление собрано заранее: в панике некогда искать фото и телефоны.' })}
+    ${statusBanner()}
+    ${!ready ? `<div class="banner warn"><span>Добавьте телефоны — без них объявление не поможет.</span>${canWrite() ? '<button class="btn small primary" data-action="lost-edit">Добавить</button>' : ''}</div>` : ''}
+    ${lostPosterHtml(lines, S.photo)}
+    <div class="lost-actions">
+      <button class="btn primary wide" data-action="lost-share"${ready ? '' : ' disabled'}>Отправить объявление картинкой</button>
+      <button class="btn wide" data-action="lost-text"${ready ? '' : ' disabled'}>Отправить текстом</button>
+      ${canWrite() ? '<button class="btn wide" data-action="lost-edit">Изменить телефоны и приметы</button>' : ''}
+    </div>
+    <section class="card">
+      <div class="card-head"><h2>Что делать сразу</h2></div>
+      <ol class="lost-steps">${LOST_STEPS.map((x) => `<li>${escapeHtml(x)}</li>`).join('')}</ol>
+    </section>
+    <p class="muted small">Фото для объявления — из паспорта. Лучше, если на нём он виден целиком, сбоку и при дневном свете.</p>`;
+}
+
+function lostSheet() {
+  const l = S.lost || {};
+  const v = (k) => escapeHtml(l[k] || '');
+  openSheet(`<form class="form"><h2>Объявление</h2>
+    <fieldset><legend>Первый телефон</legend>
+      <label>Имя<input name="name1" maxlength="40" value="${v('name1')}" placeholder="Катя"></label>
+      <label>Телефон<input name="phone1" type="tel" maxlength="30" value="${v('phone1')}" placeholder="+7 900 000-00-00"></label></fieldset>
+    <fieldset><legend>Второй телефон</legend>
+      <label>Имя<input name="name2" maxlength="40" value="${v('name2')}"></label>
+      <label>Телефон<input name="phone2" type="tel" maxlength="30" value="${v('phone2')}"></label></fieldset>
+    <label>Приметы<textarea name="signs" rows="3" maxlength="400" placeholder="Окрас, пятна, цвет ошейника или шлейки, хвост">${v('signs')}</textarea></label>
+    <label>Приписка<textarea name="note" rows="2" maxlength="300" placeholder="Например: «Боится, не ловите — позвоните нам» или «Вознаграждение»">${v('note')}</textarea></label>
+    <p class="muted small">Телефоны хранятся в вашей базе и видны только вам двоим — пока вы сами не отправите объявление.</p>
+    <div class="form-actions"><button type="button" class="btn" data-action="sheet-close">Отмена</button><button class="btn primary">Сохранить</button></div>
+  </form>`, (fd) => {
+    const x = Object.fromEntries(['name1', 'phone1', 'name2', 'phone2', 'signs', 'note'].map((k) => [k, String(fd.get(k) || '').trim()]));
+    S.lost = x;
+    store.saveLost(x);
+    toast('Объявление сохранено.');
+  });
+}
+
+async function shareFile(blob, name, text) {
+  const file = new File([blob], name, { type: blob.type });
+  if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    try { await navigator.share({ files: [file], text }); } catch (err) { if (err && err.name !== 'AbortError') toast('Не получилось отправить. Попробуйте ещё раз.'); }
+    return;
+  }
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
+  toast('Картинка сохранена в загрузки.');
+}
+
+async function shareText(text, title) {
+  if (navigator.share) {
+    try { await navigator.share({ title, text }); return; } catch (err) { if (err && err.name === 'AbortError') return; }
+  }
+  try { await navigator.clipboard.writeText(text); toast('Текст скопирован — вставьте его в сообщение.'); } catch { toast('Не получилось скопировать текст.'); }
+}
+
+// ---------- Фото месяца ----------
+
+const monthsText = (n) => (n < 12 ? `${n} ${plural(n, 'месяц', 'месяца', 'месяцев')}`
+  : `${Math.floor(n / 12)} ${plural(Math.floor(n / 12), 'год', 'года', 'лет')}${n % 12 ? ` и ${n % 12} ${plural(n % 12, 'месяц', 'месяца', 'месяцев')}` : ''}`);
+
+// День, когда исполняется n месяцев: то же число, а если его в месяце нет — последний день месяца
+function monthBirthday(birth, n) {
+  const [y, m, d] = birth.split('-').map(Number);
+  const total = (m - 1) + n;
+  const yy = y + Math.floor(total / 12);
+  const mm = total % 12;
+  const last = new Date(Date.UTC(yy, mm + 1, 0)).getUTCDate();
+  return `${yy}-${String(mm + 1).padStart(2, '0')}-${String(Math.min(d, last)).padStart(2, '0')}`;
+}
+
+// Сегодня — «месячный день рождения» (или прошло не больше трёх дней): { n, date }
+function monthNow() {
+  const birth = S.pet && S.pet.birth;
+  if (!/^\d{4}-\d\d-\d\d$/.test(birth || '')) return null;
+  const n = ageMonths(birth, S.day);
+  if (!n) return null;
+  const date = monthBirthday(birth, n);
+  const since = daysBetween(date, S.day);
+  return since >= 0 && since <= 3 ? { n, date } : null;
+}
+
+async function checkMonthPhoto(n) {
+  const mp = S.monthPhotos;
+  try {
+    const [cur, prev] = await Promise.all([store.loadMonthPhoto(n), n > 1 ? store.loadMonthPhoto(n - 1) : null]);
+    mp.checked[n] = cur ? 'have' : 'none';
+    if (prev && prev.data) mp.prev[n] = prev.data;
+  } catch { mp.checked[n] = 'none'; }
+  render();
+}
+
+function monthCardHtml() {
+  if (!canWrite()) return '';
+  const m = monthNow();
+  if (!m) return '';
+  const state = S.monthPhotos.checked[m.n];
+  if (!state) { S.monthPhotos.checked[m.n] = 'loading'; setTimeout(() => checkMonthPhoto(m.n), 0); return ''; }
+  if (state !== 'none') return '';
+  const prev = S.monthPhotos.prev[m.n];
+  return `<section class="card month-card">
+    <p class="eyebrow">Фото месяца</p>
+    <h2>${escapeHtml(DOG())}: ${monthsText(m.n)}</h2>
+    <p class="muted">Сфотографируйте его там же и в той же позе, что в прошлый раз. Из таких фото в дневнике сложится лента — видно, как он рос.</p>
+    ${prev ? `<figure class="month-prev"><img src="${escapeHtml(prev)}" alt=""><figcaption>${monthsText(m.n - 1)}</figcaption></figure>` : ''}
+    <button class="btn primary wide" data-action="month-add" data-n="${m.n}">Добавить фото</button>
+    <a class="text-link" href="#/d/months">Все месяцы ›</a>
+  </section>`;
+}
+
+async function loadAllMonthPhotos() {
+  const mp = S.monthPhotos;
+  if (mp.loading) return;
+  mp.loading = true;
+  try { mp.all = await store.loadMonthPhotos(); } catch { mp.all = mp.all || {}; }
+  mp.loading = false;
+  render();
+}
+
+function renderMonths() {
+  const back = `<a class="back" href="#/d">${BACK_SVG}Дневник</a>`;
+  const head = pageHead({ eyebrow: DOG(), title: 'Как рос', sub: 'По фото на каждый месяц. Снимайте в одном месте и в одной позе — так разница виднее.' });
+  const birth = S.pet && S.pet.birth;
+  if (!canWrite()) return `${back}${head}${statusBanner()}<p class="muted">Фото появятся после входа.</p>`;
+  if (!/^\d{4}-\d\d-\d\d$/.test(birth || '')) return `${back}${head}<p class="muted">Укажите дату рождения в <a href="#/pass">паспорте</a> — тогда здесь появятся месяцы.</p>`;
+  const mp = S.monthPhotos;
+  if (!mp.all) { setTimeout(loadAllMonthPhotos, 0); return `${back}${head}<p class="muted">Загружаем фото…</p>`; }
+  const age = ageMonths(birth, S.day) || 0;
+  const max = Math.max(age, ...Object.keys(mp.all).map(Number));
+  const tiles = [];
+  for (let n = 1; n <= max; n++) {
+    const p = mp.all[n];
+    const label = `<span class="month-label">${monthsText(n)}${p && p.date ? `<small>${escapeHtml(dayTitle(p.date, { day: 'numeric', month: 'short' }))}</small>` : ''}</span>`;
+    tiles.push(p ? `<button class="month-tile" data-action="month-open" data-n="${n}"><img src="${escapeHtml(p.data)}" alt="${escapeHtml(monthsText(n))}">${label}</button>`
+      : `<button class="month-tile empty" data-action="month-add" data-n="${n}"><span class="month-plus" aria-hidden="true">+</span>${label}</button>`);
+  }
+  return `${back}${head}${tiles.length ? `<div class="month-grid">${tiles.join('')}</div>` : '<p class="muted">Первый месяц ещё не исполнился.</p>'}`;
+}
+
+async function addMonthPhoto(n) {
+  const data = await choosePhoto();
+  if (!data) return;
+  const photo = { data, date: S.day };
+  await store.saveMonthPhoto(n, photo);
+  const mp = S.monthPhotos;
+  if (mp.all) mp.all = { ...mp.all, [n]: photo };
+  mp.checked[n] = 'have';
+  render();
+  toast(`Фото за ${monthsText(n)} сохранено.`);
+}
+
+function monthSheet(n) {
+  const p = S.monthPhotos.all && S.monthPhotos.all[n];
+  if (!p) return;
+  openSheet(`<div class="form"><h2>${monthsText(n)}</h2>
+    <button type="button" class="month-big" data-action="month-view" data-n="${n}"><img src="${escapeHtml(p.data)}" alt=""></button>
+    ${p.date ? `<p class="muted">Снято ${escapeHtml(dayTitle(p.date, { day: 'numeric', month: 'long', year: 'numeric' }))}</p>` : ''}
+    <button type="button" class="btn wide" data-action="month-replace" data-n="${n}">Заменить фото</button>
+    <button type="button" class="btn wide danger" data-action="month-remove" data-n="${n}">Убрать фото</button>
+    <div class="form-actions"><button type="button" class="btn" data-action="sheet-close">Закрыть</button></div></div>`, null);
 }
 
 // ---------- Рост и вес ----------
@@ -2176,14 +2629,17 @@ function onHashChange() {
 }
 
 // Название страницы для кнопки «Назад»; для правки карточки — нет (туда не возвращаемся)
-const PAGE_TITLES = { search: 'Поиск', today: 'Главная', day: 'День', k: 'Тренировки', g: 'Тренировки', pass: 'Паспорт', growth: 'Рост и вес', lib: 'Библиотека', weeks: 'Неделя Батончика', t: 'Советы', c: 'Каналы', d: 'Дневник', me: 'Настройки' };
+const PAGE_TITLES = { search: 'Поиск', today: 'Главная', day: 'День', k: 'Тренировки', g: 'Тренировки', pass: 'Паспорт', growth: 'Рост и вес', lib: 'Библиотека', weeks: 'Неделя Батончика', t: 'Советы', c: 'Каналы', d: 'Дневник', me: 'Настройки', social: 'Новое' };
+// Вложенные страницы со своим названием для «Назад»
+const SUB_TITLES = { 'pass/summary': 'Для ветеринара', 'pass/lost': 'Если потерялся', 'd/months': 'Как рос' };
 // Какая вкладка внизу подсвечена: игры живут во вкладке «Тренировки», Каналы — в «Советах»
-const TAB_OF = { search: 'search', today: 'today', day: 'day', k: 'k', g: 'k', pass: 'pass', growth: 'pass', lib: 't', weeks: 'day', t: 't', c: 't', d: 'd' };
+const TAB_OF = { search: 'search', today: 'today', day: 'day', k: 'k', g: 'k', pass: 'pass', growth: 'pass', lib: 't', weeks: 'day', t: 't', c: 't', d: 'd', social: 'k' };
 
 function pageTitle(hash) {
   const parts = hash.replace(/^#\/?/, '').split('/').filter(Boolean);
   if (!parts.length) return 'Главная';
   if (parts[0] === 'edit') return null;
+  if (SUB_TITLES[`${parts[0]}/${parts[1]}`]) return SUB_TITLES[`${parts[0]}/${parts[1]}`];
   if (parts[1] && (TABS[parts[0]] || parts[0] === 'c')) return 'Назад';
   return PAGE_TITLES[parts[0]] || null;
 }
@@ -2201,11 +2657,12 @@ function render(force) {
   else if (r.page === 'me') html = renderMe();
   else if (r.page === 'edit') html = renderEditor(r);
   else if (r.page === 'day') html = renderDayPage();
-  else if (r.page === 'pass') html = renderPassport();
+  else if (r.page === 'pass') html = r.id === 'summary' ? renderSummary() : r.id === 'lost' ? renderLost() : renderPassport();
+  else if (r.page === 'social') html = renderSocial();
   else if (r.page === 'growth') html = renderGrowth();
   else if (r.page === 'lib') html = renderLibrary(r);
   else if (r.page === 'weeks') html = renderWeeks();
-  else if (r.page === 'd') html = r.id ? renderStoryPage(r.id) : renderDiary();
+  else if (r.page === 'd') html = r.id === 'months' ? renderMonths() : r.id ? renderStoryPage(r.id) : renderDiary();
   else if (r.page === 'c') html = r.id ? renderNote(r.id) : renderNotesPage();
   else if (TABS[r.tab]) html = r.id ? renderCard(r.tab, r.id) : (r.tab === 't' ? renderTipsPage() : renderTrainingsPage());
   else html = renderHome();
@@ -2473,6 +2930,79 @@ function move(list, id, dir) {
 // ---------- Нажатия ----------
 
 const actions = {
+  // Уход
+  'care-open': (el) => careSheet(el.dataset.id),
+  'care-done': (el) => careMark(el.dataset.id, S.day),
+  'care-undo': (el) => {
+    const item = careItem(el.dataset.id);
+    const st = careState(item, S.care[item.id], S.day);
+    careSave(item.id, { log: st.log.slice(0, -1) });
+    closeSheet();
+    render();
+    toast('Отметка убрана.');
+  },
+  // Социализация
+  'social-filter': (el) => { S.socialFilter = el.dataset.f; render(); },
+  'social-open': (el) => socialSheet(el.dataset.id),
+  'social-add': () => socialAddSheet(),
+  'social-react': (el) => {
+    const id = el.dataset.id;
+    const st = socialState(S.social[id]);
+    socialSave(id, addReaction(st.log, S.day, el.dataset.r));
+    closeSheet();
+    render();
+    toast(`${socialName(id)}: ${REACTIONS[el.dataset.r].label.toLowerCase()}.`);
+  },
+  'social-unreact': (el) => {
+    const id = el.dataset.id;
+    socialSave(id, socialState(S.social[id]).log.filter((x) => x.d !== S.day));
+    closeSheet();
+    render();
+  },
+  'social-del': (el) => {
+    const id = el.dataset.id;
+    if (!confirm(`Удалить «${socialName(id)}» вместе с отметками?`)) return;
+    const rest = { ...S.social };
+    delete rest[id];
+    S.social = rest;
+    store.saveSocial(id, null);
+    closeSheet();
+    render();
+  },
+  // Сводка для ветеринара
+  'summary-share': () => shareText(summaryText(summaryData()), `${DOG()} — для ветеринара`),
+  'summary-print': () => window.print(),
+  // Если потерялся
+  'lost-edit': () => lostSheet(),
+  'lost-text': () => shareText(lostText(lostData()), 'Потерялась собака'),
+  'lost-share': async () => {
+    toast('Готовим картинку…');
+    const lines = lostData();
+    const blob = await lostPosterImage(lines, S.photo);
+    hideToast();
+    if (blob) shareFile(blob, 'poteryalas-sobaka.jpg', lostText(lines));
+  },
+  // Фото месяца
+  'month-add': (el) => addMonthPhoto(+el.dataset.n),
+  'month-open': (el) => monthSheet(+el.dataset.n),
+  'month-view': (el) => {
+    const all = S.monthPhotos.all || {};
+    const ns = Object.keys(all).map(Number).sort((a, b) => a - b);
+    closeSheet();
+    setTimeout(() => openViewer(ns.map((n) => all[n].data), Math.max(0, ns.indexOf(+el.dataset.n))), 0);
+  },
+  'month-replace': (el) => { closeSheet(); addMonthPhoto(+el.dataset.n); },
+  'month-remove': async (el) => {
+    const n = +el.dataset.n;
+    if (!confirm(`Убрать фото за ${monthsText(n)}?`)) return;
+    closeSheet();
+    await store.saveMonthPhoto(n, null);
+    const all = { ...(S.monthPhotos.all || {}) };
+    delete all[n];
+    S.monthPhotos.all = all;
+    S.monthPhotos.checked[n] = 'none';
+    render();
+  },
   'mark': (el) => {
     const id = el.dataset.id;
     const on = !!getMark(id);
