@@ -72,3 +72,38 @@ self.addEventListener('fetch', (event) => {
   if (url.origin === self.location.origin) event.respondWith(networkFirst(request));
   else if (request.url.startsWith(SDK)) event.respondWith(cacheFirst(request));
 });
+
+// ---------- Уведомления ----------
+// Их присылает сервер «Батончика» через Firebase Cloud Messaging. Показываем сами: заголовок, текст,
+// а по нажатию открываем приложение на нужном экране (data.link, например «#/pass»)
+self.addEventListener('push', (event) => {
+  let payload = {};
+  try { payload = event.data ? event.data.json() : {}; } catch { payload = { data: { body: event.data ? event.data.text() : '' } }; }
+  const n = payload.notification || {};
+  const d = payload.data || {};
+  const tag = d.tag || n.tag || '';
+  event.waitUntil(self.registration.showNotification(n.title || d.title || 'Батончик', {
+    body: n.body || d.body || '',
+    icon: 'icons/icon-192.png',
+    badge: 'icons/icon-192.png',
+    tag: tag || undefined,
+    renotify: !!tag,
+    data: { link: d.link || '' },
+  }));
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const link = (event.notification.data && event.notification.data.link) || '';
+  const url = new URL(link, self.registration.scope).href;
+  event.waitUntil((async () => {
+    const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    const open = windows.find((w) => w.url.startsWith(self.registration.scope));
+    if (open) {
+      await open.focus();
+      if (link && 'navigate' in open) await open.navigate(url).catch(() => {});
+      return;
+    }
+    await self.clients.openWindow(url);
+  })());
+});

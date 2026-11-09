@@ -1297,3 +1297,10 @@ a.story-date { color: inherit; text-decoration: none; }
 .tr-tile .tr-tap { width: 48px; height: 48px; }
 .tr-tile .tr-plus { font-size: 16px; }
 .tr-tile .tr-tap svg { width: 26px; height: 26px; }
+
+/* ---------- Настройки: уведомления ---------- */
+.push-list { display: grid; gap: 8px; margin: 10px 0 14px; }
+.push-opt { display: flex; align-items: flex-start; gap: 12px; padding: 12px; border-radius: 14px; background: var(--surface-2); cursor: pointer; }
+.push-opt input { flex: none; width: 22px; height: 22px; margin: 1px 0 0; accent-color: var(--accent); }
+.push-opt strong { display: block; font-size: 16px; font-weight: 600; }
+.push-opt small { display: block; margin-top: 2px; color: var(--muted); font-size: 13.5px; line-height: 1.4; }

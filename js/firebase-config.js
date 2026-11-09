@@ -10,4 +10,7 @@ export const firebaseConfig = {
   storageBucket: 'batonchik-vepritskiy.firebasestorage.app',
   messagingSenderId: '38227995827',
   appId: '1:38227995827:web:833b814ac8d462f92914c6',
+  // Ключ для уведомлений (Firebase → Настройки проекта → Cloud Messaging → Web Push certificates).
+  // Он тоже не секретный. Пока пусто — уведомления не включаются (README, раздел «Уведомления»)
+  vapidKey: '',
 };

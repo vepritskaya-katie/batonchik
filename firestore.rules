@@ -280,7 +280,26 @@ service cloud.firestore {
       allow delete: if isAllowed();
     }
 
-    // Всё остальное закрыто
+    // Уведомления: телефоны, где их включили. Документ — на один телефон: токен Firebase Cloud Messaging,
+    // чей телефон и какие уведомления на нём включены. Каждый видит и меняет только свои телефоны.
+    // Читает их и присылает уведомления сервер (functions) — ему правила не нужны
+    function validPush(d) {
+      return d.keys().hasOnly(['token', 'uid', 'name', 'platform', 'prefs', 'updatedAt'])
+        && d.token is string && d.token.size() > 0 && d.token.size() <= 4096
+        && d.uid == request.auth.uid
+        && d.name is string && d.name.size() <= 40
+        && d.platform in ['ios', 'android', 'other']
+        && d.prefs is map && d.prefs.keys().hasOnly(['toilet', 'care', 'week'])
+        && d.prefs.toilet is bool && d.prefs.care is bool && d.prefs.week is bool
+        && d.updatedAt == request.time;
+    }
+    match /pushTokens/{id} {
+      allow read, delete: if isAllowed() && resource.data.uid == request.auth.uid;
+      allow create: if isAllowed() && id.matches('^[0-9a-f]{40}$') && validPush(request.resource.data);
+      allow update: if isAllowed() && resource.data.uid == request.auth.uid && validPush(request.resource.data);
+    }
+
+    // Всё остальное закрыто (в том числе push/state — что сервер уже прислал)
     match /{document=**} {
       allow read, write: if false;
     }

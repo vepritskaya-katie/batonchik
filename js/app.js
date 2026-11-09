@@ -147,7 +147,7 @@ const store = createStore({
   onState(st) {
     const becameReady = st.status === 'ready' && S.store.status !== 'ready';
     S.store = st;
-    if (becameReady) loadRecent();
+    if (becameReady) { loadRecent(); setTimeout(pushRefresh, 3000); }
     if (st.status !== 'ready') S.edit.trainings = false;
     renderHeader();
     render();
@@ -2593,6 +2593,115 @@ function catalogMd(tab) {
     .filter(Boolean).join('\n\n')).join('\n\n') + '\n';
 }
 
+// ---------- Уведомления ----------
+// Каждый телефон включает свои: токен телефона и галочки — в pushTokens/{id}, копия — в памяти телефона (bt.push).
+// Присылает их сервер (папка functions), раз в 5 минут.
+
+const PUSH_TYPES = [
+  ['toilet', '🌳', '«Пора в туалет»', 'когда по журналу подошло обычное время; ночью и после «Легли» — нет'],
+  ['care', '🩺', 'Уход и здоровье', 'в 10:00 — что пора по уходу, прививки и обработки сегодня и завтра; врач — за 2 часа'],
+  ['week', '🐾', '«Неделя Батончика»', 'в воскресенье в 19:00, если неделю ещё не заполнили'],
+];
+const readPush = () => { try { return JSON.parse(localStorage.getItem('bt.push') || 'null'); } catch { return null; } };
+const writePush = (v) => { try { if (v) localStorage.setItem('bt.push', JSON.stringify(v)); else localStorage.removeItem('bt.push'); } catch { /* память недоступна */ } };
+const isIOS = () => /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
+function pushSupport() {
+  if (S.store.mode !== 'firebase') return 'local';
+  if (!(firebaseConfig && firebaseConfig.vapidKey)) return 'nokey';
+  if (isIOS() && !isApp()) return 'install';
+  if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) return 'unsupported';
+  if (Notification.permission === 'denied') return 'denied';
+  return 'ok';
+}
+const pushOn = () => pushSupport() === 'ok' && Notification.permission === 'granted' && !!readPush();
+
+async function tokenId(token) {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(token));
+  return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('').slice(0, 40);
+}
+const pushPrefsFromPage = () => Object.fromEntries(PUSH_TYPES.map(([k]) => {
+  const box = view.querySelector(`[data-push="${k}"]`);
+  return [k, !!(box && box.checked)];
+}));
+
+function pushPanelHtml() {
+  const sup = pushSupport();
+  if (sup === 'local') return '';
+  const saved = readPush();
+  const on = pushOn();
+  const prefs = (saved && saved.prefs) || S.pushDraft || { toilet: true, care: true, week: true };
+  let body;
+  if (!canWrite()) body = '<p class="muted">Уведомления можно включить после входа.</p>';
+  else if (sup === 'nokey') body = '<p class="muted">Уведомления ещё не настроены: не хватает ключа в настройках приложения (README, раздел «Уведомления»).</p>';
+  else if (sup === 'install') {
+    body = `<p>На iPhone уведомления приходят, только если «Батончик» открыт с экрана «Домой».</p>
+      <p class="muted">Откройте сайт в Safari → «Поделиться» → «На экран „Домой“». Потом запустите «Батончик» с экрана «Домой» и включите уведомления здесь.</p>`;
+  } else if (sup === 'unsupported') body = '<p class="muted">Этот браузер не умеет показывать уведомления. На Android откройте приложение в Chrome.</p>';
+  else if (sup === 'denied') {
+    body = `<p>Уведомления для «Батончика» запрещены в настройках телефона.</p>
+      <p class="muted">${isIOS() ? 'Настройки iPhone → Уведомления → Батончик → «Допуск уведомлений».' : 'Chrome → ⋮ → Настройки → Настройки сайтов → Уведомления → разрешите для этого сайта.'} Потом вернитесь сюда.</p>`;
+  } else {
+    body = `<p class="muted">${on ? 'Включены на этом телефоне. Что присылать сюда:' : 'Отметьте, что присылать на этот телефон, и нажмите «Включить». На втором телефоне — свой выбор.'}</p>
+      <div class="push-list">${PUSH_TYPES.map(([k, icon, label, sub]) => `<label class="push-opt">
+        <input type="checkbox" data-push="${k}"${prefs[k] ? ' checked' : ''}>
+        <span><strong>${icon} ${label}</strong><small>${sub}</small></span></label>`).join('')}</div>
+      ${on ? `<div class="edit-actions"><button class="btn small" data-action="push-test">Прислать проверочное</button>
+        <button class="btn small danger" data-action="push-off">Выключить на этом телефоне</button></div>`
+        : '<button class="btn primary wide" data-action="push-on">Включить уведомления на этом телефоне</button>'}`;
+  }
+  return `<section class="section panel" id="push"><h2>Уведомления</h2>${body}</section>`;
+}
+
+async function pushEnable() {
+  const prefs = pushPrefsFromPage();
+  if (!Object.values(prefs).some(Boolean)) { toast('Отметьте хотя бы одно уведомление.'); return; }
+  // Разрешение спрашиваем сразу по нажатию: iPhone спрашивает только в ответ на нажатие
+  const perm = await Notification.requestPermission();
+  if (perm !== 'granted') {
+    render();
+    toast(perm === 'denied' ? 'Уведомления запрещены. Их можно разрешить в настройках телефона.' : 'Уведомления не включены.');
+    return;
+  }
+  toast('Включаем уведомления…');
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    const token = await store.pushToken(firebaseConfig.vapidKey, reg);
+    const id = await tokenId(token);
+    await store.pushSave(id, token, prefs);
+    writePush({ id, token, prefs });
+    render();
+    toast('Уведомления включены. Нажмите «Прислать проверочное», чтобы проверить.');
+  } catch (err) {
+    console.error(err);
+    toast('Не получилось включить уведомления. Проверьте интернет и попробуйте ещё раз.');
+  }
+}
+
+// Галочки на включённом телефоне сохраняются сразу
+async function pushPrefsChanged() {
+  const saved = readPush();
+  const prefs = pushPrefsFromPage();
+  // Ещё не включено — запоминаем выбор, чтобы он не сбросился, если экран перерисуется
+  if (!saved || !pushOn()) { S.pushDraft = prefs; return; }
+  writePush({ ...saved, prefs });
+  try { await store.pushSave(saved.id, saved.token, prefs); toast('Сохранено.'); } catch (err) { console.error(err); toast('Не получилось сохранить. Проверьте интернет.'); }
+}
+
+// При запуске: токен телефона иногда меняется — обновляем запись в базе
+async function pushRefresh() {
+  const saved = readPush();
+  if (!saved || !pushOn()) return;
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    const token = await store.pushToken(firebaseConfig.vapidKey, reg);
+    const id = await tokenId(token);
+    await store.pushSave(id, token, saved.prefs);
+    if (id !== saved.id) await store.pushRemove(saved.id, { unsubscribe: false });
+    writePush({ ...saved, id, token });
+  } catch (err) { console.error(err); }
+}
+
 // ---------- Настройки ----------
 
 function renderMe() {
@@ -2621,6 +2730,7 @@ function renderMe() {
   const opt = (v, label) => `<button class="seg${theme === v ? ' on' : ''}" data-action="theme" data-value="${v}" aria-pressed="${theme === v}">${label}</button>`;
   return `<h1>Настройки</h1>
     <section class="section panel"><h2>Аккаунт</h2>${account}</section>
+    ${pushPanelHtml()}
     <section class="section panel"><h2>Тема</h2><div class="segmented">${opt('auto', 'Как в телефоне')}${opt('light', 'Светлая')}${opt('dark', 'Тёмная')}</div></section>
     ${hiddenCards().length ? `<section class="section panel"><h2>Удалённые карточки</h2>
       <p class="muted">Эти карточки из файлов скрыты в приложении. Их можно вернуть.</p>
@@ -2975,6 +3085,25 @@ function move(list, id, dir) {
 // ---------- Нажатия ----------
 
 const actions = {
+  // Уведомления
+  'push-on': () => pushEnable(),
+  'push-off': async () => {
+    const saved = readPush();
+    writePush(null);
+    render();
+    if (saved) await store.pushRemove(saved.id, { unsubscribe: true });
+    toast('Уведомления на этом телефоне выключены.');
+  },
+  'push-test': async () => {
+    toast('Отправляем…');
+    try {
+      const r = await store.pushTest();
+      toast(r && r.devices ? 'Отправили. Уведомление придёт через несколько секунд.' : 'Этот телефон не найден на сервере. Выключите и снова включите уведомления.');
+    } catch (err) {
+      console.error(err);
+      toast('Не получилось: сервер уведомлений ещё не выложен или нет интернета.');
+    }
+  },
   // Уход
   'care-open': (el) => careSheet(el.dataset.id),
   'care-done': (el) => careMark(el.dataset.id, S.day),
@@ -3326,7 +3455,12 @@ const actions = {
   'toast-action': () => { const fn = toastAction; hideToast(); if (fn) fn(); },
   'sheet-close': () => closeSheet(),
   'sign-in': () => store.signIn(),
-  'sign-out': () => store.signOut(),
+  // Выходя, отписываем этот телефон от уведомлений: иначе они приходили бы и после выхода
+  'sign-out': async () => {
+    const saved = readPush();
+    if (saved) { writePush(null); await store.pushRemove(saved.id, { unsubscribe: true }).catch(() => {}); }
+    store.signOut();
+  },
   'theme': (el) => { setTheme(el.dataset.value); render(); },
   'reload': () => location.reload(),
 };
@@ -3348,6 +3482,7 @@ function onEditorInput(e) {
 }
 view.addEventListener('input', onEditorInput);
 view.addEventListener('change', onEditorInput);
+view.addEventListener('change', (e) => { if (e.target.matches('[data-push]')) pushPrefsChanged(); });
 view.addEventListener('submit', (e) => {
   if (!e.target.matches('[data-editor]')) return;
   e.preventDefault();

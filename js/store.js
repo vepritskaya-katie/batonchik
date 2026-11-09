@@ -210,6 +210,9 @@ function localStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onPet 
       onStories(localStories());
     },
     signIn() {}, signOut() {},
+    // Уведомления — только с общей базой (Firebase)
+    async pushToken() { throw new Error('local'); },
+    async pushSave() {}, async pushRemove() {}, async pushTest() { return null; },
   };
 }
 
@@ -222,6 +225,7 @@ function firebaseStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onE
   let auth = null;
   let day = null;
   let unsubs = [];
+  let fbApp = null;
   let dayUnsubs = [];
 
   const emit = (patch) => { Object.assign(state, patch); onState({ ...state }); };
@@ -364,7 +368,9 @@ function firebaseStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onE
           import(SDK + 'firebase-app.js'), import(SDK + 'firebase-auth.js'), import(SDK + 'firebase-firestore.js'),
         ]);
         fb = { app, auth: authMod, fs };
-        const firebaseApp = app.initializeApp(firebaseConfig);
+        const { vapidKey, ...appOptions } = firebaseConfig; // ключ уведомлений — не настройка приложения Firebase
+        const firebaseApp = app.initializeApp(appOptions);
+        fbApp = firebaseApp;
         db = fs.initializeFirestore(firebaseApp, {
           localCache: fs.persistentLocalCache({ tabManager: fs.persistentMultipleTabManager() }),
         });
@@ -667,6 +673,42 @@ function firebaseStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onE
       else batch.delete(ref);
       batch.set(doc(db, 'pet', 'months'), { dates: { [String(n)]: photo ? photo.date : deleteField() }, ...meta }, { merge: true });
       try { await batch.commit(); } catch (err) { fail(err); }
+    },
+
+    // ---------- Уведомления ----------
+    // Токен этого телефона для уведомлений (Firebase Cloud Messaging). sw — регистрация sw.js: он и показывает уведомления
+    async pushToken(vapidKey, sw) {
+      const stub = window.__BT_PUSH_STUB__; // только для автоматической проверки на компьютере разработчика
+      if (stub) return stub.token;
+      const m = await import(SDK + 'firebase-messaging.js');
+      if (!(await m.isSupported())) throw new Error('unsupported');
+      return m.getToken(m.getMessaging(fbApp), { vapidKey, serviceWorkerRegistration: sw });
+    },
+    // pushTokens/{id}: токен, чей телефон и какие уведомления на нём включены
+    async pushSave(id, token, prefs) {
+      if (!ready()) return;
+      const { doc, setDoc, serverTimestamp } = fb.fs;
+      const platform = /iPhone|iPad/.test(navigator.userAgent) ? 'ios' : /Android/.test(navigator.userAgent) ? 'android' : 'other';
+      await setDoc(doc(db, 'pushTokens', id), {
+        token, uid: state.user.uid, name: state.user.name, platform,
+        prefs: { toilet: !!prefs.toilet, care: !!prefs.care, week: !!prefs.week }, updatedAt: serverTimestamp(),
+      });
+    },
+    // unsubscribe — ещё и отписать телефон от уведомлений (при «Выключить»; при смене токена — нет)
+    async pushRemove(id, { unsubscribe = true } = {}) {
+      if (!ready() || !id) return;
+      const { doc, deleteDoc } = fb.fs;
+      await deleteDoc(doc(db, 'pushTokens', id)).catch(() => {});
+      if (!unsubscribe || window.__BT_PUSH_STUB__) return;
+      try { const m = await import(SDK + 'firebase-messaging.js'); await m.deleteToken(m.getMessaging(fbApp)); } catch { /* уже нет */ }
+    },
+    // «Прислать проверочное» — функция sendTestPush на сервере
+    async pushTest() {
+      const stub = window.__BT_PUSH_STUB__;
+      if (stub) return stub.test || { devices: 1, delivered: 1 };
+      const f = await import(SDK + 'firebase-functions.js');
+      const res = await f.httpsCallable(f.getFunctions(fbApp, 'europe-west1'), 'sendTestPush')();
+      return res.data;
     },
 
     // ---------- Заметки о днях (дневник) ----------

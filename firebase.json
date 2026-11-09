@@ -1,0 +1,13 @@
+{
+  "functions": [
+    {
+      "source": "functions",
+      "codebase": "default",
+      "runtime": "nodejs22",
+      "ignore": ["node_modules", ".git", "*.log", "test"],
+      "predeploy": [
+        "mkdir -p \"$RESOURCE_DIR/shared\" && cp js/diary.js js/care.js js/passport.js js/md.js \"$RESOURCE_DIR/shared/\""
+      ]
+    }
+  ]
+}
