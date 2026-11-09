@@ -52,7 +52,7 @@ export async function send(db, messaging, tokens, { title, body, link = '', tag 
   return res.successCount;
 }
 
-// «Пора в туалет»: ритм по журналу за 14 дней (раз в день), подсказка — по записям за последние сутки.
+// «Пора в туалет»: ритм по журналу за 14 дней (раз в день), подсказка — от прошлого туалета, по записям за последние сутки.
 // Присылаем один раз на каждую подсказку, если время подошло не больше часа назад и сейчас не ночь
 async function toiletMessage(db, state, now, patch) {
   const today = dayKey(now);
@@ -62,10 +62,10 @@ async function toiletMessage(db, state, now, patch) {
   if (!rhythm || state.rhythmDay !== today) {
     const snap = await db.collection('events').where('day', '>=', addDays(today, -14)).where('day', '<', today).get();
     rhythm = toiletRhythm(snap.docs.map((d) => event(d.data())));
-    patch.rhythm = { gap: rhythm.gap, afterMeal: rhythm.afterMeal };
+    patch.rhythm = { gap: rhythm.gap };
     patch.rhythmDay = today;
   }
-  if (!rhythm.gap && !rhythm.afterMeal) return null;
+  if (!rhythm.gap) return null;
   const snap = await db.collection('events').where('at', '>=', new Date(now.getTime() - 30 * H)).get();
   const recent = snap.docs.map((d) => event(d.data())).filter((e) => e.type !== 'train');
   if (!recent.length) return null;
