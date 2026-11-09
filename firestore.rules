@@ -66,7 +66,7 @@ service cloud.firestore {
       allow delete: if false;
     }
 
-    // Журнал: туалет, прогулки, кормления, подъём, отбой, заметки и подходы к тренировкам (train)
+    // Журнал: туалет, аварии, кормления, подъём, отбой, заметки и подходы к тренировкам (train); прогулки — только старые записи
     function validEvent(d) {
       return d.keys().hasOnly(['type', 'sub', 'text', 'at', 'day', 'uid', 'name', 'createdAt', 'card', 'grams'])
         && d.type in ['toilet', 'accident', 'walk', 'meal', 'wake', 'bed', 'note', 'train']
@@ -133,6 +133,20 @@ service cloud.firestore {
         || (doc == 'photo'
           && request.resource.data.keys().hasOnly(['data', 'updatedAt', 'updatedBy'])
           && request.resource.data.data is string && request.resource.data.data.size() <= 900000
+          && request.resource.data.updatedAt == request.time
+          && request.resource.data.updatedBy is string && request.resource.data.updatedBy.size() <= 40)
+        // «Если потерялся»: два контакта, приметы и приписка к объявлению
+        || (doc == 'lost'
+          && request.resource.data.keys().hasOnly(['name1', 'phone1', 'name2', 'phone2', 'signs', 'note', 'updatedAt', 'updatedBy'])
+          && str(request.resource.data, 'name1', 40) && str(request.resource.data, 'phone1', 30)
+          && str(request.resource.data, 'name2', 40) && str(request.resource.data, 'phone2', 30)
+          && str(request.resource.data, 'signs', 400) && str(request.resource.data, 'note', 300)
+          && request.resource.data.updatedAt == request.time
+          && request.resource.data.updatedBy is string && request.resource.data.updatedBy.size() <= 40)
+        // Даты фото месяца: { '5': '2026-10-29' } — чтобы календарь знал, где фото, не загружая их
+        || (doc == 'months'
+          && request.resource.data.keys().hasOnly(['dates', 'updatedAt', 'updatedBy'])
+          && request.resource.data.dates is map && request.resource.data.dates.size() <= 99
           && request.resource.data.updatedAt == request.time
           && request.resource.data.updatedBy is string && request.resource.data.updatedBy.size() <= 40));
       allow delete: if isAllowed() && doc == 'photo';
@@ -226,7 +240,66 @@ service cloud.firestore {
       allow delete: if isAllowed();
     }
 
-    // Всё остальное закрыто
+    // Социализация: что Батончик уже встретил и как отреагировал. Пункты из списка в приложении
+    // и свои (с названием title). log — последние отметки { d: день, r: реакция }
+    match /social/{id} {
+      allow read: if isAllowed();
+      allow create, update: if isAllowed()
+        && id.matches('^[a-z0-9-]{1,60}$')
+        && request.resource.data.keys().hasOnly(['title', 'log', 'updatedAt', 'updatedBy'])
+        && (!('title' in request.resource.data) || (request.resource.data.title is string && request.resource.data.title.size() <= 80))
+        && request.resource.data.log is list && request.resource.data.log.size() <= 60
+        && request.resource.data.updatedAt == request.time
+        && request.resource.data.updatedBy is string && request.resource.data.updatedBy.size() <= 40;
+      allow delete: if isAllowed();
+    }
+
+    // Уход: когти, зубы, вычёсывание, уши, купание. log — дни, когда делали; every — раз в сколько дней напоминать
+    match /care/{id} {
+      allow read: if isAllowed();
+      allow create, update: if isAllowed()
+        && id in ['nails', 'teeth', 'brush', 'ears', 'bath']
+        && request.resource.data.keys().hasOnly(['log', 'every', 'updatedAt', 'updatedBy'])
+        && request.resource.data.log is list && request.resource.data.log.size() <= 60
+        && request.resource.data.every is int && request.resource.data.every >= 0 && request.resource.data.every <= 120
+        && request.resource.data.updatedAt == request.time
+        && request.resource.data.updatedBy is string && request.resource.data.updatedBy.size() <= 40;
+      allow delete: if isAllowed();
+    }
+
+    // Фото месяца: одно фото на каждый месяц жизни (1, 2 … 99), сжатая картинка и дата снимка
+    match /monthPhotos/{n} {
+      allow read: if isAllowed();
+      allow create, update: if isAllowed()
+        && n.matches('^[1-9][0-9]?$')
+        && request.resource.data.keys().hasOnly(['data', 'date', 'updatedAt', 'updatedBy'])
+        && request.resource.data.data is string && request.resource.data.data.size() <= 900000
+        && request.resource.data.date is string && request.resource.data.date.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+        && request.resource.data.updatedAt == request.time
+        && request.resource.data.updatedBy is string && request.resource.data.updatedBy.size() <= 40;
+      allow delete: if isAllowed();
+    }
+
+    // Уведомления: телефоны, где их включили. Документ — на один телефон: токен Firebase Cloud Messaging,
+    // чей телефон и какие уведомления на нём включены. Каждый видит и меняет только свои телефоны.
+    // Читает их и присылает уведомления сервер (functions) — ему правила не нужны
+    function validPush(d) {
+      return d.keys().hasOnly(['token', 'uid', 'name', 'platform', 'prefs', 'updatedAt'])
+        && d.token is string && d.token.size() > 0 && d.token.size() <= 4096
+        && d.uid == request.auth.uid
+        && d.name is string && d.name.size() <= 40
+        && d.platform in ['ios', 'android', 'other']
+        && d.prefs is map && d.prefs.keys().hasOnly(['toilet', 'care', 'week'])
+        && d.prefs.toilet is bool && d.prefs.care is bool && d.prefs.week is bool
+        && d.updatedAt == request.time;
+    }
+    match /pushTokens/{id} {
+      allow read, delete: if isAllowed() && resource.data.uid == request.auth.uid;
+      allow create: if isAllowed() && id.matches('^[0-9a-f]{40}$') && validPush(request.resource.data);
+      allow update: if isAllowed() && resource.data.uid == request.auth.uid && validPush(request.resource.data);
+    }
+
+    // Всё остальное закрыто (в том числе push/state — что сервер уже прислал)
     match /{document=**} {
       allow read, write: if false;
     }

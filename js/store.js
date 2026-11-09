@@ -32,7 +32,10 @@ function localStories() {
   }]));
 }
 
-function localStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onPet = () => {}, onPhoto = () => {}, onHealth = () => {}, onGrowth = () => {}, onReads = () => {}, onVet = () => {}, onWeeks = () => {}, onStories = () => {} }) {
+// Фото месяца: только даты — { 5: '2026-10-29' } (сами фото — по запросу)
+const localMonthDates = () => Object.fromEntries(Object.entries(read('bt.monthPhotos', {})).map(([n, p]) => [n, p.date || '']));
+
+function localStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onPet = () => {}, onPhoto = () => {}, onHealth = () => {}, onGrowth = () => {}, onReads = () => {}, onVet = () => {}, onWeeks = () => {}, onStories = () => {}, onLost = () => {}, onSocial = () => {}, onCare = () => {}, onMonths = () => {} }) {
   let day = null;
   const state = { mode: 'local', status: 'ready', user: { name: '' } };
   const mark = () => ({ uid: 'local', name: '', at: new Date().toISOString() });
@@ -57,6 +60,10 @@ function localStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onPet 
       onVet(read('bt.vet', null));
       onWeeks(Object.entries(read('bt.weeks', {})).map(([id, w]) => ({ id, ...w })));
       onStories(localStories());
+      onLost(read('bt.lost', null));
+      onSocial(cleanSocial(read('bt.social', {})));
+      onCare(cleanCare(read('bt.care', {})));
+      onMonths(localMonthDates());
     },
     setDay(key) {
       day = key;
@@ -114,13 +121,38 @@ function localStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onPet 
       return {
         plan: read('bt.plan', null), marks: read('bt.marks', {}), days, events: read('bt.events', []), cards: read('bt.cards', {}),
         pet: read('bt.pet', null), health: read('bt.health', {}), stories: read('bt.stories', {}), growth: read('bt.growth', {}),
-        weeks: read('bt.weeks', {}),
+        weeks: read('bt.weeks', {}), lost: read('bt.lost', null), social: read('bt.social', {}), care: read('bt.care', {}),
       };
     },
     // Паспорт и дневник
     savePet(profile) { write('bt.pet', profile); onPet(profile); },
     savePhoto(data) { write('bt.photo', data || ''); onPhoto(data || ''); },
     saveVet(v) { write('bt.vet', v); onVet(v); },
+    // «Если потерялся»: телефоны и приметы для объявления
+    saveLost(v) { const x = plainLost(v); write('bt.lost', x); onLost(x); },
+    // Социализация: { title (только у своих пунктов), log: [{ d: день, r: реакция }] }; null — удалить
+    saveSocial(id, item) {
+      const all = read('bt.social', {});
+      if (item) all[id] = { ...(item.title ? { title: item.title } : {}), log: item.log || [] }; else delete all[id];
+      write('bt.social', all);
+      onSocial(cleanSocial(all));
+    },
+    // Уход: { log: [дни], every: раз в сколько дней напоминать }
+    saveCare(id, item) {
+      const all = read('bt.care', {});
+      all[id] = { log: item.log || [], every: item.every || 0 };
+      write('bt.care', all);
+      onCare(cleanCare(all));
+    },
+    // Фото месяца: { 6: { data, date } }
+    async loadMonthPhotos() { return read('bt.monthPhotos', {}); },
+    async loadMonthPhoto(n) { return read('bt.monthPhotos', {})[n] || null; },
+    async saveMonthPhoto(n, photo) {
+      const all = read('bt.monthPhotos', {});
+      if (photo) all[n] = { data: photo.data, date: photo.date }; else delete all[n];
+      write('bt.monthPhotos', all);
+      onMonths(localMonthDates());
+    },
     // «Неделя Батончика»: ответы за воскресенье day
     saveWeek(day, w) {
       const all = read('bt.weeks', {});
@@ -178,18 +210,22 @@ function localStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onPet 
       onStories(localStories());
     },
     signIn() {}, signOut() {},
+    // Уведомления — только с общей базой (Firebase)
+    async pushToken() { throw new Error('local'); },
+    async pushSave() {}, async pushRemove() {}, async pushTest() { return null; },
   };
 }
 
 // ---------- Firebase ----------
 
-function firebaseStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onError, onPet = () => {}, onPhoto = () => {}, onHealth = () => {}, onGrowth = () => {}, onReads = () => {}, onVet = () => {}, onWeeks = () => {}, onStories = () => {} }, firebaseConfig) {
+function firebaseStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onError, onPet = () => {}, onPhoto = () => {}, onHealth = () => {}, onGrowth = () => {}, onReads = () => {}, onVet = () => {}, onWeeks = () => {}, onStories = () => {}, onLost = () => {}, onSocial = () => {}, onCare = () => {}, onMonths = () => {} }, firebaseConfig) {
   const state = { mode: 'firebase', status: 'loading', user: null, message: '' };
   let fb = null; // модули SDK
   let db = null;
   let auth = null;
   let day = null;
   let unsubs = [];
+  let fbApp = null;
   let dayUnsubs = [];
 
   const emit = (patch) => { Object.assign(state, patch); onState({ ...state }); };
@@ -260,6 +296,22 @@ function firebaseStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onE
       onVet(v && Object.fromEntries(VET_FIELDS.map((k) => [k, String(v[k] || '')])));
     }, fail));
     unsubs.push(onSnapshot(doc(db, 'pet', 'photo'), (snap) => { onPhoto(snap.exists() ? String(snap.data().data || '') : ''); }, fail));
+    unsubs.push(onSnapshot(doc(db, 'pet', 'lost'), (snap) => { onLost(snap.exists() ? plainLost(snap.data()) : null); }, fail));
+    // Даты фото месяца — лёгкий документ: по нему календарь знает, где есть фото, не загружая сами фото
+    unsubs.push(onSnapshot(doc(db, 'pet', 'months'), (snap) => {
+      const dates = (snap.exists() && snap.data().dates) || {};
+      onMonths(Object.fromEntries(Object.entries(dates).filter(([n, d]) => /^[1-9][0-9]?$/.test(n) && DAY_RE.test(d))));
+    }, fail));
+    unsubs.push(onSnapshot(collection(db, 'social'), (snap) => {
+      const out = {};
+      snap.forEach((d) => { out[d.id] = d.data(); });
+      onSocial(cleanSocial(out));
+    }, fail));
+    unsubs.push(onSnapshot(collection(db, 'care'), (snap) => {
+      const out = {};
+      snap.forEach((d) => { out[d.id] = d.data(); });
+      onCare(cleanCare(out));
+    }, fail));
     unsubs.push(onSnapshot(collection(db, 'health'), (snap) => {
       onHealth(snap.docs.map((d) => { const v = d.data(); return { id: d.id, title: v.title, kind: v.kind, date: v.date, time: v.time || '', done: !!v.done, note: v.note || '', updatedBy: v.updatedBy || '' }; }));
     }, fail));
@@ -316,7 +368,9 @@ function firebaseStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onE
           import(SDK + 'firebase-app.js'), import(SDK + 'firebase-auth.js'), import(SDK + 'firebase-firestore.js'),
         ]);
         fb = { app, auth: authMod, fs };
-        const firebaseApp = app.initializeApp(firebaseConfig);
+        const { vapidKey, ...appOptions } = firebaseConfig; // ключ уведомлений — не настройка приложения Firebase
+        const firebaseApp = app.initializeApp(appOptions);
+        fbApp = firebaseApp;
         db = fs.initializeFirestore(firebaseApp, {
           localCache: fs.persistentLocalCache({ tabManager: fs.persistentMultipleTabManager() }),
         });
@@ -349,6 +403,10 @@ function firebaseStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onE
           onVet(null);
           onWeeks([]);
           onStories({});
+          onLost(null);
+          onSocial({});
+          onCare({});
+          onMonths({});
           return emit({ status: 'signed-out', user: null });
         }
         checkAccess(user);
@@ -489,7 +547,7 @@ function firebaseStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onE
         plan: plan.exists() ? plain(plan.data()) : null,
         marks: await all('marks'), days: await all('days'), events: await all('events'), cards: await all('cards'),
         pet: await all('pet'), health: await all('health'), stories: await all('stories'), growth: await all('growth'),
-        weeks: await all('weeks'),
+        weeks: await all('weeks'), social: await all('social'), care: await all('care'),
       };
     },
 
@@ -565,6 +623,94 @@ function firebaseStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onE
       setDoc(doc(db, 'pet', 'vet'), { ...data, updatedAt: serverTimestamp(), updatedBy: state.user.name }).catch(fail);
     },
 
+    // «Если потерялся»: pet/lost — телефоны и приметы для объявления, общие для двоих
+    saveLost(v) {
+      if (!ready()) return;
+      const { doc, setDoc, serverTimestamp } = fb.fs;
+      setDoc(doc(db, 'pet', 'lost'), { ...plainLost(v), updatedAt: serverTimestamp(), updatedBy: state.user.name }).catch(fail);
+    },
+    // Социализация: social/{пункт} — { title (только у своих пунктов), log: [{ d, r }] }; null — удалить
+    saveSocial(id, item) {
+      if (!ready()) return;
+      const { doc, setDoc, deleteDoc, serverTimestamp } = fb.fs;
+      const ref = doc(db, 'social', id);
+      if (!item) { deleteDoc(ref).catch(fail); return; }
+      const data = { log: (item.log || []).slice(-LOG_MAX), updatedAt: serverTimestamp(), updatedBy: state.user.name };
+      if (item.title) data.title = String(item.title).slice(0, 80);
+      setDoc(ref, data).catch(fail);
+    },
+    // Уход: care/{пункт} — { log: [дни], every }
+    saveCare(id, item) {
+      if (!ready()) return;
+      const { doc, setDoc, serverTimestamp } = fb.fs;
+      setDoc(doc(db, 'care', id), {
+        log: (item.log || []).slice(-LOG_MAX), every: Math.max(0, Math.min(120, Math.round(item.every || 0))),
+        updatedAt: serverTimestamp(), updatedBy: state.user.name,
+      }).catch(fail);
+    },
+    // Фото месяца: monthPhotos/{возраст в месяцах} — { data, date }. Грузятся по запросу, а не при запуске
+    async loadMonthPhotos() {
+      if (!ready()) return {};
+      const { collection, getDocs } = fb.fs;
+      const out = {};
+      (await getDocs(collection(db, 'monthPhotos'))).forEach((d) => { const v = d.data(); out[d.id] = { data: String(v.data || ''), date: v.date || '' }; });
+      return out;
+    },
+    async loadMonthPhoto(n) {
+      if (!ready()) return null;
+      const { doc, getDoc } = fb.fs;
+      const snap = await getDoc(doc(db, 'monthPhotos', String(n)));
+      return snap.exists() ? { data: String(snap.data().data || ''), date: snap.data().date || '' } : null;
+    },
+    // Фото и его дата в pet/months — одним пакетом: либо всё вместе, либо ничего
+    async saveMonthPhoto(n, photo) {
+      if (!ready()) return;
+      const { doc, writeBatch, serverTimestamp, deleteField } = fb.fs;
+      const ref = doc(db, 'monthPhotos', String(n));
+      const meta = { updatedAt: serverTimestamp(), updatedBy: state.user.name };
+      const batch = writeBatch(db);
+      if (photo) batch.set(ref, { data: photo.data, date: photo.date, ...meta });
+      else batch.delete(ref);
+      batch.set(doc(db, 'pet', 'months'), { dates: { [String(n)]: photo ? photo.date : deleteField() }, ...meta }, { merge: true });
+      try { await batch.commit(); } catch (err) { fail(err); }
+    },
+
+    // ---------- Уведомления ----------
+    // Токен этого телефона для уведомлений (Firebase Cloud Messaging). sw — регистрация sw.js: он и показывает уведомления
+    async pushToken(vapidKey, sw) {
+      const stub = window.__BT_PUSH_STUB__; // только для автоматической проверки на компьютере разработчика
+      if (stub) return stub.token;
+      const m = await import(SDK + 'firebase-messaging.js');
+      if (!(await m.isSupported())) throw new Error('unsupported');
+      return m.getToken(m.getMessaging(fbApp), { vapidKey, serviceWorkerRegistration: sw });
+    },
+    // pushTokens/{id}: токен, чей телефон и какие уведомления на нём включены
+    async pushSave(id, token, prefs) {
+      if (!ready()) return;
+      const { doc, setDoc, serverTimestamp } = fb.fs;
+      const platform = /iPhone|iPad/.test(navigator.userAgent) ? 'ios' : /Android/.test(navigator.userAgent) ? 'android' : 'other';
+      await setDoc(doc(db, 'pushTokens', id), {
+        token, uid: state.user.uid, name: state.user.name, platform,
+        prefs: { toilet: !!prefs.toilet, care: !!prefs.care, week: !!prefs.week }, updatedAt: serverTimestamp(),
+      });
+    },
+    // unsubscribe — ещё и отписать телефон от уведомлений (при «Выключить»; при смене токена — нет)
+    async pushRemove(id, { unsubscribe = true } = {}) {
+      if (!ready() || !id) return;
+      const { doc, deleteDoc } = fb.fs;
+      await deleteDoc(doc(db, 'pushTokens', id)).catch(() => {});
+      if (!unsubscribe || window.__BT_PUSH_STUB__) return;
+      try { const m = await import(SDK + 'firebase-messaging.js'); await m.deleteToken(m.getMessaging(fbApp)); } catch { /* уже нет */ }
+    },
+    // «Прислать проверочное» — функция sendTestPush на сервере
+    async pushTest() {
+      const stub = window.__BT_PUSH_STUB__;
+      if (stub) return stub.test || { devices: 1, delivered: 1 };
+      const f = await import(SDK + 'firebase-functions.js');
+      const res = await f.httpsCallable(f.getFunctions(fbApp, 'europe-west1'), 'sendTestPush')();
+      return res.data;
+    },
+
     // ---------- Заметки о днях (дневник) ----------
     // Фото к заметке: storyPhotos/{день}, {день}_2, {день}_3 …
     async loadStoryPhotos(day, count) {
@@ -600,6 +746,25 @@ function firebaseStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onE
 
 // Карточка собаки: только известные поля, строками
 const PET_FIELDS = ['name', 'breed', 'birth', 'sex', 'chip', 'mdr1', 'weight'];
+// «Если потерялся»: два контакта, приметы, приписка к объявлению
+const LOST_FIELDS = { name1: 40, phone1: 30, name2: 40, phone2: 30, signs: 400, note: 300 };
+const plainLost = (v) => Object.fromEntries(Object.entries(LOST_FIELDS).map(([k, n]) => [k, typeof v[k] === 'string' ? v[k].slice(0, n) : '']));
+// Сколько последних отметок хранить у пункта социализации и ухода
+const LOG_MAX = 60;
+const DAY_RE = /^\d{4}-\d\d-\d\d$/;
+const REACTIONS = ['calm', 'alert', 'scared'];
+function cleanSocial(all) {
+  return Object.fromEntries(Object.entries(all || {}).map(([id, v]) => [id, {
+    title: typeof v.title === 'string' ? v.title : '',
+    log: (Array.isArray(v.log) ? v.log : []).filter((x) => x && DAY_RE.test(x.d) && REACTIONS.includes(x.r)).map((x) => ({ d: x.d, r: x.r })),
+  }]));
+}
+function cleanCare(all) {
+  return Object.fromEntries(Object.entries(all || {}).map(([id, v]) => [id, {
+    log: (Array.isArray(v.log) ? v.log : []).filter((d) => typeof d === 'string' && DAY_RE.test(d)).sort(),
+    every: Number.isInteger(v.every) ? v.every : null,
+  }]));
+}
 const VET_FIELDS = ['clinicName', 'clinicAddress', 'clinicPhone', 'vetName', 'vetPhone'];
 // Первое фото заметки — под датой дня, следующие — с номером: 2026-10-04, 2026-10-04_2 …
 const storyPhotoId = (day, i) => (i ? `${day}_${i + 1}` : day);

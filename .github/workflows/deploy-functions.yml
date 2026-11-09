@@ -1,0 +1,61 @@
+# Выкладка серверной части уведомлений (папка functions) в Firebase.
+# Запускается сама после слияния в main, если менялись functions, firebase.json или общие файлы
+# приложения, которые использует сервер; можно запустить и вручную: Actions → «Уведомления: выложить сервер» → Run workflow.
+# Нужен секрет FIREBASE_SERVICE_ACCOUNT (ключ сервисного аккаунта, см. README, «Уведомления»). Пока его нет — шаг пропускается.
+name: 'Уведомления: выложить сервер'
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'functions/**'
+      - 'firebase.json'
+      - 'js/diary.js'
+      - 'js/care.js'
+      - 'js/passport.js'
+      - 'js/md.js'
+      - '.github/workflows/deploy-functions.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-functions
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Ключ доступа к Firebase
+        env:
+          SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: |
+          if [ -z "$SERVICE_ACCOUNT" ]; then
+            echo "::warning::Секрет FIREBASE_SERVICE_ACCOUNT ещё не добавлен — сервер уведомлений не выкладываем. Как добавить — README, раздел «Уведомления»."
+            echo "SKIP=1" >> "$GITHUB_ENV"
+            exit 0
+          fi
+          printf '%s' "$SERVICE_ACCOUNT" > "$RUNNER_TEMP/service-account.json"
+          echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/service-account.json" >> "$GITHUB_ENV"
+
+      - name: Зависимости
+        if: env.SKIP != '1'
+        working-directory: functions
+        run: npm ci --no-audit --no-fund
+
+      - name: Выложить
+        if: env.SKIP != '1'
+        run: npx --yes firebase-tools@15 deploy --only functions --project batonchik-vepritskiy --force --non-interactive
+
+      - name: Убрать ключ
+        if: always()
+        run: rm -f "$RUNNER_TEMP/service-account.json"

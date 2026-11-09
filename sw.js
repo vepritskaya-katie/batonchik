@@ -1,11 +1,11 @@
 // Работа без интернета: файлы приложения и памятки хранятся на телефоне.
 // При наличии сети всегда берётся свежая версия, без сети — сохранённая.
 
-const VERSION = 'batonchik-v29';
+const VERSION = 'batonchik-v30';
 const SDK = 'https://www.gstatic.com/firebasejs/12.19.0/';
 const APP_FILES = [
   './', 'index.html', 'manifest.webmanifest', 'css/style.css',
-  'js/app.js', 'js/md.js', 'js/store.js', 'js/editor.js', 'js/diary.js', 'js/ideas.js', 'js/notes.js', 'js/passport.js', 'js/photo.js', 'js/growth.js', 'js/library.js', 'js/search.js', 'js/firebase-config.js',
+  'js/app.js', 'js/md.js', 'js/store.js', 'js/editor.js', 'js/diary.js', 'js/ideas.js', 'js/notes.js', 'js/passport.js', 'js/photo.js', 'js/growth.js', 'js/library.js', 'js/search.js', 'js/care.js', 'js/firebase-config.js',
   'fonts/manrope-cyrillic.woff2', 'fonts/manrope-latin.woff2',
   'content/komandy.md', 'content/igry.md', 'content/sovety.md', 'content/rasporyadok.md', 'content/kanaly.md', 'content/biblioteka.md',
   'content/priuchenie-k-kletke-14-dney.pdf',
@@ -71,4 +71,39 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(request.url);
   if (url.origin === self.location.origin) event.respondWith(networkFirst(request));
   else if (request.url.startsWith(SDK)) event.respondWith(cacheFirst(request));
+});
+
+// ---------- Уведомления ----------
+// Их присылает сервер «Батончика» через Firebase Cloud Messaging. Показываем сами: заголовок, текст,
+// а по нажатию открываем приложение на нужном экране (data.link, например «#/pass»)
+self.addEventListener('push', (event) => {
+  let payload = {};
+  try { payload = event.data ? event.data.json() : {}; } catch { payload = { data: { body: event.data ? event.data.text() : '' } }; }
+  const n = payload.notification || {};
+  const d = payload.data || {};
+  const tag = d.tag || n.tag || '';
+  event.waitUntil(self.registration.showNotification(n.title || d.title || 'Батончик', {
+    body: n.body || d.body || '',
+    icon: 'icons/icon-192.png',
+    badge: 'icons/icon-192.png',
+    tag: tag || undefined,
+    renotify: !!tag,
+    data: { link: d.link || '' },
+  }));
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const link = (event.notification.data && event.notification.data.link) || '';
+  const url = new URL(link, self.registration.scope).href;
+  event.waitUntil((async () => {
+    const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    const open = windows.find((w) => w.url.startsWith(self.registration.scope));
+    if (open) {
+      await open.focus();
+      if (link && 'navigate' in open) await open.navigate(url).catch(() => {});
+      return;
+    }
+    await self.clients.openWindow(url);
+  })());
 });

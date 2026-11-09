@@ -8,15 +8,18 @@ const MSK_OFFSET_H = 3; // Москва круглый год UTC+3, без пе
 // form: запись обычно делают после события — сначала окно со временем и комментарием;
 // без form («Авария дома») запись сохраняется сразу с текущим временем; grams — в окне спрашиваем граммы корма
 // short — подпись под значком в строке быстрых кнопок на главной
+// retired — новых таких записей не делаем (кнопки нет), старые видны в журнале и открываются на правку
 export const EVENT_TYPES = {
   toilet: { icon: '🌳', label: 'Туалет на улице', short: 'Туалет', subs: true, form: true },
   accident: { icon: '💦', label: 'Авария дома', short: 'Авария', subs: true },
-  walk: { icon: '🦮', label: 'Прогулка', short: 'Прогулка', form: true },
+  walk: { icon: '🦮', label: 'Прогулка', short: 'Прогулка', form: true, retired: true },
   meal: { icon: '🍽', label: 'Кормление', short: 'Еда', form: true, grams: true },
   wake: { icon: '☀️', label: 'Встали утром', short: 'Встали', form: true },
   bed: { icon: '🌙', label: 'Легли вечером', short: 'Легли', form: true },
   note: { icon: '✏️', label: 'Заметка', short: 'Заметка', text: true, form: true },
 };
+// Что можно записать сейчас: кнопки журнала, значки на главной, «+» и ссылки #/add/…
+export const ADD_TYPES = Object.entries(EVENT_TYPES).filter(([, t]) => !t.retired);
 export const SUBS = { pee: 'пописал', poo: 'покакал', both: 'пописал и покакал' };
 // Повтор тренировки или игры: записывается кнопками «Тренировки на сегодня», в ленте журнала не показывается
 export const TRAIN = { icon: '🎯', label: 'Повтор' };
@@ -120,8 +123,6 @@ export function weekSummary(thisWeek, prevWeek) {
   const aCur = cur.reduce((a, d) => a + d.accident, 0);
   const aPrev = prev.length ? prev.reduce((a, d) => a + d.accident, 0) : null;
   lines.push(aCur ? `Аварий дома: ${aCur} за неделю${aPrev != null ? ` (неделей раньше — ${aPrev})` : ''}.` : 'Аварий дома не было.');
-  const wCur = avg(cur.map((d) => d.walk));
-  if (wCur) lines.push(`Прогулок: в среднем ${num(wCur)} в день${cmp(wCur, prev.length ? avg(prev.map((d) => d.walk)) : null)}.`);
   const trCur = avg(cur.map((d) => d.trains));
   if (trCur) lines.push(`Повторов на тренировках: в среднем ${num(trCur)} в день${cmp(trCur, prev.length ? avg(prev.map((d) => d.trains)) : null)}.`);
   const fed = cur.filter((d) => d.mealGrams);
@@ -223,7 +224,6 @@ export function rhythmHtml(st, { trainsDone, trainsTotal }) {
     <p class="muted">${all ? `Туалет на улице: ${st.toilet} из ${all}${st.accident ? `, дома ${st.accident}` : ''}.` : 'Сегодня туалет ещё не отмечали.'}</p>
     ${row('🌳 Туалет на улице', st.toilet)}
     ${row('💦 Аварии дома', st.accident)}
-    ${row('🦮 Прогулки', st.walk)}
     ${row('🍽 Кормления', `${st.meal}${st.mealGrams ? ` · ${st.mealGrams} г` : ''}`)}
     ${row('🌙 Ночной сон', sleep)}
     ${row('🎯 Повторы тренировок', trainsTotal ? `${trainsDone} из ${trainsTotal}` : st.trains)}
@@ -237,11 +237,10 @@ export function weekStatsHtml({ days, prevWeek, loading }) {
   return `<section class="card week-card">
       <h2>Последние 7 дней</h2>
       ${summary.length ? `<ul class="summary">${summary.map((l) => `<li>${escapeHtml(l)}</li>`).join('')}</ul>`
-        : `<p class="muted">${loading ? 'Загружаем…' : 'Записей пока нет. Отмечайте туалет, прогулки и кормления — здесь появится сводка.'}</p>`}
+        : `<p class="muted">${loading ? 'Загружаем…' : 'Записей пока нет. Отмечайте туалет, аварии и кормления — здесь появится сводка.'}</p>`}
       ${summary.length ? `<div class="charts">
         ${miniChart('🌳 Туалет на улице', week, 'toilet')}
         ${miniChart('💦 Аварии дома', week, 'accident')}
-        ${miniChart('🦮 Прогулки', week, 'walk')}
         ${miniChart('🎯 Повторы на тренировках', week, 'trains')}
       </div>` : ''}
     </section>`;
@@ -250,3 +249,62 @@ export function weekStatsHtml({ days, prevWeek, loading }) {
 // Дневник: лента дней. У каждого дня — короткая строка из журнала, освоенное и, если написана, заметка о дне.
 // Последний день с заметкой — большой карточкой сверху.
 export const MONTHS_SHORT = ['янв', 'фев', 'мар', 'апр', 'мая', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
+
+// ---------- «Пора в туалет» ----------
+
+const median = (nums) => {
+  if (!nums.length) return null;
+  const s = [...nums].sort((a, b) => a - b);
+  const m = Math.floor(s.length / 2);
+  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+};
+const MIN_SAMPLES = 6; // меньше — подсказку не показываем: по двум-трём записям легко ошибиться
+
+// Обычный ритм по журналу за последние дни: сколько обычно проходит между выходами в туалет днём
+// (туалет на улице и аварии — одинаково) и через сколько после еды. Ночь и промежутки дольше 6 часов не считаем
+export function toiletRhythm(events) {
+  const at = (e) => new Date(e.at).getTime();
+  const all = events.filter((e) => e.type !== 'train').slice().sort((a, b) => at(a) - at(b));
+  const elim = all.filter((e) => e.type === 'toilet' || e.type === 'accident');
+  const gaps = [];
+  for (let i = 1; i < elim.length; i++) {
+    const a = elim[i - 1];
+    const b = elim[i];
+    const gap = at(b) - at(a);
+    const slept = all.some((e) => e.type === 'bed' && at(e) > at(a) && at(e) < at(b));
+    if (a.day === b.day && !slept && gap > 5 * 60000 && gap <= 6 * 3600000) gaps.push(gap);
+  }
+  const afterMeal = [];
+  all.filter((e) => e.type === 'meal').forEach((m) => {
+    const next = elim.find((e) => at(e) > at(m));
+    if (next && next.day === m.day && at(next) - at(m) <= 3 * 3600000) afterMeal.push(at(next) - at(m));
+  });
+  return {
+    gap: gaps.length >= MIN_SAMPLES ? median(gaps) : null,
+    afterMeal: afterMeal.length >= MIN_SAMPLES ? median(afterMeal) : null,
+  };
+}
+
+// «около 2 ч 10 мин», «около 35 мин» — округляем до 5 минут
+export function aboutText(ms) {
+  const min = Math.max(5, Math.round(ms / 300000) * 5);
+  const h = Math.floor(min / 60);
+  return `около ${h ? `${h} ч` : ''}${h && min % 60 ? ' ' : ''}${min % 60 ? `${min % 60} мин` : ''}`;
+}
+
+// Подсказка на главной: когда, судя по журналу, пора выходить. null — подсказывать нечего
+// (мало записей, сегодня ещё не было туалета или уже легли спать)
+export function toiletHint(rhythm, events, day) {
+  const at = (e) => new Date(e.at).getTime();
+  const sorted = events.slice().sort((a, b) => at(a) - at(b));
+  const lastElim = sorted.filter((e) => (e.type === 'toilet' || e.type === 'accident') && e.day === day).pop();
+  if (!lastElim) return null;
+  const after = sorted.filter((e) => at(e) > at(lastElim));
+  if (after.some((e) => e.type === 'bed')) return null;
+  const meal = after.filter((e) => e.type === 'meal').pop();
+  if (meal && rhythm.afterMeal) {
+    return { due: new Date(at(meal) + rhythm.afterMeal), wait: `После еды обычно ${aboutText(rhythm.afterMeal)} до туалета.`, now: `Пора на улицу: после еды обычно ${aboutText(rhythm.afterMeal)} до туалета.` };
+  }
+  if (!rhythm.gap) return null;
+  return { due: new Date(at(lastElim) + rhythm.gap), wait: `Обычно между выходами ${aboutText(rhythm.gap)}.`, now: `Пора на улицу: обычно между выходами ${aboutText(rhythm.gap)}.` };
+}
