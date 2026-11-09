@@ -629,6 +629,24 @@ function trainingsHtml(title = '') {
   if (!edit) rows.sort((a, b) => a.done - b.done || a.i - b.i);
   const items = rows.map(({ it, i, tab, id, card, n, target, done }) => {
     const name = card ? card.name : 'Карточка не найдена';
+    // Плитка (по две в ряд): название, шаг, счёт и «+1». В режиме правки — строки, как раньше: там стрелки и «Убрать»
+    if (!edit) {
+      const bar = `<span class="mini-bar"><span style="width:${Math.min(100, Math.round(n / target * 100))}%"></span></span>`;
+      const count = `<span class="tr-count">${n} из ${target}</span>${bar}`;
+      return `<li class="item tr tr-tile${done ? ' done' : ''}">
+        <div class="tr-tile-top">
+          ${card ? `<a class="item-title link" href="#/${tab}/${id}">${escapeHtml(name)}</a>` : `<span class="item-title muted">${name}</span>`}
+          ${it.day ? '<span class="chip today-only">только сегодня</span>' : ''}
+          ${card && tab === 'k' ? `<span class="tr-step">${escapeHtml(currentStep(tab, card))}</span>` : ''}
+        </div>
+        <div class="tr-tile-foot">
+          ${n && can ? `<button class="tr-progress-btn tr-tile-prog" data-action="tr-reps" data-card="${it.card}" aria-label="Повторы за сегодня: ${n}. Нажмите, чтобы убрать лишний">${count}</button>`
+            : `<span class="tr-tile-prog">${count}</span>`}
+          <button class="tr-tap${done ? ' on' : ''}" data-action="tr-tap" data-card="${it.card}"${can && card ? '' : ' disabled'}
+            aria-label="Отметить повтор: ${escapeHtml(name)}, сделано ${n} из ${target}">
+            ${done ? '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>' : '<span class="tr-plus">+1</span>'}</button>
+        </div></li>`;
+    }
     const segs = target <= 10
       ? `<span class="segs">${Array.from({ length: target }, (_, j) => `<span class="seg-dot${j < n ? ' on' : ''}"></span>`).join('')}</span>`
       : `<span class="mini-bar"><span style="width:${Math.min(100, Math.round(n / target * 100))}%"></span></span>`;
@@ -666,8 +684,8 @@ function trainingsHtml(title = '') {
     ${weekBanner}
     ${chosen ? `<p class="muted small">Неделя с ${dayTitle(week, { day: 'numeric', month: 'long' })}.</p>` : ''}
     ${t.intro && t.intro.length ? `<details class="intro"><summary>Как устроены занятия</summary><div class="prose">${renderBlocks(t.intro)}</div></details>` : ''}
-    <p class="muted small">Одно нажатие на «+1» — один повтор. Сделали все повторы — строка станет зелёной и уйдёт вниз. Ошиблись — нажмите на счёт «2 из 5», чтобы убрать лишний повтор. Счёт начинается заново после «Легли вечером».</p>
-    <ul class="list">${items || '<li class="empty">Список пуст. Нажмите «Изменить», чтобы добавить тренировки.</li>'}</ul>
+    <p class="muted small">Одно нажатие на «+1» — один повтор. Сделали все повторы — плитка станет зелёной и уйдёт вниз. Ошиблись — нажмите на счёт «2 из 5», чтобы убрать лишний повтор. Счёт начинается заново после «Легли вечером».</p>
+    <ul class="list${edit ? '' : ' tr-tiles'}">${items || '<li class="empty">Список пуст. Нажмите «Изменить», чтобы добавить тренировки.</li>'}</ul>
     ${edit ? `<div class="edit-actions">
       <button class="btn" data-action="tr-add">+ Добавить на сегодня</button>
       <button class="btn" data-action="week-pick">${chosen ? 'Изменить выбор на неделю' : 'Выбрать на неделю'}</button>
@@ -1326,19 +1344,8 @@ function catalogBody(tab, { showTitle = false } = {}) {
   const loose = cat.loose.length ? `<div class="prose">${blocksHtml(cat.loose, tab, null)}</div>` : '';
   const groups = cat.groups.map((g) => {
     if (g.raw) return `<section class="group"><div class="raw">${escapeHtml(g.raw)}</div></section>`;
-    // Тренировки и игры — квадратные плитки по три в ряд: так список короче
-    const tiles = tab === 'k' || tab === 'g';
     const cards = g.cards.map((c) => {
       const p = cardProgress(tab, c);
-      if (tiles) {
-        const foot = p.mastered ? '<span class="tile-ok">✓ Освоено</span>'
-          : p.total ? `<span class="tile-prog"><span class="tile-bar"><span style="width:${Math.round(p.done / p.total * 100)}%"></span></span>${p.done}/${p.total}</span>` : '';
-        const label = `${c.name}${c.subtitle ? `. ${c.subtitle}` : ''}`.replace(/\*\*|\*|`/g, '');
-        return `<li><a class="tile${p.mastered ? ' ok' : ''}" href="#/${tab}/${c.id}" aria-label="${escapeHtml(label)}">
-          <span class="tile-name">${inline(c.name)}</span>
-          ${c.subtitle && c.name.length <= 20 ? `<span class="tile-sub">${inline(c.subtitle)}</span>` : ''}
-          ${foot || tab === 'k' ? `<span class="tile-foot">${foot}${tab === 'k' ? placesMini(tab, c) : ''}</span>` : ''}</a></li>`;
-      }
       let prog = '';
       if (p.mastered) prog = '<span class="card-prog ok">✓ Освоено</span>';
       else if (p.total) {
@@ -1358,7 +1365,7 @@ function catalogBody(tab, { showTitle = false } = {}) {
     return `<section class="group">
       ${g.title && !single ? `<h2>${inline(g.title)}</h2>` : ''}
       ${intro}
-      ${cards ? `<ul class="cards${tiles ? ' tiles' : ''}">${cards}</ul>` : (g.intro.length ? '' : '<p class="empty">Здесь пока пусто.</p>')}
+      ${cards ? `<ul class="cards">${cards}</ul>` : (g.intro.length ? '' : '<p class="empty">Здесь пока пусто.</p>')}
     </section>`;
   }).join('');
   return `${errors}${loose}${groups}`;
