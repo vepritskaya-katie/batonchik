@@ -14,7 +14,7 @@ import { buildIndex, resultsHtml } from './search.js';
 import { RUBRICS, parseLibrary, readKey, readCount, readBtn, metaChips, articleBody, foldList, agesHtml, dictHtml, booksHtml, introHtml } from './library.js';
 import {
   FORMATS, DAILY, POINTS, READ_POINTS, LEVELS, parseQuestions, formatOf, optionOrder, todayIds, answered, finished, rightCount, readPoints,
-  totalPoints, weekPoints, level, streak, playedDays, sharedDays, trophies, dueRepeats, afterRepeat, newMistake, topicProgress,
+  totalPoints, weekPoints, level, streak, playedDays, sharedDays, trophies, dueRepeats, afterRepeat, newMistake, topicProgress, seasons, seasonPoints, seasonLeft,
 } from './game.js';
 import { pickIdeas } from './ideas.js';
 import { parseNotes, noteItemHtml, noteHtml, noteMatches, NOTE_FILTERS } from './notes.js';
@@ -1228,15 +1228,18 @@ function gameMainHtml() {
       <p class="muted">Вопросы, где вы ошиблись раньше. +${POINTS.fix} за каждую исправленную ошибку.</p>
       <a class="btn wide" href="#/game/repeat">Повторить</a></section>` : '';
   const mood = done ? (rightCount(rec) === rec.q.length ? '🎉' : '👍') : '🎯';
+  const allSeasons = seasons(all, { day: today, q: ids });
+  const season = allSeasons[allSeasons.length - 1];
   return `<section class="card game-hero">
       <div class="game-hero-top">${dogAva(mood, true)}
-        <div class="game-hero-text"><p class="eyebrow">Разминка дня</p><h2 class="game-title">${title}</h2><p class="muted small">${sub}</p></div></div>
+        <div class="game-hero-text"><p class="eyebrow">Разминка дня${season && season.n > 1 ? ` · сезон ${season.n}` : ''}</p><h2 class="game-title">${title}</h2><p class="muted small">${sub}</p></div></div>
       <div class="game-chips">${chips}</div>
       ${rivals}
       ${btn}
     </section>
     ${repeat}
     ${leagueHtml(me, others, today)}
+    ${seasonHtml(me, others, allSeasons)}
     ${levelHtml(me)}
     ${topicsHtml(me)}
     ${gameRulesHtml()}`;
@@ -1267,6 +1270,31 @@ function leagueHtml(me, others, today) {
       : 'Когда второй из вас пройдёт первую разминку, здесь появится соревнование.'}</p></section>`;
 }
 
+// Сезон: пока не кончатся новые вопросы; дальше — по второму кругу. Итоги прошлых сезонов остаются
+function seasonHtml(me, others, list) {
+  if (!list.length) return '';
+  const players = [me, ...others];
+  const cur = list[list.length - 1];
+  const left = seasonLeft(S.questions.qs, cur);
+  const short = { day: 'numeric', month: 'short' };
+  const score = (s) => {
+    const pts = players.map((p) => ({ p, v: seasonPoints(p, s) })).sort((a, b) => b.v - a.v || (a.p.me ? -1 : 1));
+    const win = pts.length > 1 && pts[0].v > pts[1].v ? pts[0].p : null;
+    return pts.map((x) => `<span>${x.p === win ? '🥇 ' : ''}${escapeHtml(playerName(x.p))}: <b>${x.v}</b></span>`).join('');
+  };
+  const what = cur.n === 1
+    ? (left ? `Новых вопросов осталось ${left} — примерно на ${daysText(Math.ceil(left / DAILY))}. Потом начнётся сезон 2: вопросы пойдут по второму кругу, сначала самые давние. Повтор через пару месяцев закрепляет знания.`
+      : 'Новые вопросы закончились — со следующей разминки начнётся сезон 2: вопросы по второму кругу.')
+    : (left ? `Вопросы идут по ${cur.n === 2 ? 'второму' : 'новому'} кругу. В этом сезоне ещё не было ${left} ${plural(left, 'вопроса', 'вопросов', 'вопросов')} — примерно на ${daysText(Math.ceil(left / DAILY))}.`
+      : `Сезон подходит к концу — со следующей разминки начнётся сезон ${cur.n + 1}.`);
+  const past = list.slice(0, -1).reverse().map((s) => `<li><span class="season-name">Сезон ${s.n} <small>${dayTitle(s.from, short)} – ${dayTitle(s.to, short)}</small></span>
+    <span class="season-score">${score(s)}</span></li>`).join('');
+  return `<section class="card game-season"><div class="card-head"><h2>Сезон ${cur.n}</h2><span class="muted small">с ${dayTitle(cur.from, { day: 'numeric', month: 'long' })}</span></div>
+    <p class="season-score now">${score(cur)}</p>
+    <p class="muted small">${what}</p>
+    ${past ? `<h3 class="season-past-title">Прошлые сезоны</h3><ul class="season-past">${past}</ul>` : ''}</section>`;
+}
+
 function levelHtml(me) {
   const total = totalPoints(me);
   const L = level(total);
@@ -1290,6 +1318,7 @@ function gameRulesHtml() {
     <li><b>Очки:</b> +${POINTS.right} за верный ответ, +${POINTS.perfect} за все верные, +${POINTS.fix} за исправленную ошибку. В Библиотеке за отметку «Прочитано»: статья — +${READ_POINTS.a}, вопрос-ответ или миф — +${READ_POINTS.qa}.</li>
     <li><b>Ошибки</b> возвращаются через 1, 3 и 7 дней, пока не запомнятся, — до трёх в день.</li>
     <li><b>Серия 🔥</b> — дни подряд с разминкой; один пропуск в неделю её не обрывает. <b>Вместе 🤝</b> — дни, когда сыграли оба.</li>
+    <li><b>Сезон</b> длится, пока не кончатся новые вопросы, потом они идут по второму кругу — начинается следующий сезон. Медаль 🥇 — тому, у кого за сезон больше очков. Новые вопросы, добавленные в игру, попадают в ближайшую разминку.</li>
     <li><b>Неделя</b> — с понедельника по воскресенье, кубок 🏆 — тому, у кого больше очков. Уровни: ${LEVELS.map(([pts, name], i) => `${LEVEL_ICONS[i]} ${escapeHtml(name)}${pts ? ` (${pts})` : ''}`).join(' → ')}.</li>
     <li>Ответы второго видны только после своей разминки. Свободной игры нет — чтобы вопросы за очки не попадались заранее.</li>
   </ul></div></details>`;

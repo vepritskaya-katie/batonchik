@@ -267,3 +267,31 @@ export function topicProgress(qs, known) {
     return { topic, total: list.length, known: list.filter((q) => known && known[q.id]).length };
   }).filter((t) => t.total);
 }
+
+// ---------- Сезоны ----------
+// Сезон — пока не кончатся новые вопросы. Первый день, где попался вопрос, который уже был в этом сезоне,
+// открывает следующий: вопросы идут по второму кругу (сначала самые давние). Новые вопросы в файле попадают в ближайший сезон.
+// planned — вопросы сегодняшней разминки, если её ещё никто не начал: { day, q }
+export function seasons(players, planned) {
+  const byDay = new Map();
+  for (const p of players) {
+    for (const [d, rec] of Object.entries(p.days || {})) if (rec && Array.isArray(rec.q) && rec.q.length && !byDay.has(d)) byDay.set(d, rec.q);
+  }
+  if (planned && planned.q && planned.q.length && !byDay.has(planned.day)) byDay.set(planned.day, planned.q);
+  const list = [];
+  let cur = null;
+  for (const d of [...byDay.keys()].sort()) {
+    const q = byDay.get(d);
+    if (!cur || q.some((id) => cur.used.has(id))) {
+      if (cur) cur.to = addDays(d, -1);
+      cur = { n: list.length + 1, from: d, to: null, used: new Set() };
+      list.push(cur);
+    }
+    q.forEach((id) => cur.used.add(id));
+  }
+  return list;
+}
+// Очки игрока за сезон (to — null у текущего: по сегодня)
+export const seasonPoints = (player, s) => sum(pointsByDay(player), s.from, s.to || '9999');
+// Сколько новых вопросов осталось в текущем сезоне
+export const seasonLeft = (qs, s) => qs.filter((q) => !s.used.has(q.id)).length;
