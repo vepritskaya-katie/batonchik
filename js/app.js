@@ -950,8 +950,8 @@ function renderHome() {
   return `${pageHead({ eyebrow: cap(dayTitle(S.day)), title: greeting() })}
     ${statusBanner()}
     ${heroHtml()}
-    ${gameInviteHtml()}
     ${weekCardHtml()}
+    ${gameInviteHtml()}
     ${homeJournalHtml()}
     ${factHtml()}
     ${homeTrainingsHtml()}
