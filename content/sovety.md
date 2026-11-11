@@ -159,6 +159,8 @@
 
 ### Подробнее в Библиотеке
 - [Порог, стресс-ведро и почему трамвай иногда «не страшный», а иногда — очень](#/lib/a/porog-stress-vedro-i-pochemu-tramvay-inogda-ne-strashnyy-a-i)
+- [Разбор: скрип трамвая на остановке](#/lib/cases/skrip-tramvaya-na-ostanovke)
+- [Как собака воспринимает мир: нюх, слух, зрение](#/lib/a/kak-sobaka-vosprinimaet-mir-nyuh-sluh-zrenie)
 
 ## Подбирание на улице
 Салфетки и кости
@@ -235,6 +237,7 @@
 ### Подробнее в Библиотеке
 - [Нагрузка, отдых и сон: как не вырастить «адреналинового наркомана»](#/lib/a/nagruzka-otdyh-i-son-kak-ne-vyrastit-adrenalinovogo-narkoman)
 - [Как учится собака: награда, тайминг и почему это работает](#/lib/a/kak-uchitsya-sobaka-nagrada-tayming-i-pochemu-eto-rabotaet)
+- [Разбор: вечером хватает поводок и штанины](#/lib/cases/vecherom-hvataet-povodok-i-shtaniny)
 
 ## Кусает за лицо, уши и волосы
 
@@ -281,6 +284,7 @@
 ### Подробнее в Библиотеке
 - [Нагрузка, отдых и сон: как не вырастить «адреналинового наркомана»](#/lib/a/nagruzka-otdyh-i-son-kak-ne-vyrastit-adrenalinovogo-narkoman)
 - [Как учится собака: награда, тайминг и почему это работает](#/lib/a/kak-uchitsya-sobaka-nagrada-tayming-i-pochemu-eto-rabotaet)
+- [Разбор: вечером хватает поводок и штанины](#/lib/cases/vecherom-hvataet-povodok-i-shtaniny)
 
 ## Перевозбуждение
 Кусает всё подряд и носится — пора спать
@@ -404,6 +408,10 @@ Settle — учимся ничего не делать
 
 ### Получается, если
 Не прыгает вниз сам.
+
+### Подробнее в Библиотеке
+- [Разбор: бешеные минуты и прыжки с кровати](#/lib/cases/beshenye-minuty-i-pryzhki-s-krovati)
+- [Управление средой: почему профилактика — половина воспитания](#/lib/a/upravlenie-sredoy-pochemu-profilaktika-polovina-vospitaniya)
 
 # Здоровье
 
@@ -539,6 +547,7 @@ N/N не значит, что ему можно всё: передозировк
 ### Подробнее в Библиотеке
 - [Генетика и здоровье: что значит «красный мрамор» и за чем следить у аусси](#/lib/a/genetika-i-zdorove-chto-znachit-krasnyy-mramor-i-za-chem-sle)
 - [Ветеринар без стресса: кооперативный уход и намордник](#/lib/a/veterinar-bez-stressa-kooperativnyy-uhod-i-namordnik)
+- [Вакцинация и паразиты: логика защиты](#/lib/a/vakcinaciya-i-parazity-logika-zaschity)
 
 # Питание
 
@@ -577,6 +586,7 @@ N/N не значит, что ему можно всё: передозировк
 ### Подробнее в Библиотеке
 - [Каникросс от А до Я: снаряжение, сигналы, техника](#/lib/a/kanikross-ot-a-do-ya-snaryazhenie-signaly-tehnika)
 - [Какой спорт выбрать для аусси](#/lib/a/kakoy-sport-vybrat-dlya-aussi)
+- [Если собака потерялась: профилактика и план действий](#/lib/a/esli-sobaka-poteryalas-profilaktika-i-plan-deystviy)
 
 ## Уши, глаза и осмотр раз в неделю
 3–5 минут, заодно — тренировка доверия
@@ -603,6 +613,7 @@ N/N не значит, что ему можно всё: передозировк
 ### Подробнее в Библиотеке
 - [Генетика и здоровье: что значит «красный мрамор» и за чем следить у аусси](#/lib/a/genetika-i-zdorove-chto-znachit-krasnyy-mramor-i-za-chem-sle)
 - [Ветеринар без стресса: кооперативный уход и намордник](#/lib/a/veterinar-bez-stressa-kooperativnyy-uhod-i-namordnik)
+- [Вакцинация и паразиты: логика защиты](#/lib/a/vakcinaciya-i-parazity-logika-zaschity)
 
 # Город и поездки
 
@@ -623,3 +634,5 @@ N/N не значит, что ему можно всё: передозировк
 ### Подробнее в Библиотеке
 - [Порог, стресс-ведро и почему трамвай иногда «не страшный», а иногда — очень](#/lib/a/porog-stress-vedro-i-pochemu-tramvay-inogda-ne-strashnyy-a-i)
 - [Ветеринар без стресса: кооперативный уход и намордник](#/lib/a/veterinar-bez-stressa-kooperativnyy-uhod-i-namordnik)
+- [Разбор: скрип трамвая на остановке](#/lib/cases/skrip-tramvaya-na-ostanovke)
+- [Как собака воспринимает мир: нюх, слух, зрение](#/lib/a/kak-sobaka-vosprinimaet-mir-nyuh-sluh-zrenie)

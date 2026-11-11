@@ -23,8 +23,8 @@ export const TOPICS = ['Поведение', 'Тренировки и игры',
 export const DAILY = 5;      // вопросов в разминке
 export const REPEAT_MAX = 3; // повторов ошибок в день
 export const POINTS = { right: 10, perfect: 10, fix: 5 };
-// Очки за «Прочитано» в Библиотеке: статья — 5, вопрос-ответ и миф — 2
-export const READ_POINTS = { a: 5, qa: 2, myths: 2 };
+// Очки за «Прочитано» в Библиотеке: статья и разбор ситуации — 5, вопрос-ответ и миф — 2
+export const READ_POINTS = { a: 5, cases: 5, qa: 2, myths: 2 };
 export const LEVELS = [[0, 'Щенок'], [200, 'Подросток'], [600, 'Пастух'], [1200, 'Знаток породы'], [2400, 'Мастер аусси']];
 const REPEAT_GAPS = [1, 3, 7];
 

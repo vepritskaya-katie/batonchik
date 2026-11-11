@@ -670,7 +670,7 @@ function firebaseStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onE
         updatedAt: serverTimestamp(), updatedBy: state.user.name,
       }).catch(fail);
     },
-    // «Срочно к ветеринару»: телефоны клиники и ветеринара — общие для двоих
+    // «Срочно»: телефоны клиники и ветеринара и база чипа — общие для двоих
     saveVet(v) {
       if (!ready()) return;
       const { doc, setDoc, serverTimestamp } = fb.fs;
@@ -820,7 +820,7 @@ function cleanCare(all) {
     every: Number.isInteger(v.every) ? v.every : null,
   }]));
 }
-const VET_FIELDS = ['clinicName', 'clinicAddress', 'clinicPhone', 'vetName', 'vetPhone'];
+const VET_FIELDS = ['clinicName', 'clinicAddress', 'clinicPhone', 'vetName', 'vetPhone', 'chipBase'];
 // Первое фото заметки — под датой дня, следующие — с номером: 2026-10-04, 2026-10-04_2 …
 const storyPhotoId = (day, i) => (i ? `${day}_${i + 1}` : day);
 

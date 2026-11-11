@@ -11,7 +11,7 @@ import { HEALTH_KINDS, NEXT_OPTIONS, nextDate, suggestNext, dueText, ageText, up
 import { pickPhotos, compressPhoto } from './photo.js';
 import { fmtNum, parseNum, series, deltaText, lineChartSvg } from './growth.js';
 import { buildIndex, resultsHtml } from './search.js';
-import { RUBRICS, parseLibrary, readKey, readCount, readBtn, metaChips, articleBody, foldList, agesHtml, dictHtml, booksHtml, introHtml } from './library.js';
+import { RUBRICS, parseLibrary, readKey, readCount, readBtn, metaChips, articleBody, foldList, agesHtml, dictHtml, booksHtml, introHtml, casesHtml } from './library.js';
 import {
   FORMATS, DAILY, POINTS, READ_POINTS, LEVELS, parseQuestions, formatOf, optionOrder, todayIds, answered, finished, rightCount, readPoints,
   totalPoints, weekPoints, level, streak, playedDays, sharedDays, trophies, dueRepeats, afterRepeat, newMistake, topicProgress, seasons, seasonPoints, seasonLeft,
@@ -102,7 +102,7 @@ const S = {
   questions: null,    // вопросы игры (content/igra.md)
   gamePlayers: [],    // игроки: свой документ и чужие (для рейтинга)
   gameUi: { reveal: null, rep: null }, // разминка: открытое пояснение; повтор ошибок: { day, ids, i, picked }
-  vet: null,          // «Срочно к ветеринару»: круглосуточная клиника и наш ветеринар
+  vet: null,          // «Срочно»: круглосуточная клиника, наш ветеринар и база, где зарегистрирован чип
   weeks: [],          // «Неделя Батончика»: { id: воскресенье, joy, choice, sleep, ribs, waist, notes }
   factShift: 0,       // «Факт дня» на главной: нажатие — следующий
   stories: {},        // дневник: заметки о днях { 'ГГГГ-ММ-ДД': { title, text, special, hasPhoto, photoCount, photoKey } } — все, без фото
@@ -1008,7 +1008,7 @@ function tipsSwitch(on) {
 }
 const TIPS_SUB = 'Почему это работает, что делать в жизни — и игра на знания.';
 
-// Страница «Советов»: шапка, «Срочно к ветеринару», переключатель разделов и раздел
+// Страница «Советов»: шапка, «Срочно», переключатель разделов и раздел
 function tipsPage(on, body, plus) {
   return `${pageHead({ title: 'Советы', sub: TIPS_SUB, plus })}${urgentBtn()}${tipsSwitch(on)}${body}`;
 }
@@ -1136,7 +1136,8 @@ function renderTipsPage() {
   const notesState = !S.notes ? '<p class="muted small">Загружаем заметки из каналов…</p>'
     : S.notes.error ? '<div class="banner warn">Не удалось загрузить заметки из каналов. Проверьте интернет.</div>' : '';
   return tipsPage('t', `${errors}${intro}
-    <p class="muted small practice-legend">🧭 <b>Практика</b> — наши правила и протоколы. 📣 <b>Канал</b> — заметки из Telegram-каналов: ✅ наука и консенсус или 💬 опыт, который подходит не всем собакам.</p>
+    <p class="muted small practice-legend">🧭 <b>Практика</b> — наши правила и протоколы. 📣 <b>Канал</b> — заметки из Telegram-каналов: ✅ наука и консенсус или 💬 опыт, который подходит не всем собакам.
+      <a href="#/lib/a/kak-proveryat-sovety-nauka-mnenie-i-marketing">Как проверять советы ›</a></p>
     <div class="notes-tools"><div class="filter-chips">${chips}</div>
       <p class="muted small notes-count" aria-live="polite" data-tips="${tips}" data-notes="${notes}">${practiceCount(shown, tips, notes)}</p></div>
     ${notesState}${sections}
@@ -1316,7 +1317,7 @@ function gameRulesHtml() {
   const formats = FORMATS.map((f) => `${f.icon} ${escapeHtml(f.title)}`).join(', ');
   return `<details class="card game-rules"><summary>Как устроена игра</summary><div class="prose"><ul>
     <li><b>Разминка дня</b> — ${DAILY} вопросов, по одному каждого формата: ${formats} Вопросы у вас обоих одинаковые и новые, пока не кончатся.</li>
-    <li><b>Очки:</b> +${POINTS.right} за верный ответ, +${POINTS.perfect} за все верные, +${POINTS.fix} за исправленную ошибку. В Библиотеке за отметку «Прочитано»: статья — +${READ_POINTS.a}, вопрос-ответ или миф — +${READ_POINTS.qa}.</li>
+    <li><b>Очки:</b> +${POINTS.right} за верный ответ, +${POINTS.perfect} за все верные, +${POINTS.fix} за исправленную ошибку. В Библиотеке за отметку «Прочитано»: статья или разбор ситуации — +${READ_POINTS.a}, вопрос-ответ или миф — +${READ_POINTS.qa}.</li>
     <li><b>Ошибки</b> возвращаются через 1, 3 и 7 дней, пока не запомнятся, — до трёх в день.</li>
     <li><b>Серия 🔥</b> — дни подряд с разминкой; один пропуск в неделю её не обрывает. <b>Вместе 🤝</b> — дни, когда сыграли оба.</li>
     <li><b>Сезон</b> длится, пока не кончатся новые вопросы, потом они идут по второму кругу — начинается следующий сезон. Медаль 🥇 — тому, у кого за сезон больше очков. Новые вопросы, добавленные в игру, попадают в ближайшую разминку.</li>
@@ -1553,14 +1554,14 @@ const BACK_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 
 function rubricNote(key) {
   const lib = S.lib;
   const r = RUBRICS.find((x) => x.key === key);
-  if (r.read) { const c = readCount(lib, key, S.reads.items); return c.done ? `прочитано ${c.done} из ${c.total}` : `${c.total} ${key === 'a' ? plural(c.total, 'статья', 'статьи', 'статей') : key === 'qa' ? plural(c.total, 'вопрос', 'вопроса', 'вопросов') : plural(c.total, 'миф', 'мифа', 'мифов')}`; }
+  if (r.read) { const c = readCount(lib, key, S.reads.items); return c.done ? `прочитано ${c.done} из ${c.total}` : `${c.total} ${key === 'a' ? plural(c.total, 'статья', 'статьи', 'статей') : key === 'qa' ? plural(c.total, 'вопрос', 'вопроса', 'вопросов') : key === 'cases' ? plural(c.total, 'разбор', 'разбора', 'разборов') : plural(c.total, 'миф', 'мифа', 'мифов')}`; }
   if (key === 'ages') { const m = ageMonths(S.pet && S.pet.birth, S.day); const now = m != null && lib.ages.find((s) => s.range && m >= s.range.from && m < s.range.to); return now ? `сейчас: ${now.label}` : r.sub; }
   if (key === 'dict') return `${lib.dict.length} ${plural(lib.dict.length, 'термин', 'термина', 'терминов')}`;
   return r.sub;
 }
 
-// Красная кнопка в шапке «Советов»: «Срочно к ветеринару» в одно касание
-const urgentBtn = () => `<a class="urgent-btn" href="#/lib/vet"><span aria-hidden="true">🚑</span><span><strong>Срочно к ветеринару</strong><small>когда нельзя ждать и куда звонить</small></span><span aria-hidden="true">›</span></a>`;
+// Красная кнопка в шапке «Советов»: «Срочно» в одно касание — к ветеринару и если собака потерялась
+const urgentBtn = () => `<a class="urgent-btn" href="#/lib/vet"><span aria-hidden="true">🚑</span><span><strong>Срочно</strong><small>к ветеринару и если собака потерялась</small></span><span aria-hidden="true">›</span></a>`;
 
 function renderLibrary(r) {
   if (!S.lib) return tipsPage('lib', '<p class="muted">Загружаем…</p>');
@@ -1585,6 +1586,7 @@ function renderLibrary(r) {
         <span class="lib-chips">${metaChips(c)}</span></a>${readBtn('a', c.id, on, can)}</li>`;
     }).join('')}</ul>`;
   } else if (rubric.key === 'qa' || rubric.key === 'myths') body = foldList(S.lib, rubric.key, S.reads.items, can, r.sub);
+  else if (rubric.key === 'cases') body = casesHtml(S.lib, S.reads.items, can, r.sub);
   else if (rubric.key === 'ages') {
     const m = ageMonths(S.pet && S.pet.birth, S.day);
     body = `${m != null ? `<p class="muted">${escapeHtml(DOG())} сейчас ${ageText(S.pet.birth, S.day)}. Текущий этап открыт и отмечен.</p>` : ''}${agesHtml(S.lib, m, r.sub)}`;
@@ -1617,14 +1619,47 @@ function vetContactsHtml() {
     ${can ? '<button class="text-link vet-edit" data-action="vet-edit">Изменить</button>' : ''}</section>`;
 }
 
+// Чип для карточки «Собака потерялась»: номер — из паспорта, база — рядом с телефонами клиники (pet/vet)
+function chipHtml() {
+  const chip = (S.pet && S.pet.chip) || '';
+  const base = (S.vet && S.vet.chipBase) || '';
+  return `<section class="vet-contacts lost-head">
+    <div class="vet-contact"><p class="eyebrow">Номер чипа</p>${chip ? `<strong class="chip-num">${escapeHtml(chip)}</strong>` : '<span class="muted">Не указан</span>'}</div>
+    <div class="vet-contact"><p class="eyebrow">База, где он зарегистрирован</p>${base ? `<strong>${escapeHtml(base)}</strong>` : '<span class="muted">Не указана. Проверьте, что в базе ваш актуальный телефон.</span>'}</div>
+    <div class="lost-actions"><a class="btn primary" href="#/pass/months">📷 Открыть фото Батончика</a><a class="btn" href="#/pass/lost">🔎 Объявление «Если потерялся»</a></div>
+    ${canWrite() ? '<button class="text-link vet-edit" data-action="chip-edit">Изменить</button>' : ''}</section>`;
+}
+
+function chipSheet() {
+  const chip = (S.pet && S.pet.chip) || '';
+  const base = (S.vet && S.vet.chipBase) || '';
+  openSheet(`<form class="form"><h2>🔎 Чип</h2>
+    <label>Номер чипа<input name="chip" maxlength="40" inputmode="numeric" value="${escapeHtml(chip)}"></label>
+    <label>База, где он зарегистрирован<input name="chipBase" maxlength="120" placeholder="Название базы или сайт" value="${escapeHtml(base)}"></label>
+    <p class="muted small">Чип — это номер, а не GPS: он помогает, только если в базе ваш актуальный телефон.</p>
+    <div class="form-actions"><button type="button" class="btn" data-action="sheet-close">Отмена</button><button class="btn primary">Сохранить</button></div>
+  </form>`, (fd) => {
+    const newChip = String(fd.get('chip') || '').trim();
+    const newBase = String(fd.get('chipBase') || '').trim();
+    if (newChip !== chip) store.savePet({ ...(S.pet || {}), chip: newChip });
+    if (newBase !== base) store.saveVet({ ...(S.vet || {}), chipBase: newBase });
+    toast('Сохранено.');
+  });
+}
+
+// «Срочно»: к ветеринару (телефоны клиники) и если собака потерялась (чип, фото, объявление)
 function renderVet() {
-  const c = S.lib.vet[0];
+  const cards = S.lib.vet;
   const back = searchBack(`<a class="back" href="#/lib">${BACK_SVG}Библиотека</a>`);
-  if (!c) return `${back}<p class="empty">Раздел не найден.</p>`;
+  if (!cards.length) return `${back}<p class="empty">Раздел не найден.</p>`;
+  const jump = cards.length > 1 ? `<nav class="urgent-jump">${cards.map((c, i) => `<button type="button" class="filter-chip" data-action="jump-to" data-id="lib-vet-${c.id}">${i ? '🔎' : '🚑'} ${escapeHtml(i ? 'Собака потерялась' : 'К ветеринару')}</button>`).join('')}</nav>` : '';
+  const sections = cards.map((c, i) => `<section class="urgent-card" id="lib-vet-${c.id}">
+      <h2 class="urgent-title">${inline(c.title)}</h2>
+      ${i === 0 ? vetContactsHtml() : i === 1 ? chipHtml() : ''}
+      <div class="prose article vet-article">${articleBody(c)}</div></section>`).join('');
   return `${back}<p class="eyebrow urgent-eyebrow">Библиотека · срочно</p>
-    <h1 class="card-title">${inline(c.title)}</h1>
-    ${vetContactsHtml()}
-    <div class="prose article vet-article">${articleBody(c)}</div>`;
+    <h1 class="card-title">Срочно</h1><p class="page-sub">Здоровье и потеря собаки</p>
+    ${jump}${sections}`;
 }
 
 function vetSheet() {
@@ -1638,7 +1673,7 @@ function vetSheet() {
     <div class="form-actions"><button type="button" class="btn" data-action="sheet-close">Отмена</button><button class="btn primary">Сохранить</button></div>
   </form>`, (fd) => {
     const g = (k) => String(fd.get(k) || '').trim();
-    store.saveVet({ clinicName: g('clinicName'), clinicAddress: g('clinicAddress'), clinicPhone: g('clinicPhone'), vetName: g('vetName'), vetPhone: g('vetPhone') });
+    store.saveVet({ ...(S.vet || {}), clinicName: g('clinicName'), clinicAddress: g('clinicAddress'), clinicPhone: g('clinicPhone'), vetName: g('vetName'), vetPhone: g('vetPhone') });
     toast('Телефоны сохранены.');
   });
 }
@@ -3764,6 +3799,8 @@ const actions = {
   'game-pick': (el) => gamePick(+el.dataset.k),
   'game-next': () => gameNext(),
   'vet-edit': () => vetSheet(),
+  'chip-edit': () => chipSheet(),
+  'jump-to': (el) => { const t = document.getElementById(el.dataset.id); if (t) t.scrollIntoView({ behavior: 'smooth', block: 'start' }); },
   'week-edit': (el) => weekSheet(el.dataset.day),
   // Оформление текста совета: подзаголовок, список, жирный
   'ed-fmt': (el) => {

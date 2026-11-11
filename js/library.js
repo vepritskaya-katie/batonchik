@@ -5,10 +5,11 @@ import { parseBlocks, renderBlocks, inline, escapeHtml, slug, stripComments } fr
 
 // Рубрики в порядке показа; key — часть адреса (#/lib/a, #/lib/qa …), read — у карточек есть «Прочитано»
 export const RUBRICS = [
-  { key: 'vet', title: 'Срочно к ветеринару', icon: '🚑', urgent: true, sub: 'Когда нельзя ждать' },
+  { key: 'vet', title: 'Срочно', icon: '🚑', urgent: true, sub: 'Здоровье и потеря собаки' },
   { key: 'a', title: 'Статьи', icon: '📖', read: true, sub: 'Почему это работает' },
   { key: 'qa', title: 'Вопрос — ответ', icon: '❓', read: true, sub: 'Короткие ответы' },
   { key: 'myths', title: 'Мифы и факты', icon: '🔍', read: true, sub: 'Что устарело' },
+  { key: 'cases', title: 'Разбор ситуаций', icon: '🧩', read: true, sub: 'Подумать, потом открыть' },
   { key: 'ages', title: 'Календарь взросления', icon: '🌱', sub: 'Этапы по возрасту' },
   { key: 'body', title: 'Язык тела', icon: '🐾', sub: 'Шпаргалка' },
   { key: 'dict', title: 'Словарь', icon: '🔤', sub: 'Термины' },
@@ -16,7 +17,7 @@ export const RUBRICS = [
   { key: 'books', title: 'Что почитать', icon: '📚', sub: 'Книги и сайты' },
 ];
 const SECTION_KEY = {
-  'Библиотека': 'intro', 'Срочно к ветеринару': 'vet', 'Статьи': 'a', 'Вопрос — ответ': 'qa', 'Мифы и факты': 'myths', 'Календарь взросления': 'ages',
+  'Библиотека': 'intro', 'Срочно': 'vet', 'Срочно к ветеринару': 'vet', 'Разбор ситуаций': 'cases', 'Статьи': 'a', 'Вопрос — ответ': 'qa', 'Мифы и факты': 'myths', 'Календарь взросления': 'ages',
   'Язык тела': 'body', 'Словарь': 'dict', 'Что почитать': 'books', 'Факт дня': 'facts',
 };
 const META_RE = /^\*\*(Время чтения|Когда актуально):\*\*\s*(.*)$/;
@@ -73,7 +74,11 @@ export function parseLibrary(source) {
     if (cur) sections[cur].push(line);
   }
   const lib = { intro: parseBlocks(splitLabels(sections.intro || []).join('\n')) };
-  for (const key of ['vet', 'a', 'qa', 'myths', 'ages', 'body', 'books']) lib[key] = splitCards(sections[key] || []);
+  for (const key of ['vet', 'a', 'qa', 'myths', 'cases', 'ages', 'body', 'books']) lib[key] = splitCards(sections[key] || []);
+  // У «Разбора ситуаций» — вводный текст до первой карточки
+  const casesLines = sections.cases || [];
+  const firstCase = casesLines.findIndex((l) => /^##\s/.test(l));
+  lib.casesIntro = parseBlocks(splitLabels(firstCase < 0 ? casesLines : casesLines.slice(0, firstCase)).join('\n'));
   lib.ages.forEach((s) => { s.range = ageRange(s.title); const [label, dates] = s.title.split(' · '); s.label = label; s.dates = dates || ''; });
   lib.dict = parseDict(sections.dict || []);
   lib.facts = (sections.facts || []).map((l) => l.match(/^\s*\d+[.)]\s+(.*)$/)).filter(Boolean).map((m) => m[1]);
@@ -152,3 +157,19 @@ export function booksHtml(lib) {
 }
 
 export function introHtml(lib) { return prose(lib.intro); }
+
+// «Разбор ситуаций»: сначала только «Ситуация» — подумать самой, — потом по кнопке весь разбор
+export function casesHtml(lib, items, can, open) {
+  const list = lib.cases.map((c) => {
+    const on = !!items[readKey('cases', c.id)];
+    const cut = c.blocks.findIndex((b, k) => k > 0 && b.type === 'heading');
+    const situation = cut > 0 ? c.blocks.slice(0, cut) : c.blocks;
+    const rest = cut > 0 ? c.blocks.slice(cut) : [];
+    return `<li class="case${on ? ' read' : ''}" id="lib-cases-${c.id}">
+      <div class="case-head"><h2>${inline(c.title)}</h2>${readBtn('cases', c.id, on, can)}</div>
+      <div class="prose case-situation">${prose(situation)}</div>
+      ${rest.length ? `<details class="case-more"${c.id === open ? ' open' : ''}><summary><span class="case-show">Подумать самой → Показать разбор</span><span class="case-hide">Скрыть разбор</span></summary>
+        <div class="prose">${prose(rest)}</div></details>` : ''}</li>`;
+  }).join('');
+  return `${lib.casesIntro && lib.casesIntro.length ? `<div class="prose lib-intro">${prose(lib.casesIntro)}</div>` : ''}<ul class="case-list">${list}</ul>`;
+}

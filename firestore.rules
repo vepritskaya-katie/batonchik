@@ -124,10 +124,10 @@ service cloud.firestore {
           && request.resource.data.updatedAt == request.time
           && request.resource.data.updatedBy is string && request.resource.data.updatedBy.size() <= 40)
         || (doc == 'vet'
-          && request.resource.data.keys().hasOnly(['clinicName', 'clinicAddress', 'clinicPhone', 'vetName', 'vetPhone', 'updatedAt', 'updatedBy'])
+          && request.resource.data.keys().hasOnly(['clinicName', 'clinicAddress', 'clinicPhone', 'vetName', 'vetPhone', 'chipBase', 'updatedAt', 'updatedBy'])
           && str(request.resource.data, 'clinicName', 80) && str(request.resource.data, 'clinicAddress', 160)
           && str(request.resource.data, 'clinicPhone', 30) && str(request.resource.data, 'vetName', 80)
-          && str(request.resource.data, 'vetPhone', 30)
+          && str(request.resource.data, 'vetPhone', 30) && str(request.resource.data, 'chipBase', 120)
           && request.resource.data.updatedAt == request.time
           && request.resource.data.updatedBy is string && request.resource.data.updatedBy.size() <= 40)
         || (doc == 'photo'
