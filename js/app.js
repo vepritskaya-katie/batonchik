@@ -1277,9 +1277,10 @@ function seasonHtml(me, others, list) {
   const cur = list[list.length - 1];
   const left = seasonLeft(S.questions.qs, cur);
   const short = { day: 'numeric', month: 'short' };
-  const score = (s) => {
+  // Медаль 🥇 — только за закончившийся сезон
+  const score = (s, done) => {
     const pts = players.map((p) => ({ p, v: seasonPoints(p, s) })).sort((a, b) => b.v - a.v || (a.p.me ? -1 : 1));
-    const win = pts.length > 1 && pts[0].v > pts[1].v ? pts[0].p : null;
+    const win = done && pts.length > 1 && pts[0].v > pts[1].v ? pts[0].p : null;
     return pts.map((x) => `<span>${x.p === win ? '🥇 ' : ''}${escapeHtml(playerName(x.p))}: <b>${x.v}</b></span>`).join('');
   };
   const what = cur.n === 1
@@ -1288,7 +1289,7 @@ function seasonHtml(me, others, list) {
     : (left ? `Вопросы идут по ${cur.n === 2 ? 'второму' : 'новому'} кругу. В этом сезоне ещё не было ${left} ${plural(left, 'вопроса', 'вопросов', 'вопросов')} — примерно на ${daysText(Math.ceil(left / DAILY))}.`
       : `Сезон подходит к концу — со следующей разминки начнётся сезон ${cur.n + 1}.`);
   const past = list.slice(0, -1).reverse().map((s) => `<li><span class="season-name">Сезон ${s.n} <small>${dayTitle(s.from, short)} – ${dayTitle(s.to, short)}</small></span>
-    <span class="season-score">${score(s)}</span></li>`).join('');
+    <span class="season-score">${score(s, true)}</span></li>`).join('');
   return `<section class="card game-season"><div class="card-head"><h2>Сезон ${cur.n}</h2><span class="muted small">с ${dayTitle(cur.from, { day: 'numeric', month: 'long' })}</span></div>
     <p class="season-score now">${score(cur)}</p>
     <p class="muted small">${what}</p>
