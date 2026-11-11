@@ -12,12 +12,12 @@ export const RUBRICS = [
   { key: 'ages', title: 'Календарь взросления', icon: '🌱', sub: 'Этапы по возрасту' },
   { key: 'body', title: 'Язык тела', icon: '🐾', sub: 'Шпаргалка' },
   { key: 'dict', title: 'Словарь', icon: '🔤', sub: 'Термины' },
-  { key: 'quiz', title: 'Проверь себя', icon: '✏️', sub: 'Тесты' },
+  { key: 'game', title: 'Игра', icon: '🏆', sub: 'Разминка дня', href: '#/game' },
   { key: 'books', title: 'Что почитать', icon: '📚', sub: 'Книги и сайты' },
 ];
 const SECTION_KEY = {
   'Библиотека': 'intro', 'Срочно к ветеринару': 'vet', 'Статьи': 'a', 'Вопрос — ответ': 'qa', 'Мифы и факты': 'myths', 'Календарь взросления': 'ages',
-  'Язык тела': 'body', 'Словарь': 'dict', 'Проверь себя': 'quiz', 'Что почитать': 'books', 'Факт дня': 'facts',
+  'Язык тела': 'body', 'Словарь': 'dict', 'Что почитать': 'books', 'Факт дня': 'facts',
 };
 const META_RE = /^\*\*(Время чтения|Когда актуально):\*\*\s*(.*)$/;
 
@@ -54,33 +54,6 @@ function ageRange(title) {
   return { from: +m[1] * k, to: +m[2] * k };
 }
 
-// «Проверь себя»: ## Тест N, внутри ### Вопрос N
-function parseQuizzes(lines) {
-  const tests = [];
-  let cur = null;
-  for (const line of lines) {
-    const h = line.match(/^##\s+(.*?)\s*$/);
-    if (h) { cur = { title: h[1], lines: [] }; tests.push(cur); continue; }
-    if (!cur) { cur = { title: 'Тест', lines: [] }; tests.push(cur); }
-    cur.lines.push(line);
-  }
-  return tests.map((t, i) => ({ id: `t${i + 1}`, title: t.title, qs: parseQuiz(t.lines) })).filter((t) => t.qs.length);
-}
-
-function parseQuiz(lines) {
-  const qs = [];
-  let q = null;
-  for (const line of lines) {
-    if (/^###\s+/.test(line)) { q = { text: [], options: [], answer: -1, why: '' }; qs.push(q); continue; }
-    if (!q || !line.trim()) continue;
-    const opt = line.match(/^-\s+(\*\s+)?(.*)$/);
-    const why = line.match(/^\*\*Пояснение:\*\*\s*(.*)$/);
-    if (opt) { if (opt[1]) q.answer = q.options.length; q.options.push(opt[2]); } else if (why) q.why = why[1];
-    else q.text.push(line.trim());
-  }
-  return qs.filter((x) => x.options.length && x.answer >= 0).map((x) => ({ ...x, text: x.text.join(' ') }));
-}
-
 function parseDict(lines) {
   return lines.map((l) => l.match(/^-\s+\*\*(.+?)\*\*\s*—\s*(.*)$/)).filter(Boolean).map((m) => {
     const t = m[1].match(/^(.*?)\s*\((.+)\)$/);
@@ -102,7 +75,6 @@ export function parseLibrary(source) {
   const lib = { intro: parseBlocks(splitLabels(sections.intro || []).join('\n')) };
   for (const key of ['vet', 'a', 'qa', 'myths', 'ages', 'body', 'books']) lib[key] = splitCards(sections[key] || []);
   lib.ages.forEach((s) => { s.range = ageRange(s.title); const [label, dates] = s.title.split(' · '); s.label = label; s.dates = dates || ''; });
-  lib.quizzes = parseQuizzes(sections.quiz || []);
   lib.dict = parseDict(sections.dict || []);
   lib.facts = (sections.facts || []).map((l) => l.match(/^\s*\d+[.)]\s+(.*)$/)).filter(Boolean).map((m) => m[1]);
   return lib;
@@ -177,39 +149,6 @@ export function booksHtml(lib) {
     }).join('');
     return `<section class="section"><h2>${inline(c.title)}</h2><ul class="books">${items}</ul></section>`;
   }).join('');
-}
-
-// Варианты в случайном порядке для каждой попытки — чтобы правильный не угадывался по месту
-export function quizOrder(test) {
-  return test.qs.map((q) => q.options.map((_, k) => k).sort(() => Math.random() - 0.5));
-}
-
-// Тест: state = { test, i, picked, score, done, order }
-export function quizHtml(test, state, best) {
-  const total = test.qs.length;
-  if (state.done) {
-    return `<section class="card quiz-result"><p class="eyebrow">Результат</p>
-      <p class="quiz-score">${state.score}<small> из ${total}</small></p>
-      <p class="muted">${best != null ? `Лучший результат — ${best} из ${total}.` : ''}</p>
-      <button class="btn primary wide" data-action="quiz-restart">Пройти ещё раз</button></section>`;
-  }
-  const q = test.qs[state.i];
-  const answered = state.picked != null;
-  const order = (state.order && state.order[state.i]) || q.options.map((_, k) => k);
-  const opts = order.map((k) => {
-    const o = q.options[k];
-    const cls = !answered ? '' : k === q.answer ? ' right' : k === state.picked ? ' wrong' : ' dim';
-    return `<button type="button" class="quiz-opt${cls}" data-action="quiz-pick" data-k="${k}"${answered ? ' disabled' : ''}>${inline(o)}</button>`;
-  }).join('');
-  const verdict = answered ? (state.picked === q.answer ? '<p class="quiz-verdict right">Верно</p>' : '<p class="quiz-verdict wrong">Не совсем</p>') : '';
-  return `<section class="card quiz">
-    <div class="quiz-top"><span class="eyebrow">${escapeHtml(test.title)} · вопрос ${state.i + 1} из ${total}</span><span class="muted small">верно: ${state.score}</span></div>
-    <div class="quiz-track"><span style="width:${Math.round((state.i / total) * 100)}%"></span></div>
-    <p class="quiz-q">${inline(q.text)}</p>
-    <div class="quiz-opts">${opts}</div>
-    ${answered ? `${verdict}<p class="quiz-why">${inline(q.why)}</p>
-      <button class="btn primary wide" data-action="quiz-next">${state.i + 1 < total ? 'Дальше' : 'Результат'}</button>` : ''}
-  </section>`;
 }
 
 export function introHtml(lib) { return prose(lib.intro); }

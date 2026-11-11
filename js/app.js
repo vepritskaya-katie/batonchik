@@ -11,9 +11,13 @@ import { HEALTH_KINDS, NEXT_OPTIONS, nextDate, suggestNext, dueText, ageText, up
 import { pickPhotos, compressPhoto } from './photo.js';
 import { fmtNum, parseNum, series, deltaText, lineChartSvg } from './growth.js';
 import { buildIndex, resultsHtml } from './search.js';
-import { RUBRICS, parseLibrary, quizOrder, readKey, readCount, readBtn, metaChips, articleBody, foldList, agesHtml, dictHtml, booksHtml, quizHtml, introHtml } from './library.js';
+import { RUBRICS, parseLibrary, readKey, readCount, readBtn, metaChips, articleBody, foldList, agesHtml, dictHtml, booksHtml, introHtml } from './library.js';
+import {
+  FORMATS, DAILY, POINTS, READ_POINTS, LEVELS, parseQuestions, formatOf, optionOrder, todayIds, answered, finished, rightCount, readPoints,
+  totalPoints, weekPoints, level, streak, playedDays, sharedDays, trophies, dueRepeats, afterRepeat, newMistake, topicProgress,
+} from './game.js';
 import { pickIdeas } from './ideas.js';
-import { parseNotes, notesListHtml, noteHtml, noteMatches, countText } from './notes.js';
+import { parseNotes, noteItemHtml, noteHtml, noteMatches, NOTE_FILTERS } from './notes.js';
 import {
   CARE_ITEMS, EVERY_OPTIONS, everyText, careState, daysAgoText, careDue, REACTIONS, SOCIAL_GROUPS, SOCIAL_ITEMS, isOwnSocial, socialState, addReaction,
   socialSummary, reactionLine, LOST_STEPS, hasLostPhones, lostLines, lostText, lostPosterHtml, lostPosterImage,
@@ -85,7 +89,7 @@ const S = {
   day: startDay(),
   edit: { trainings: false },
   notes: null,        // вкладка «Каналы»: заметки из Telegram-каналов (только чтение)
-  notesFilter: { q: '', now: false, future: false, sci: false, exp: false },
+  notesFilter: { q: '', p: false, c: false, now: false, future: false, sci: false, exp: false }, // «Практика»: свои советы / каналы и фильтры заметок
   searchQ: '',        // поиск (лупа в шапке): советы, тренировки и игры
   searchMore: {},     // разделы результатов, где нажали «Показать ещё»
   searchFrom: '',     // откуда открыли поиск — туда ведёт «Отмена»
@@ -94,8 +98,10 @@ const S = {
   health: [],         // паспорт: прививки, обработки, таблетки, врач — { id, title, kind, date, time (у врача, «ЧЧ:ММ» или пусто), done, note }
   growth: [],         // рост и вес: { id, date, weight (кг), height (см) }
   lib: null,          // Библиотека (content/biblioteka.md)
-  reads: { items: {}, quiz: {} }, // что прочитано в Библиотеке и лучшие результаты тестов — у каждого свои
-  quiz: { test: '', i: 0, picked: null, score: 0, done: false, order: null },
+  reads: { items: {}, quiz: {} }, // что прочитано в Библиотеке — у каждого своё
+  questions: null,    // вопросы игры (content/igra.md)
+  gamePlayers: [],    // игроки: свой документ и чужие (для рейтинга)
+  gameUi: { reveal: null, rep: null }, // разминка: открытое пояснение; повтор ошибок: { day, ids, i, picked }
   vet: null,          // «Срочно к ветеринару»: круглосуточная клиника и наш ветеринар
   weeks: [],          // «Неделя Батончика»: { id: воскресенье, joy, choice, sleep, ribs, waist, notes }
   factShift: 0,       // «Факт дня» на главной: нажатие — следующий
@@ -179,6 +185,7 @@ const store = createStore({
   onLost(v) { S.lost = v; render(); },
   onSocial(map) { S.social = map || {}; render(); },
   onCare(map) { S.care = map || {}; render(); },
+  onGame(players) { S.gamePlayers = players || []; render(); },
   onMonths(dates) {
     // Список фото месяца изменился (в том числе на другом телефоне): «Как рос» перечитает фото,
     // а уменьшенные копии с другой датой или убранные — забываем
@@ -301,6 +308,9 @@ async function loadContent() {
   tasks.push(loadText('biblioteka.md').then((t) => {
     try { S.lib = parseLibrary(t); } catch (err) { console.error(err); S.lib = { error: true }; }
   }).catch(() => { S.lib = { error: true }; }));
+  tasks.push(loadText('igra.md').then((t) => {
+    try { S.questions = parseQuestions(t); } catch (err) { console.error(err); S.questions = { error: true }; }
+  }).catch(() => { S.questions = { error: true }; }));
   tasks.push(loadText('rasporyadok.md').then((t) => {
     try { S.today = parseToday(t); } catch { S.today = { raw: t }; }
   }).catch(() => { S.today = { error: true }; }));
@@ -994,9 +1004,9 @@ function renderTrainingsPage() {
 
 function tipsSwitch(on) {
   const a = (key, href, label) => `<a class="seg${on === key ? ' on' : ''}" href="${href}"${on === key ? ' aria-current="page"' : ''}>${label}</a>`;
-  return `<nav class="segmented three" aria-label="Разделы советов">${a('lib', '#/lib', 'Библиотека')}${a('t', '#/t', 'Практика')}${a('c', '#/c', 'Каналы')}</nav>`;
+  return `<nav class="segmented three" aria-label="Разделы советов">${a('lib', '#/lib', 'Библиотека')}${a('t', '#/t', 'Практика')}${a('game', '#/game', 'Игра')}</nav>`;
 }
-const TIPS_SUB = 'Почему это работает, что делать и заметки из каналов.';
+const TIPS_SUB = 'Почему это работает, что делать в жизни — и игра на знания.';
 
 // Страница «Советов»: шапка, «Срочно к ветеринару», переключатель разделов и раздел
 function tipsPage(on, body, plus) {
@@ -1015,7 +1025,7 @@ function searchResultsHtml() {
   return `${resultsHtml(searchIndex.items, S.searchQ, S.searchMore)}${loading ? '<p class="muted small">Ещё загружаем часть текстов…</p>' : ''}`;
 }
 
-const SEARCH_HINT = `<div class="search-hint muted"><p>Ищет в советах (Библиотека, Практика, Каналы), тренировках и играх.</p>
+const SEARCH_HINT = `<div class="search-hint muted"><p>Ищет в советах (Библиотека и Практика — вместе с заметками из каналов), тренировках и играх.</p>
   <p>Можно писать часть слова: «повод» найдёт и «поводок», и «поводке». Несколько слов — найдутся места, где есть все.</p></div>`;
 
 function renderSearch() {
@@ -1056,14 +1066,380 @@ function openSearch(e) {
 const fromSearch = () => prevHash === '#/search';
 const searchBack = (fallback) => (fromSearch() ? `<a class="back" href="#/search" data-action="back">${BACK_SVG}Поиск</a>` : fallback);
 
-function renderTipsPage() {
-  return tipsPage('t', catalogBody('t'), { action: 'new-tip', label: 'Новый совет' });
+// ---------- Практика: наши советы и заметки из каналов ----------
+// По темам (# в sovety.md и ## в kanaly.md): сначала наши правила и протоколы 🧭, потом заметки из Telegram-каналов 📣
+
+const SRC_FILTERS = [['p', '🧭 Практика'], ['c', '📣 Каналы']];
+const NOTE_ONLY = NOTE_FILTERS.map(([k]) => k);
+// Внутри пары («Практика» / «Каналы», «сейчас» / «на будущее», ✅ / 💬) — «или», между парами — «и».
+// Фильтры заметок (сейчас, на будущее, ✅, 💬) оставляют только заметки
+const tipShown = (f) => (!(f.p || f.c) || f.p) && !NOTE_ONLY.some((k) => f[k]);
+const noteShown = (n, f) => !!n && (!(f.p || f.c) || f.c) && noteMatches(n, f);
+const CHEV_SVG = '<svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg>';
+
+function practiceThemes() {
+  const themes = [];
+  const byTitle = new Map();
+  const theme = (title) => {
+    if (!byTitle.has(title)) { const t = { title, cards: [], topics: [] }; byTitle.set(title, t); themes.push(t); }
+    return byTitle.get(title);
+  };
+  (S.catalogs.t ? S.catalogs.t.groups : []).forEach((g) => { if (!g.raw) theme(g.title || 'Главное').cards.push(...g.cards); });
+  if (S.notes && !S.notes.error) S.notes.sections.forEach((s) => theme(s.title || 'Разное').topics.push(...s.topics));
+  return themes;
 }
 
-function renderNotesPage() {
-  if (!S.notes) return tipsPage('c', '<p class="muted">Загружаем…</p>');
-  if (S.notes.error) return tipsPage('c', '<div class="banner warn">Не удалось загрузить заметки. Проверьте интернет.</div>');
-  return tipsPage('c', notesListHtml(S.notes, S.notesFilter));
+function practiceCount(shown, tips, notes) {
+  return shown === tips + notes
+    ? `Советов: ${tips}${notes ? ` · заметок из каналов: ${notes}` : ''}`
+    : `Найдено: ${shown} из ${tips + notes}`;
+}
+
+function renderTipsPage() {
+  const plus = { action: 'new-tip', label: 'Новый совет' };
+  const cat = S.catalogs.t;
+  if (!cat) return tipsPage('t', '<p class="muted">Загружаем…</p>', plus);
+  const f = S.notesFilter;
+  let tips = 0;
+  let notes = 0;
+  let shown = 0;
+  const sections = practiceThemes().map((t) => {
+    let visible = 0;
+    const cards = t.cards.map((c) => {
+      const ok = tipShown(f);
+      tips++;
+      if (ok) visible++;
+      return `<li data-tip${ok ? '' : ' hidden'}><a class="card-link" href="#/t/${c.id}">
+        <span class="card-name">${inline(c.name)}</span>
+        ${c.subtitle ? `<span class="card-sub">${inline(c.subtitle)}</span>` : ''}
+        <span class="src-line"><span class="src-mark own">🧭 Практика</span></span>${CHEV_SVG}</a></li>`;
+    }).join('');
+    const topics = t.topics.map((tp) => {
+      let n = 0;
+      const items = tp.notes.map((note) => {
+        const ok = noteShown(note, f);
+        notes++;
+        if (ok) n++;
+        return noteItemHtml(note, ok);
+      }).join('');
+      visible += n;
+      return `<div class="note-topic" data-topic${n ? '' : ' hidden'}>${tp.title ? `<h3>${inline(tp.title)}</h3>` : ''}<ul class="cards">${items}</ul></div>`;
+    }).join('');
+    shown += visible;
+    return `<section class="group note-section" data-section${visible ? '' : ' hidden'}><h2>${inline(t.title)}</h2>
+      ${cards ? `<ul class="cards tips-list">${cards}</ul>` : ''}${topics}</section>`;
+  }).join('');
+  const chips = [...SRC_FILTERS, ...NOTE_FILTERS].map(([key, label]) =>
+    `<button type="button" class="filter-chip" data-action="notes-filter" data-f="${key}" aria-pressed="${!!f[key]}">${label}</button>`).join('');
+  const errors = cat.errors.map((e) => `<div class="banner warn">${escapeHtml(e)}</div>`).join('');
+  const intro = cat.loose.length ? `<div class="prose notes-intro">${blocksHtml(cat.loose, 't', null)}</div>` : '';
+  const notesState = !S.notes ? '<p class="muted small">Загружаем заметки из каналов…</p>'
+    : S.notes.error ? '<div class="banner warn">Не удалось загрузить заметки из каналов. Проверьте интернет.</div>' : '';
+  return tipsPage('t', `${errors}${intro}
+    <p class="muted small practice-legend">🧭 <b>Практика</b> — наши правила и протоколы. 📣 <b>Канал</b> — заметки из Telegram-каналов: ✅ наука и консенсус или 💬 опыт, который подходит не всем собакам.</p>
+    <div class="notes-tools"><div class="filter-chips">${chips}</div>
+      <p class="muted small notes-count" aria-live="polite" data-tips="${tips}" data-notes="${notes}">${practiceCount(shown, tips, notes)}</p></div>
+    ${notesState}${sections}
+    <p class="empty notes-empty"${shown ? ' hidden' : ''}>Ничего не нашлось. Снимите часть фильтров.</p>`, plus);
+}
+
+// ---------- Игра ----------
+// «Разминка дня»: 5 вопросов, у обоих одинаковые; очки, серии, рейтинг недели и повтор ошибок (расчёты — в game.js).
+// День игры — календарный по Москве, одинаковый на обоих телефонах
+
+const gameDay = () => dayKey();
+const LEVEL_ICONS = ['🐶', '🐕', '🐑', '🎓', '🏅'];
+
+function gamePlayers() {
+  const user = S.store.user || {};
+  const list = S.gamePlayers || [];
+  const me = list.find((p) => p.me) || { uid: user.uid || '', me: true, name: user.name || '', photo: '', days: {}, rep: {}, known: {}, read: {} };
+  // В рейтинге — только те, кто уже играл или читал
+  const others = list.filter((p) => !p.me && (Object.keys(p.days || {}).length || Object.keys(p.read || {}).length));
+  return { me, others, all: [me, ...others] };
+}
+const playerName = (p) => (p.me ? 'Вы' : p.name || 'Второй игрок');
+function playerAva(p) {
+  const user = S.store.user || {};
+  const photo = p.me ? p.photo || user.photo || '' : p.photo;
+  const name = (p.me ? user.name || p.name || 'Вы' : p.name) || '?';
+  return /^https:\/\//.test(photo || '')
+    ? `<span class="avatar ava-img"><img src="${escapeHtml(photo)}" alt="" referrerpolicy="no-referrer"></span>`
+    : `<span class="avatar">${escapeHtml(name.charAt(0).toUpperCase())}</span>`;
+}
+// Батончик рядом с вопросами: фото из паспорта и значок настроения
+const dogAva = (mood, big) => `<span class="game-dog${big ? ' big' : ''}">${S.photo ? `<img src="${escapeHtml(S.photo)}" alt="">` : '<span class="game-dog-empty" aria-hidden="true">🐶</span>'}${mood ? `<span class="game-dog-mood" aria-hidden="true">${mood}</span>` : ''}</span>`;
+const daysText = (n) => `${n} ${plural(n, 'день', 'дня', 'дней')}`;
+const ptsText = (n) => `${n} ${plural(n, 'очко', 'очка', 'очков')}`;
+
+function renderGame(r) {
+  const Q = S.questions;
+  if (!Q) return tipsPage('game', '<p class="muted">Загружаем…</p>');
+  if (Q.error) return tipsPage('game', '<div class="banner warn">Не удалось загрузить вопросы. Проверьте интернет.</div>');
+  if (r.id === 'play') return gameRoundHtml();
+  if (r.id === 'repeat') return gameRepeatHtml();
+  return tipsPage('game', gameMainHtml());
+}
+
+// Вопросы разминки на сегодня (без убранных из файла)
+function gameTodayIds(me, all, today) {
+  const rec = me.days[today];
+  return rec ? rec.q : todayIds(S.questions.qs, me, all, today).filter((id) => S.questions.byId.has(id));
+}
+
+function gameMainHtml() {
+  const today = gameDay();
+  const { me, others, all } = gamePlayers();
+  const can = canWrite();
+  const rec = me.days[today];
+  const ids = gameTodayIds(me, all, today);
+  const done = finished(rec);
+  const n = answered(rec);
+  let title;
+  let sub;
+  let btn = '';
+  if (done) {
+    title = `Сегодня: ${rightCount(rec)} из ${rec.q.length}`;
+    sub = 'Новая разминка — завтра.';
+    btn = '<a class="btn wide" href="#/game/play">Посмотреть ответы</a>';
+  } else if (n) {
+    title = `Отвечено ${n} из ${ids.length}`;
+    sub = 'Ответы сохраняются сразу — можно продолжить в любой момент.';
+    btn = can ? '<a class="btn primary wide" href="#/game/play">Продолжить</a>' : '';
+  } else {
+    title = `${ids.length} ${plural(ids.length, 'вопрос', 'вопроса', 'вопросов')} на пару минут`;
+    sub = can ? `+${POINTS.right} за верный ответ и +${POINTS.perfect} сверху, если все верные.` : 'Войдите в приложение, чтобы играть.';
+    btn = can ? '<a class="btn primary wide" href="#/game/play">Начать разминку</a>' : '';
+  }
+  const mine = streak(playedDays(me), today);
+  const together = others.length ? streak(sharedDays(all), today) : 0;
+  const chips = `<span class="game-chip">🔥 ${mine ? `Серия: ${daysText(mine)}` : 'Начните серию сегодня'}</span>
+    ${others.length ? `<span class="game-chip">🤝 Вместе: ${daysText(together)}</span>` : ''}`;
+  // Результат второго — только после своей разминки
+  const rivals = others.map((p) => {
+    const pr = p.days[today];
+    const text = !finished(pr) ? 'разминка ещё впереди'
+      : done ? `${rightCount(pr)} из ${pr.q.length}` : 'разминка пройдена ✓ Результат откроется после вашей';
+    return `<p class="game-rival">${playerAva(p)}<span><b>${escapeHtml(playerName(p))}:</b> ${text}</span></p>`;
+  }).join('');
+  const due = done && can ? dueRepeats(me, S.questions.byId, today) : [];
+  const repeat = due.length ? `<section class="card game-repeat">
+      <div class="card-head"><h2>Повтор ошибок</h2><span class="muted small">${due.length} ${plural(due.length, 'вопрос', 'вопроса', 'вопросов')}</span></div>
+      <p class="muted">Вопросы, где вы ошиблись раньше. +${POINTS.fix} за каждую исправленную ошибку.</p>
+      <a class="btn wide" href="#/game/repeat">Повторить</a></section>` : '';
+  const mood = done ? (rightCount(rec) === rec.q.length ? '🎉' : '👍') : '🎯';
+  return `<section class="card game-hero">
+      <div class="game-hero-top">${dogAva(mood, true)}
+        <div class="game-hero-text"><p class="eyebrow">Разминка дня</p><h2 class="game-title">${title}</h2><p class="muted small">${sub}</p></div></div>
+      <div class="game-chips">${chips}</div>
+      ${rivals}
+      ${btn}
+    </section>
+    ${repeat}
+    ${leagueHtml(me, others, today)}
+    ${levelHtml(me)}
+    ${topicsHtml(me)}
+    ${gameRulesHtml()}`;
+}
+
+function weekRange(monday) {
+  const sunday = addDays(monday, 6);
+  const sameMonth = monday.slice(0, 7) === sunday.slice(0, 7);
+  return `${dayTitle(monday, sameMonth ? { day: 'numeric' } : { day: 'numeric', month: 'long' })} – ${dayTitle(sunday, { day: 'numeric', month: 'long' })}`;
+}
+
+function leagueHtml(me, others, today) {
+  const monday = mondayOf(today);
+  const players = [me, ...others];
+  const cups = trophies(players, today);
+  const rows = players.map((p) => ({ p, pts: weekPoints(p, monday), total: totalPoints(p) }))
+    .sort((a, b) => b.pts - a.pts || (a.p.me ? -1 : 1));
+  const max = Math.max(1, ...rows.map((x) => x.pts));
+  const list = rows.map((x, i) => `<li class="league-row${x.p.me ? ' me' : ''}">
+      <span class="league-place">${others.length ? i + 1 : ''}</span>${playerAva(x.p)}
+      <span class="league-who"><strong>${escapeHtml(playerName(x.p))}</strong>
+        <small>${LEVEL_ICONS[level(x.total).i]} ${escapeHtml(level(x.total).name)}${cups.get(x.p) ? ` · 🏆 ${cups.get(x.p)}` : ''}</small>
+        <span class="mini-bar"><span style="width:${Math.round((x.pts / max) * 100)}%"></span></span></span>
+      <b class="league-pts">${x.pts}</b></li>`).join('');
+  return `<section class="card game-league"><div class="card-head"><h2>Неделя</h2><span class="muted small">${weekRange(monday)}</span></div>
+    <ol class="league">${list}</ol>
+    <p class="muted small">${others.length ? 'Кубок 🏆 — тому, у кого за неделю больше очков. Каждый понедельник счёт с нуля.'
+      : 'Когда второй из вас пройдёт первую разминку, здесь появится соревнование.'}</p></section>`;
+}
+
+function levelHtml(me) {
+  const total = totalPoints(me);
+  const L = level(total);
+  return `<section class="card game-level"><div class="card-head"><h2>Ваш уровень</h2><span class="muted small">${ptsText(total)}</span></div>
+    <p class="level-name"><span aria-hidden="true">${LEVEL_ICONS[L.i]}</span> ${escapeHtml(L.name)}</p>
+    <span class="level-bar"><span style="width:${Math.round(L.frac * 100)}%"></span></span>
+    <p class="muted small">${L.next ? `До уровня «${escapeHtml(L.next)}» — ${ptsText(L.toNext)}.` : 'Высший уровень. Так держать!'}</p></section>`;
+}
+
+function topicsHtml(me) {
+  const rows = topicProgress(S.questions.qs, me.known).map((t) => `<li class="topic-row"><span class="topic-name">${escapeHtml(t.topic)}</span>
+    <span class="mini-bar"><span style="width:${Math.round((t.known / t.total) * 100)}%"></span></span><small>${t.known} из ${t.total}</small></li>`).join('');
+  return `<section class="card game-topics"><div class="card-head"><h2>Что вы уже знаете</h2></div>
+    <p class="muted small">Вопросы по темам, на которые вы хоть раз ответили верно.</p><ul class="topic-list">${rows}</ul></section>`;
+}
+
+function gameRulesHtml() {
+  const formats = FORMATS.map((f) => `${f.icon} ${escapeHtml(f.title)}`).join(', ');
+  return `<details class="card game-rules"><summary>Как устроена игра</summary><div class="prose"><ul>
+    <li><b>Разминка дня</b> — ${DAILY} вопросов, по одному каждого формата: ${formats} Вопросы у вас обоих одинаковые и новые, пока не кончатся.</li>
+    <li><b>Очки:</b> +${POINTS.right} за верный ответ, +${POINTS.perfect} за все верные, +${POINTS.fix} за исправленную ошибку. В Библиотеке за отметку «Прочитано»: статья — +${READ_POINTS.a}, вопрос-ответ или миф — +${READ_POINTS.qa}.</li>
+    <li><b>Ошибки</b> возвращаются через 1, 3 и 7 дней, пока не запомнятся, — до трёх в день.</li>
+    <li><b>Серия 🔥</b> — дни подряд с разминкой; один пропуск в неделю её не обрывает. <b>Вместе 🤝</b> — дни, когда сыграли оба.</li>
+    <li><b>Неделя</b> — с понедельника по воскресенье, кубок 🏆 — тому, у кого больше очков. Уровни: ${LEVELS.map(([pts, name], i) => `${LEVEL_ICONS[i]} ${escapeHtml(name)}${pts ? ` (${pts})` : ''}`).join(' → ')}.</li>
+    <li>Ответы второго видны только после своей разминки. Свободной игры нет — чтобы вопросы за очки не попадались заранее.</li>
+  </ul></div></details>`;
+}
+
+// Карточка вопроса: до ответа — варианты, после — что верно, пояснение и «Подробнее»
+function questionHtml(q, { pos, total, picked, salt, eyebrow, points }) {
+  const f = formatOf(q);
+  const done = picked != null;
+  const ok = done && picked === q.answer;
+  const opts = optionOrder(q, salt).map((k) => {
+    const cls = !done ? '' : k === q.answer ? ' right' : k === picked ? ' wrong' : ' dim';
+    return `<button type="button" class="quiz-opt${cls}" data-action="game-pick" data-k="${k}"${done ? ' disabled' : ''}>${inline(q.options[k])}</button>`;
+  }).join('');
+  const after = !done ? '' : `<div class="game-verdict ${ok ? 'right' : 'wrong'}">${dogAva(ok ? '🎉' : '🤔')}
+      <p><strong>${ok ? 'Верно!' : 'Не совсем.'}</strong>${ok && points ? ` <span class="game-plus">+${points}</span>` : ''}${ok ? '' : ` Правильно: «${inline(q.options[q.answer])}».`}</p></div>
+    ${q.why ? `<p class="quiz-why">${inline(q.why)}</p>` : ''}
+    ${q.more ? `<a class="game-more" href="${escapeHtml(q.more.href)}">Подробнее: ${escapeHtml(q.more.title)} ›</a>` : ''}
+    <button class="btn primary wide" data-action="game-next">${pos + 1 < total ? 'Дальше' : 'Итог'}</button>`;
+  return `<section class="card quiz game-q">
+    <div class="quiz-top"><span class="eyebrow">${escapeHtml(eyebrow)} · ${pos + 1} из ${total}</span></div>
+    <div class="quiz-track"><span style="width:${Math.round(((pos + (done ? 1 : 0)) / total) * 100)}%"></span></div>
+    <p class="game-format"><span aria-hidden="true">${f.icon}</span> ${escapeHtml(f.title)}</p>
+    <p class="quiz-q">${inline(q.text)}</p>
+    <div class="quiz-opts${f.defaults && q.options.length === 2 ? ' two' : ''}">${opts}</div>
+    ${after}
+  </section>`;
+}
+
+function gameRoundHtml() {
+  const today = gameDay();
+  const { me, others, all } = gamePlayers();
+  const back = `<a class="back" href="#/game">${BACK_SVG}Игра</a>`;
+  const rec = me.days[today];
+  if (!canWrite() && !rec) return `${back}<p class="muted">Войдите в приложение, чтобы играть.</p>`;
+  const ids = gameTodayIds(me, all, today);
+  const ui = S.gameUi;
+  const revealing = ui.reveal != null && ui.revealDay === today;
+  const i = revealing ? ui.reveal : answered(rec);
+  if (!ids.length) return `${back}<p class="muted">Вопросов пока нет.</p>`;
+  if (i >= ids.length) return back + gameResultHtml(me, others, rec, today);
+  const q = S.questions.byId.get(ids[i]);
+  if (!q) {
+    return `${back}<section class="card"><p class="muted">Этот вопрос убрали из игры.</p>
+      <button class="btn primary wide" data-action="game-pick" data-k="-1">Дальше</button></section>`;
+  }
+  const picked = rec && rec.p[i] != null ? rec.p[i] : revealing ? ui.revealPick : null;
+  return back + questionHtml(q, { pos: i, total: ids.length, picked, salt: today, eyebrow: 'Разминка дня', points: POINTS.right });
+}
+
+function gameResultHtml(me, others, rec, today) {
+  const right = rightCount(rec);
+  const total = rec.q.length;
+  const perfect = right === total && total >= DAILY;
+  const pts = right * POINTS.right + (perfect ? POINTS.perfect : 0);
+  const mine = streak(playedDays(me), today);
+  const rivals = others.filter((p) => finished(p.days[today]));
+  const rows = rec.q.map((id, k) => {
+    const q = S.questions.byId.get(id);
+    if (!q) return '';
+    const ok = !!rec.ok[k];
+    const yours = rec.p[k];
+    const theirs = rivals.map((p) => {
+      const j = p.days[today].q.indexOf(id);
+      return j < 0 ? '' : `<span>${escapeHtml(playerName(p))}: ${p.days[today].ok[j] ? '✓' : '✗'}</span>`;
+    }).join('');
+    return `<li class="${ok ? 'right' : 'wrong'}"><span class="rv-mark" aria-label="${ok ? 'верно' : 'ошибка'}">${ok ? '✓' : '✗'}</span><div>
+      <p class="rv-q">${inline(q.text)}</p>
+      <p class="rv-a">Ответ: «${inline(q.options[q.answer])}»${!ok && q.options[yours] != null ? ` · ваш: «${inline(q.options[yours])}»` : ''}</p>
+      ${theirs ? `<p class="rv-rivals">${theirs}</p>` : ''}
+      ${q.more ? `<a class="game-more" href="${escapeHtml(q.more.href)}">Подробнее ›</a>` : ''}</div></li>`;
+  }).join('');
+  const due = canWrite() ? dueRepeats(me, S.questions.byId, today) : [];
+  const waiting = others.filter((p) => !finished(p.days[today])).map((p) => `<p class="muted small">${escapeHtml(playerName(p))}: разминка ещё впереди.</p>`).join('');
+  return `<section class="card game-result">
+      ${dogAva(perfect ? '🎉' : right >= total - 1 ? '👍' : '💪', true)}
+      <p class="quiz-score">${right}<small> из ${total}</small></p>
+      <p class="game-plus big">+${ptsText(pts)}${perfect ? ' — все верные!' : ''}</p>
+      <p class="muted">🔥 Серия: ${daysText(mine)}</p>
+      ${due.length ? `<a class="btn primary wide" href="#/game/repeat">Повторить ошибки (${due.length})</a>` : ''}
+      <a class="btn wide" href="#/game">К игре</a>
+    </section>
+    <section class="card"><div class="card-head"><h2>Ответы</h2></div>${waiting}<ol class="game-review">${rows}</ol></section>`;
+}
+
+function gameRepeatHtml() {
+  const today = gameDay();
+  const { me } = gamePlayers();
+  const back = `<a class="back" href="#/game">${BACK_SVG}Игра</a>`;
+  if (!canWrite()) return `${back}<p class="muted">Войдите в приложение, чтобы играть.</p>`;
+  if (!finished(me.days[today])) return `${back}<p class="muted">Сначала — разминка дня.</p><a class="btn primary" href="#/game/play">К разминке</a>`;
+  let st = S.gameUi.rep;
+  if (!st || st.day !== today) st = S.gameUi.rep = { day: today, ids: dueRepeats(me, S.questions.byId, today), i: 0, picked: null, fixed: 0, paid: 0 };
+  if (!st.ids.length) return `${back}<section class="card"><p class="muted">Сегодня повторять нечего. Ошибки вернутся через несколько дней.</p><a class="btn wide" href="#/game">К игре</a></section>`;
+  if (st.i >= st.ids.length) {
+    return `${back}<section class="card game-result">${dogAva(st.fixed === st.ids.length ? '🎉' : '💪', true)}
+      <p class="quiz-score">${st.fixed}<small> из ${st.ids.length}</small></p>
+      <p class="muted">${st.fixed ? 'исправлено' : 'пока не получилось — вопросы вернутся завтра'}${st.paid ? ` · <span class="game-plus">+${st.paid * POINTS.fix}</span>` : ''}</p>
+      <a class="btn wide" href="#/game">К игре</a></section>`;
+  }
+  const q = S.questions.byId.get(st.ids[st.i]);
+  return back + questionHtml(q, { pos: st.i, total: st.ids.length, picked: st.picked, salt: `${today}:r`, eyebrow: 'Повтор ошибок', points: st.lastPaid ? POINTS.fix : 0 });
+}
+
+// Ответ в разминке или в повторе: сразу сохраняем — продолжить можно с любого телефона
+function gamePick(k) {
+  if (!canWrite() || !S.questions || S.questions.error) return;
+  const today = gameDay();
+  const { me, all } = gamePlayers();
+  if (route().id === 'repeat') {
+    const st = S.gameUi.rep;
+    const rec = me.days[today];
+    if (!st || st.picked != null || !finished(rec)) return;
+    const id = st.ids[st.i];
+    const q = S.questions.byId.get(id);
+    if (!q) return;
+    const ok = k === q.answer;
+    const res = afterRepeat(me.rep[id], ok, today);
+    Object.assign(st, { picked: k, lastPaid: res.paid, fixed: st.fixed + (ok ? 1 : 0), paid: st.paid + (res.paid ? 1 : 0) });
+    store.saveGame({
+      days: { [today]: { ...rec, fix: rec.fix + (res.paid ? 1 : 0), r: rec.r + 1 } },
+      rep: { [id]: res.entry },
+      known: ok ? { [id]: 1 } : {},
+    });
+    render();
+    return;
+  }
+  const rec = me.days[today];
+  const ids = gameTodayIds(me, all, today);
+  const i = answered(rec);
+  if (i >= ids.length || (S.gameUi.reveal != null && S.gameUi.revealDay === today)) return;
+  const q = S.questions.byId.get(ids[i]);
+  const ok = !!q && k === q.answer;
+  const day = { q: ids, p: [...(rec ? rec.p : []), k], ok: [...(rec ? rec.ok : []), ok], fix: rec ? rec.fix : 0, r: rec ? rec.r : 0 };
+  const patch = { days: { [today]: day } };
+  if (q && ok) patch.known = { [q.id]: 1 };
+  // Ошибка вернётся завтра; если за неё уже давали очки за исправление, второй раз не дадут
+  if (q && !ok) patch.rep = { [q.id]: { ...newMistake(today), paid: !!(me.rep[q.id] && me.rep[q.id].paid) } };
+  store.saveGame(patch);
+  if (q) Object.assign(S.gameUi, { reveal: i, revealDay: today, revealPick: k });
+  render();
+}
+
+function gameNext() {
+  if (route().id === 'repeat') {
+    const st = S.gameUi.rep;
+    if (st) Object.assign(st, { i: st.i + 1, picked: null, lastPaid: false });
+  } else S.gameUi.reveal = null;
+  render();
+  window.scrollTo(0, 0);
 }
 
 // ---------- Неделя Батончика ----------
@@ -1150,7 +1526,6 @@ function rubricNote(key) {
   if (r.read) { const c = readCount(lib, key, S.reads.items); return c.done ? `прочитано ${c.done} из ${c.total}` : `${c.total} ${key === 'a' ? plural(c.total, 'статья', 'статьи', 'статей') : key === 'qa' ? plural(c.total, 'вопрос', 'вопроса', 'вопросов') : plural(c.total, 'миф', 'мифа', 'мифов')}`; }
   if (key === 'ages') { const m = ageMonths(S.pet && S.pet.birth, S.day); const now = m != null && lib.ages.find((s) => s.range && m >= s.range.from && m < s.range.to); return now ? `сейчас: ${now.label}` : r.sub; }
   if (key === 'dict') return `${lib.dict.length} ${plural(lib.dict.length, 'термин', 'термина', 'терминов')}`;
-  if (key === 'quiz') return `${lib.quizzes.length} ${plural(lib.quizzes.length, 'тест', 'теста', 'тестов')}, пройдено ${lib.quizzes.filter((t) => S.reads.quiz[t.id] != null).length}`;
   return r.sub;
 }
 
@@ -1160,16 +1535,16 @@ const urgentBtn = () => `<a class="urgent-btn" href="#/lib/vet"><span aria-hidde
 function renderLibrary(r) {
   if (!S.lib) return tipsPage('lib', '<p class="muted">Загружаем…</p>');
   if (S.lib.error) return tipsPage('lib', '<div class="banner warn">Не удалось загрузить Библиотеку. Проверьте интернет.</div>');
-  const rubric = RUBRICS.find((x) => x.key === r.id);
+  const rubric = RUBRICS.find((x) => x.key === r.id && !x.href);
   if (!rubric) {
-    const tiles = RUBRICS.filter((x) => !x.urgent).map((x) => `<a class="lib-tile" href="#/lib/${x.key}"><span class="lib-icon" aria-hidden="true">${x.icon}</span>
+    const tiles = RUBRICS.filter((x) => !x.urgent).map((x) => `<a class="lib-tile" href="${x.href || `#/lib/${x.key}`}"><span class="lib-icon" aria-hidden="true">${x.icon}</span>
       <strong>${x.title}</strong><span>${escapeHtml(rubricNote(x.key))}</span></a>`).join('');
     return tipsPage('lib', `<div class="prose lib-intro">${introHtml(S.lib)}</div><div class="lib-grid">${tiles}</div>`);
   }
   if (rubric.key === 'a' && r.sub) return renderArticle(r.sub);
   if (rubric.key === 'vet') return renderVet();
   const can = canWrite();
-  const back = rubric.key === 'quiz' && r.sub ? `<a class="back" href="#/lib/quiz">${BACK_SVG}Проверь себя</a>` : searchBack(`<a class="back" href="#/lib">${BACK_SVG}Библиотека</a>`);
+  const back = searchBack(`<a class="back" href="#/lib">${BACK_SVG}Библиотека</a>`);
   const top = `${back}<div class="page-head"><div class="page-head-text"><p class="eyebrow">Библиотека</p><h1>${rubric.title}</h1>
     <p class="page-sub">${escapeHtml(rubricNote(rubric.key))}${rubric.read && can ? ' · кружок справа — «прочитано»' : ''}</p></div></div>`;
   let body = '';
@@ -1188,20 +1563,6 @@ function renderLibrary(r) {
     body = S.lib.body.map((c) => { let k = 0; return `<div class="prose lib-sheet">${articleBody(c).replace(/<h3>/g, () => `<h3 id="lib-body-${c.id}-${++k}">`)}</div>`; }).join('');
   }
   else if (rubric.key === 'dict') body = dictHtml(S.lib);
-  else if (rubric.key === 'quiz') {
-    const test = r.sub && S.lib.quizzes.find((t) => t.id === r.sub);
-    if (!test) {
-      body = `<ul class="lib-list">${S.lib.quizzes.map((t) => {
-        const best = S.reads.quiz[t.id];
-        return `<li class="lib-row"><a class="lib-link" href="#/lib/quiz/${t.id}"><strong>${inline(t.title)}</strong>
-          <span class="muted small">${t.qs.length} ${plural(t.qs.length, 'вопрос', 'вопроса', 'вопросов')}${best != null ? ` · лучший результат ${best} из ${t.qs.length}` : ''}</span></a>
-          <span class="chev-sm" aria-hidden="true">›</span></li>`;
-      }).join('')}</ul>`;
-    } else {
-      if (S.quiz.test !== test.id) S.quiz = { test: test.id, i: 0, picked: null, score: 0, done: false, order: quizOrder(test) };
-      body = quizHtml(test, S.quiz, S.reads.quiz[test.id]);
-    }
-  }
   else if (rubric.key === 'books') body = booksHtml(S.lib);
   return top + body;
 }
@@ -1304,25 +1665,25 @@ function renderNote(id) {
   const arrow = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>';
   const from = prevHash && pageTitle(prevHash);
   const back = from ? `<a class="back" href="${prevHash}" data-action="back">${arrow}${escapeHtml(from)}</a>`
-    : `<a class="back" href="#/c">${arrow}Каналы</a>`;
+    : `<a class="back" href="#/t">${arrow}Практика</a>`;
   if (!S.notes) return `${back}<p class="muted">Загружаем…</p>`;
   const n = S.notes.byId && S.notes.byId.get(id);
   return n ? noteHtml(n, back) : `${back}<h1>Не найдено</h1><p class="muted">Возможно, заметку переименовали.</p>`;
 }
 
-// Поиск и фильтры прячут лишние заметки прямо на странице, без перерисовки: поле поиска не теряет курсор
+// Фильтры «Практики» прячут лишнее прямо на странице, без перерисовки
 function applyNotesFilter() {
-  if (!S.notes || !S.notes.byId) return;
+  const f = S.notesFilter;
   let shown = 0;
+  view.querySelectorAll('[data-tip]').forEach((li) => { li.hidden = !tipShown(f); if (!li.hidden) shown++; });
   view.querySelectorAll('[data-note]').forEach((li) => {
-    const ok = noteMatches(S.notes.byId.get(li.dataset.note), S.notesFilter);
-    li.hidden = !ok;
-    if (ok) shown++;
+    li.hidden = !noteShown(S.notes && S.notes.byId && S.notes.byId.get(li.dataset.note), f);
+    if (!li.hidden) shown++;
   });
   view.querySelectorAll('[data-topic]').forEach((el) => { el.hidden = !el.querySelector('[data-note]:not([hidden])'); });
-  view.querySelectorAll('[data-section]').forEach((el) => { el.hidden = !el.querySelector('[data-note]:not([hidden])'); });
+  view.querySelectorAll('[data-section]').forEach((el) => { el.hidden = !el.querySelector('[data-note]:not([hidden]), [data-tip]:not([hidden])'); });
   const count = view.querySelector('.notes-count');
-  if (count) count.textContent = countText(shown, S.notes.all.length);
+  if (count) count.textContent = practiceCount(shown, +count.dataset.tips, +count.dataset.notes);
   const empty = view.querySelector('.notes-empty');
   if (empty) empty.hidden = shown > 0;
 }
@@ -2606,6 +2967,7 @@ const PUSH_TYPES = [
   ['toilet', '🌳', '«Пора в туалет»', 'когда по журналу подошло обычное время; ночью и после «Легли» — нет'],
   ['care', '🩺', 'Уход и здоровье', 'в 10:00 — что пора по уходу, прививки и обработки сегодня и завтра; врач — за 2 часа'],
   ['week', '🐾', '«Неделя Батончика»', 'в воскресенье в 19:00, если неделю ещё не заполнили'],
+  ['game', '🧠', '«Разминка дня»', 'в 20:00, если вы сегодня ещё не сыграли; если второй уже сыграл — с его результатом'],
 ];
 const readPush = () => { try { return JSON.parse(localStorage.getItem('bt.push') || 'null'); } catch { return null; } };
 const writePush = (v) => { try { if (v) localStorage.setItem('bt.push', JSON.stringify(v)); else localStorage.removeItem('bt.push'); } catch { /* память недоступна */ } };
@@ -2635,7 +2997,7 @@ function pushPanelHtml() {
   if (sup === 'local') return '';
   const saved = readPush();
   const on = pushOn();
-  const prefs = (saved && saved.prefs) || S.pushDraft || { toilet: true, care: true, week: true };
+  const prefs = (saved && saved.prefs) || S.pushDraft || { toilet: true, care: true, week: true, game: true };
   let body;
   if (!canWrite()) body = '<p class="muted">Уведомления можно включить после входа.</p>';
   else if (sup === 'nokey') body = '<p class="muted">Уведомления ещё не настроены: не хватает ключа в настройках приложения (README, раздел «Уведомления»).</p>';
@@ -2789,11 +3151,11 @@ function onHashChange() {
 }
 
 // Название страницы для кнопки «Назад»; для правки карточки — нет (туда не возвращаемся)
-const PAGE_TITLES = { search: 'Поиск', today: 'Главная', day: 'День', k: 'Тренировки', g: 'Тренировки', pass: 'Паспорт', growth: 'Рост и вес', lib: 'Библиотека', weeks: 'Неделя Батончика', t: 'Советы', c: 'Каналы', d: 'Дневник', me: 'Настройки', social: 'Новое' };
+const PAGE_TITLES = { search: 'Поиск', today: 'Главная', day: 'День', k: 'Тренировки', g: 'Тренировки', pass: 'Паспорт', growth: 'Рост и вес', lib: 'Библиотека', weeks: 'Неделя Батончика', t: 'Практика', c: 'Практика', game: 'Игра', d: 'Дневник', me: 'Настройки', social: 'Новое' };
 // Вложенные страницы со своим названием для «Назад»
-const SUB_TITLES = { 'pass/summary': 'Для ветеринара', 'pass/lost': 'Если потерялся', 'pass/months': 'Как рос' };
-// Какая вкладка внизу подсвечена: игры живут во вкладке «Тренировки», Каналы — в «Советах»
-const TAB_OF = { search: 'search', today: 'today', day: 'day', k: 'k', g: 'k', pass: 'pass', growth: 'pass', lib: 't', weeks: 'day', t: 't', c: 't', d: 'd', social: 'k' };
+const SUB_TITLES = { 'pass/summary': 'Для ветеринара', 'pass/lost': 'Если потерялся', 'pass/months': 'Как рос', 'game/play': 'Разминка', 'game/repeat': 'Повтор ошибок' };
+// Какая вкладка внизу подсвечена: игры с собакой живут во вкладке «Тренировки», Практика, заметки каналов и игра на знания — в «Советах»
+const TAB_OF = { search: 'search', today: 'today', day: 'day', k: 'k', g: 'k', pass: 'pass', growth: 'pass', lib: 't', weeks: 'day', t: 't', c: 't', game: 't', d: 'd', social: 'k' };
 
 function pageTitle(hash) {
   const parts = hash.replace(/^#\/?/, '').split('/').filter(Boolean);
@@ -2812,6 +3174,12 @@ function render(force) {
   // То же для поиска, пока в нём печатают
   if (r.page === 'search' && !force && document.activeElement && document.activeElement.matches('.search-input')) return;
   if (r.page === 'lib' && r.id === 'dict' && !force && document.activeElement && document.activeElement.matches('.dict-search')) return;
+  // Тесты «Проверь себя» переехали в игру
+  if (r.page === 'lib' && r.id === 'quiz') {
+    history.replaceState(null, '', '#/game');
+    currentHash = '#/game';
+    return render(force);
+  }
   let html;
   if (r.page === 'search') html = renderSearch();
   else if (r.page === 'me') html = renderMe();
@@ -2823,7 +3191,8 @@ function render(force) {
   else if (r.page === 'lib') html = renderLibrary(r);
   else if (r.page === 'weeks') html = renderWeeks();
   else if (r.page === 'd') html = r.id ? renderStoryPage(r.id) : renderDiary();
-  else if (r.page === 'c') html = r.id ? renderNote(r.id) : renderNotesPage();
+  else if (r.page === 'c') html = r.id ? renderNote(r.id) : renderTipsPage();
+  else if (r.page === 'game') html = renderGame(r);
   else if (TABS[r.tab]) html = r.id ? renderCard(r.tab, r.id) : (r.tab === 't' ? renderTipsPage() : renderTrainingsPage());
   else html = renderHome();
   view.innerHTML = html;
@@ -3349,37 +3718,23 @@ const actions = {
   // Библиотека
   'lib-read': (el) => {
     if (!canWrite()) return;
-    const on = !S.reads.items[el.dataset.id];
+    const key = el.dataset.id;
+    const on = !S.reads.items[key];
     S.reads = { ...S.reads, items: { ...S.reads.items } };
-    if (on) S.reads.items[el.dataset.id] = true; else delete S.reads.items[el.dataset.id];
-    store.setRead(el.dataset.id, on);
+    if (on) S.reads.items[key] = true; else delete S.reads.items[key];
+    store.setRead(key, on);
+    // Очки в игре — за первую отметку; снятая и снова поставленная отметка их не добавляет
+    const pts = readPoints(key);
+    if (on && pts && !gamePlayers().me.read[key]) {
+      store.saveGame({ read: { [key]: gameDay() } });
+      toast(`Прочитано · +${pts} в игре`);
+    }
     render();
   },
+  'game-pick': (el) => gamePick(+el.dataset.k),
+  'game-next': () => gameNext(),
   'vet-edit': () => vetSheet(),
   'week-edit': (el) => weekSheet(el.dataset.day),
-  'quiz-pick': (el) => {
-    const test = S.lib.quizzes.find((t) => t.id === S.quiz.test);
-    const q = test && test.qs[S.quiz.i];
-    if (S.quiz.picked != null || !q) return;
-    S.quiz.picked = +el.dataset.k;
-    if (S.quiz.picked === q.answer) S.quiz.score++;
-    render();
-  },
-  'quiz-next': () => {
-    const test = S.lib.quizzes.find((t) => t.id === S.quiz.test);
-    if (!test) return;
-    if (S.quiz.i + 1 < test.qs.length) { S.quiz = { ...S.quiz, i: S.quiz.i + 1, picked: null }; render(); return; }
-    S.quiz = { ...S.quiz, done: true };
-    const best = S.reads.quiz[test.id];
-    if (canWrite() && (best == null || S.quiz.score > best)) store.saveQuizBest(test.id, S.quiz.score);
-    render();
-    window.scrollTo(0, 0);
-  },
-  'quiz-restart': () => {
-    const test = S.lib.quizzes.find((t) => t.id === S.quiz.test);
-    if (test) S.quiz = { test: test.id, i: 0, picked: null, score: 0, done: false, order: quizOrder(test) };
-    render();
-  },
   // Оформление текста совета: подзаголовок, список, жирный
   'ed-fmt': (el) => {
     const ta = view.querySelector('[data-editor] textarea[data-path="text"]');

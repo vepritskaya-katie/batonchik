@@ -20,7 +20,7 @@ const addDays = (key, n) => new Date(Date.parse(`${key}T12:00:00Z`) + n * 864000
 const moscowAt = (key, hm) => new Date(Date.parse(`${key}T${hm}:00Z`) - MSK);
 
 // Типы уведомлений: в pushTokens.prefs у каждого телефона свои галочки
-export const TYPES = ['toilet', 'care', 'week'];
+export const TYPES = ['toilet', 'care', 'week', 'game'];
 
 const plain = (snap) => ({ id: snap.id, ...snap.data() });
 const toDate = (v) => (v && typeof v.toDate === 'function' ? v.toDate() : new Date(v));
@@ -130,6 +130,38 @@ async function weekMessage(db, state, now, patch) {
   return { title: 'Неделя Батончика 🐾', body: 'Подведите неделю: три вопроса о благополучии, вес и заметки.', link: '#/', tag: 'week' };
 }
 
+// «Разминка дня»: в 20:00 — каждому, кто сегодня ещё не прошёл разминку (game/{uid}, см. js/game.js).
+// Если второй уже прошёл — с его результатом. Один раз в день на человека
+const roundDone = (g, day) => {
+  const r = g && g.days && g.days[day];
+  return !!(r && Array.isArray(r.q) && r.q.length && Array.isArray(r.p) && r.p.length >= r.q.length);
+};
+async function gameMessages(db, state, now, patch, tokens) {
+  const today = dayKey(now);
+  if (mskHour(now) < 20) return [];
+  // gameSent: { uid: день, когда уже напомнили }
+  const sent = {};
+  const uids = [...new Set(tokens.map((t) => t.uid).filter((u) => typeof u === 'string' && u))]
+    .filter((uid) => !(state.gameSent && state.gameSent[uid] === today));
+  if (!uids.length) return [];
+  const games = Object.fromEntries((await db.collection('game').get()).docs.map((d) => [d.id, d.data()]));
+  const out = [];
+  for (const uid of uids) {
+    sent[uid] = today;
+    if (roundDone(games[uid], today)) continue;
+    const rival = Object.entries(games).find(([id, g]) => id !== uid && roundDone(g, today));
+    let body = 'Сегодня ещё не сыграно: 5 вопросов на пару минут.';
+    if (rival) {
+      const r = rival[1].days[today];
+      const right = (Array.isArray(r.ok) ? r.ok : []).filter(Boolean).length;
+      body = `${String(rival[1].name || 'Второй игрок').slice(0, 40)}: ${right} из ${r.q.length}. Ваш ход!`;
+    }
+    out.push({ uid, msg: { title: 'Разминка дня 🧠', body, link: '#/game', tag: 'game' } });
+  }
+  patch.gameSent = sent;
+  return out;
+}
+
 // Один проход: что пора прислать сейчас. Состояние (что уже прислали) — в push/state
 export async function tick({ db, messaging, now = new Date() }) {
   const stateRef = db.collection('push').doc('state');
@@ -151,9 +183,11 @@ export async function tick({ db, messaging, now = new Date() }) {
     const m = await weekMessage(db, state, now, patch);
     if (m) out.push(['week', m]);
   }
-  for (const [type, m] of out) await send(db, messaging, want(type), m);
+  // «Разминка дня» — каждому своё: только на его телефоны
+  if (want('game').length) (await gameMessages(db, state, now, patch, want('game'))).forEach(({ uid, msg }) => out.push(['game', msg, uid]));
+  for (const [type, m, uid] of out) await send(db, messaging, want(type).filter((t) => !uid || t.uid === uid), m);
   if (Object.keys(patch).length) await stateRef.set(patch, { merge: true });
-  return out.map(([type, m]) => ({ type, ...m }));
+  return out.map(([type, m, uid]) => ({ type, ...m, ...(uid ? { uid } : {}) }));
 }
 
 // Проверочное уведомление: на все телефоны этого человека

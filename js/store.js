@@ -32,10 +32,52 @@ function localStories() {
   }]));
 }
 
+// ---------- Игра ----------
+
+// Данные игрока: days — разминки по дням, rep — ошибки на повтор, known — на что отвечали верно, read — очки за чтение
+const GAME_MAPS = ['days', 'rep', 'known', 'read'];
+const GAME_DAY_RE = /^\d{4}-\d\d-\d\d$/;
+function cleanGame(v) {
+  const src = v || {};
+  const map = (x) => (x && typeof x === 'object' && !Array.isArray(x) ? x : {});
+  const days = {};
+  for (const [d, r] of Object.entries(map(src.days))) {
+    if (!GAME_DAY_RE.test(d) || !r || !Array.isArray(r.q)) continue;
+    days[d] = {
+      q: r.q.filter((x) => typeof x === 'string'),
+      p: (Array.isArray(r.p) ? r.p : []).map(Number),
+      ok: (Array.isArray(r.ok) ? r.ok : []).map(Boolean),
+      fix: Number.isInteger(r.fix) ? r.fix : 0,
+      r: Number.isInteger(r.r) ? r.r : 0,
+    };
+  }
+  const rep = {};
+  for (const [id, e] of Object.entries(map(src.rep))) {
+    if (e && GAME_DAY_RE.test(e.due)) rep[id] = { box: Number.isInteger(e.box) ? e.box : 0, due: e.due, paid: !!e.paid };
+  }
+  const read = Object.fromEntries(Object.entries(map(src.read)).filter(([, d]) => GAME_DAY_RE.test(d)));
+  return { name: typeof src.name === 'string' ? src.name : '', photo: typeof src.photo === 'string' ? src.photo : '', days, rep, known: { ...map(src.known) }, read };
+}
+// Изменения поверх сохранённого: null — убрать запись
+function mergeGame(cur, patch) {
+  const out = cleanGame(cur);
+  for (const key of GAME_MAPS) {
+    for (const [k, v] of Object.entries(patch[key] || {})) {
+      if (v === null) delete out[key][k]; else out[key][k] = v;
+    }
+  }
+  return out;
+}
+// Локальный режим: играете вы одни; другие игроки бывают только в примере (bt.gamePlayers)
+const localPlayers = () => [
+  { ...cleanGame(read('bt.game', {})), uid: 'local', me: true },
+  ...read('bt.gamePlayers', []).map((p, i) => ({ ...cleanGame(p), uid: `other${i + 1}`, me: false })),
+];
+
 // Фото месяца: только даты — { 5: '2026-10-29' } (сами фото — по запросу)
 const localMonthDates = () => Object.fromEntries(Object.entries(read('bt.monthPhotos', {})).map(([n, p]) => [n, p.date || '']));
 
-function localStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onPet = () => {}, onPhoto = () => {}, onHealth = () => {}, onGrowth = () => {}, onReads = () => {}, onVet = () => {}, onWeeks = () => {}, onStories = () => {}, onLost = () => {}, onSocial = () => {}, onCare = () => {}, onMonths = () => {} }) {
+function localStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onPet = () => {}, onPhoto = () => {}, onHealth = () => {}, onGrowth = () => {}, onReads = () => {}, onVet = () => {}, onWeeks = () => {}, onStories = () => {}, onLost = () => {}, onSocial = () => {}, onCare = () => {}, onMonths = () => {}, onGame = () => {} }) {
   let day = null;
   const state = { mode: 'local', status: 'ready', user: { name: '' } };
   const mark = () => ({ uid: 'local', name: '', at: new Date().toISOString() });
@@ -63,6 +105,7 @@ function localStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onPet 
       onLost(read('bt.lost', null));
       onSocial(cleanSocial(read('bt.social', {})));
       onCare(cleanCare(read('bt.care', {})));
+      onGame(localPlayers());
       onMonths(localMonthDates());
     },
     setDay(key) {
@@ -122,7 +165,13 @@ function localStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onPet 
         plan: read('bt.plan', null), marks: read('bt.marks', {}), days, events: read('bt.events', []), cards: read('bt.cards', {}),
         pet: read('bt.pet', null), health: read('bt.health', {}), stories: read('bt.stories', {}), growth: read('bt.growth', {}),
         weeks: read('bt.weeks', {}), lost: read('bt.lost', null), social: read('bt.social', {}), care: read('bt.care', {}),
+        game: read('bt.game', {}),
       };
+    },
+    // Игра: свои ответы, повторы ошибок и очки за чтение
+    saveGame(patch) {
+      write('bt.game', mergeGame(read('bt.game', {}), patch));
+      onGame(localPlayers());
     },
     // Паспорт и дневник
     savePet(profile) { write('bt.pet', profile); onPet(profile); },
@@ -187,16 +236,10 @@ function localStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onPet 
       write('bt.growth', all);
       onGrowth(Object.entries(all).map(([k, r]) => ({ id: k, ...r })));
     },
-    // Библиотека: что прочитано и лучший результат теста — у каждого свои
+    // Библиотека: что прочитано — у каждого своё
     setRead(key, on) {
       const r = read('bt.reads', { items: {}, quiz: {} });
       if (on) r.items[key] = true; else delete r.items[key];
-      write('bt.reads', r);
-      onReads(r);
-    },
-    saveQuizBest(test, n) {
-      const r = read('bt.reads', { items: {}, quiz: {} });
-      r.quiz = { ...(r.quiz || {}), [test]: n };
       write('bt.reads', r);
       onReads(r);
     },
@@ -218,7 +261,7 @@ function localStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onPet 
 
 // ---------- Firebase ----------
 
-function firebaseStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onError, onPet = () => {}, onPhoto = () => {}, onHealth = () => {}, onGrowth = () => {}, onReads = () => {}, onVet = () => {}, onWeeks = () => {}, onStories = () => {}, onLost = () => {}, onSocial = () => {}, onCare = () => {}, onMonths = () => {} }, firebaseConfig) {
+function firebaseStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onError, onPet = () => {}, onPhoto = () => {}, onHealth = () => {}, onGrowth = () => {}, onReads = () => {}, onVet = () => {}, onWeeks = () => {}, onStories = () => {}, onLost = () => {}, onSocial = () => {}, onCare = () => {}, onMonths = () => {}, onGame = () => {} }, firebaseConfig) {
   const state = { mode: 'firebase', status: 'loading', user: null, message: '' };
   let fb = null; // модули SDK
   let db = null;
@@ -319,6 +362,12 @@ function firebaseStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onE
       const v = snap.exists() ? snap.data() : {};
       onReads({ items: v.items || {}, quiz: v.quiz || {} });
     }, fail));
+    // Игра: у каждого свой документ game/{uid}, видят оба — для рейтинга
+    unsubs.push(onSnapshot(collection(db, 'game'), (snap) => {
+      const list = snap.docs.map((d) => ({ ...cleanGame(d.data()), uid: d.id, me: d.id === state.user.uid }));
+      if (!list.some((p) => p.me)) list.unshift({ ...cleanGame({ name: state.user.name }), uid: state.user.uid, me: true });
+      onGame(list);
+    }, fail));
     unsubs.push(onSnapshot(collection(db, 'growth'), (snap) => {
       onGrowth(snap.docs.map((d) => { const v = d.data(); return { id: d.id, date: v.date, weight: v.weight || 0, height: v.height || 0 }; }));
     }, fail));
@@ -334,7 +383,7 @@ function firebaseStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onE
     const fallbackName = (user.displayName || email.split('@')[0] || '').split(' ')[0];
     const ready = (name) => {
       const wasReady = state.status === 'ready';
-      emit({ status: 'ready', user: { name, email, uid: user.uid } });
+      emit({ status: 'ready', user: { name, email, uid: user.uid, photo: user.photoURL || '' } });
       if (!wasReady) startListeners();
     };
     const cached = read(cacheKey, null);
@@ -407,6 +456,7 @@ function firebaseStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onE
           onSocial({});
           onCare({});
           onMonths({});
+          onGame([]);
           return emit({ status: 'signed-out', user: null });
         }
         checkAccess(user);
@@ -547,7 +597,7 @@ function firebaseStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onE
         plan: plan.exists() ? plain(plan.data()) : null,
         marks: await all('marks'), days: await all('days'), events: await all('events'), cards: await all('cards'),
         pet: await all('pet'), health: await all('health'), stories: await all('stories'), growth: await all('growth'),
-        weeks: await all('weeks'), social: await all('social'), care: await all('care'),
+        weeks: await all('weeks'), social: await all('social'), care: await all('care'), game: await all('game'),
       };
     },
 
@@ -595,16 +645,21 @@ function firebaseStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onE
       const { doc, deleteDoc } = fb.fs;
       deleteDoc(doc(db, 'growth', id)).catch(fail);
     },
-    // Библиотека: документ reads/{uid} — что прочитал этот человек и его лучший результат теста
+    // Игра: game/{uid} — свои ответы, повторы ошибок и очки за чтение. null в patch — убрать запись
+    saveGame(patch) {
+      if (!ready()) return;
+      const { doc, setDoc, serverTimestamp, deleteField } = fb.fs;
+      const data = { name: state.user.name || '', photo: state.user.photo || '', updatedAt: serverTimestamp() };
+      for (const key of GAME_MAPS) {
+        if (patch[key]) data[key] = Object.fromEntries(Object.entries(patch[key]).map(([k, v]) => [k, v === null ? deleteField() : v]));
+      }
+      setDoc(doc(db, 'game', state.user.uid), data, { merge: true }).catch(fail);
+    },
+    // Библиотека: документ reads/{uid} — что прочитал этот человек
     setRead(key, on) {
       if (!ready()) return;
       const { doc, setDoc, serverTimestamp, deleteField } = fb.fs;
       setDoc(doc(db, 'reads', state.user.uid), { items: { [key]: on ? true : deleteField() }, updatedAt: serverTimestamp() }, { merge: true }).catch(fail);
-    },
-    saveQuizBest(test, n) {
-      if (!ready()) return;
-      const { doc, setDoc, serverTimestamp } = fb.fs;
-      setDoc(doc(db, 'reads', state.user.uid), { quiz: { [test]: n }, updatedAt: serverTimestamp() }, { merge: true }).catch(fail);
     },
     // «Неделя Батончика»: weeks/{воскресенье} — вопросы о благополучии, фигура, заметки (вес — в growth)
     saveWeek(day, w) {
@@ -691,7 +746,7 @@ function firebaseStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onE
       const platform = /iPhone|iPad/.test(navigator.userAgent) ? 'ios' : /Android/.test(navigator.userAgent) ? 'android' : 'other';
       await setDoc(doc(db, 'pushTokens', id), {
         token, uid: state.user.uid, name: state.user.name, platform,
-        prefs: { toilet: !!prefs.toilet, care: !!prefs.care, week: !!prefs.week }, updatedAt: serverTimestamp(),
+        prefs: { toilet: !!prefs.toilet, care: !!prefs.care, week: !!prefs.week, game: !!prefs.game }, updatedAt: serverTimestamp(),
       });
     },
     // unsubscribe — ещё и отписать телефон от уведомлений (при «Выключить»; при смене токена — нет)
