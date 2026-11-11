@@ -6,6 +6,8 @@ import { parseBlocks, renderBlocks, inline, escapeHtml, slug, stripComments } fr
 // Рубрики в порядке показа; key — часть адреса (#/lib/a, #/lib/qa …), read — у карточек есть «Прочитано»
 export const RUBRICS = [
   { key: 'vet', title: 'Срочно', icon: '🚑', urgent: true, sub: 'Здоровье и потеря собаки' },
+  // «Здоровье» — сразу после «Срочно»: широкая спокойная плитка над остальными
+  { key: 'health', title: 'Здоровье: болезни и симптомы', short: 'Здоровье', icon: '🩺', read: true, feature: true, sub: 'Как выглядит, чем пахнет и насколько срочно' },
   { key: 'a', title: 'Статьи', icon: '📖', read: true, sub: 'Почему это работает' },
   { key: 'qa', title: 'Вопрос — ответ', icon: '❓', read: true, sub: 'Короткие ответы' },
   { key: 'myths', title: 'Мифы и факты', icon: '🔍', read: true, sub: 'Что устарело' },
@@ -16,7 +18,7 @@ export const RUBRICS = [
   { key: 'books', title: 'Что почитать', icon: '📚', sub: 'Книги и сайты' },
 ];
 const SECTION_KEY = {
-  'Библиотека': 'intro', 'Срочно': 'vet', 'Срочно к ветеринару': 'vet', 'Разбор ситуаций': 'cases', 'Статьи': 'a', 'Вопрос — ответ': 'qa', 'Мифы и факты': 'myths', 'Календарь взросления': 'ages',
+  'Библиотека': 'intro', 'Срочно': 'vet', 'Срочно к ветеринару': 'vet', 'Здоровье: болезни и симптомы': 'health', 'Здоровье': 'health', 'Разбор ситуаций': 'cases', 'Статьи': 'a', 'Вопрос — ответ': 'qa', 'Мифы и факты': 'myths', 'Календарь взросления': 'ages',
   'Язык тела': 'body', 'Словарь': 'dict', 'Что почитать': 'books', 'Факт дня': 'facts',
 };
 const META_RE = /^\*\*(Время чтения|Когда актуально):\*\*\s*(.*)$/;
@@ -73,11 +75,14 @@ export function parseLibrary(source) {
     if (cur) sections[cur].push(line);
   }
   const lib = { intro: parseBlocks(splitLabels(sections.intro || []).join('\n')) };
-  for (const key of ['vet', 'a', 'qa', 'myths', 'cases', 'ages', 'body', 'books']) lib[key] = splitCards(sections[key] || []);
-  // У «Разбора ситуаций» — вводный текст до первой карточки
-  const casesLines = sections.cases || [];
-  const firstCase = casesLines.findIndex((l) => /^##\s/.test(l));
-  lib.casesIntro = parseBlocks(splitLabels(firstCase < 0 ? casesLines : casesLines.slice(0, firstCase)).join('\n'));
+  for (const key of ['vet', 'health', 'a', 'qa', 'myths', 'cases', 'ages', 'body', 'books']) lib[key] = splitCards(sections[key] || []);
+  // У «Здоровья» и «Разбора ситуаций» — вводный текст до первой карточки
+  const introOf = (lines = []) => {
+    const first = lines.findIndex((l) => /^##\s/.test(l));
+    return parseBlocks(splitLabels(first < 0 ? lines : lines.slice(0, first)).join('\n'));
+  };
+  lib.casesIntro = introOf(sections.cases);
+  lib.healthIntro = introOf(sections.health);
   lib.ages.forEach((s) => { s.range = ageRange(s.title); const [label, dates] = s.title.split(' · '); s.label = label; s.dates = dates || ''; });
   lib.dict = parseDict(sections.dict || []);
   lib.facts = (sections.facts || []).map((l) => l.match(/^\s*\d+[.)]\s+(.*)$/)).filter(Boolean).map((m) => m[1]);
@@ -106,6 +111,26 @@ export function metaChips(card) {
 }
 
 export function articleBody(card) { return prose(card.blocks); }
+
+// «Здоровье». Строка «Температура в покое: ___ °C» — поле, которое заполняют в приложении: подпись и единица.
+export const FILL_RE = /^(.+?):\s*_{3,}\s*(.*)$/;
+export const fillKey = (label) => slug(label).slice(0, 40);
+export const fillItems = (block) => block.items.map((it) => { const m = it.text.match(FILL_RE); return { key: fillKey(m[1]), label: m[1].trim(), unit: m[2].trim() }; });
+const isFillList = (b) => b.type === 'list' && b.items.length > 0 && b.items.every((it) => FILL_RE.test(it.text));
+export const fillBlocks = (card) => card.blocks.filter(isFillList);
+
+// «Насколько срочно»: строки с метками — цветные плашки (красная, оранжевая, жёлтая, зелёная)
+const URGENCY = { 'Немедленно': 'now', 'Сегодня': 'today', 'В ближайшие 1–3 дня': 'soon', 'Можно наблюдать': 'watch' };
+const urgencyHtml = (html) => html
+  .replace(/<li><div class="li-text"><strong>(Немедленно|Сегодня|В ближайшие 1–3 дня|Можно наблюдать):<\/strong>\s*/g,
+    (m, label) => `<li class="urg urg-${URGENCY[label]}"><div class="li-text"><span class="urg-tag">${label}</span> `)
+  .replace(/<strong>(немедленно)<\/strong>/g, '<strong class="urg-word">$1</strong>');
+
+// Тело карточки «Здоровья»; fill(items, n) рисует n-й блок полей «___» (значения хранит приложение)
+export function healthBody(card, fill) {
+  let n = 0;
+  return urgencyHtml(card.blocks.map((b) => (isFillList(b) ? fill(fillItems(b), n++) : prose([b]))).join('\n'));
+}
 
 // Вопрос — ответ и мифы: заголовок, по нажатию раскрывается ответ
 export function foldList(lib, rubric, items, can, open) {
