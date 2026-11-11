@@ -1324,3 +1324,119 @@ a.story-date { color: inherit; text-decoration: none; }
 }
 .idea-plan:active { background: var(--surface); }
 .idea-tile .tr-count { align-self: center; }
+
+/* ---------- Игра: «Разминка дня» ---------- */
+.game-hero { background: color-mix(in srgb, var(--lavender) 55%, var(--surface)); }
+.game-hero-top { display: flex; align-items: center; gap: 14px; }
+.game-hero-text { min-width: 0; }
+.game-title { margin: 2px 0 4px; font: 700 21px/1.25 "Manrope", sans-serif; letter-spacing: -.01em; }
+.game-dog { position: relative; flex: none; width: 46px; height: 46px; border-radius: 50%; background: var(--sand); display: grid; place-items: center; }
+.game-dog.big { width: 72px; height: 72px; }
+.game-dog img { width: 100%; height: 100%; border-radius: 50%; object-fit: cover; }
+.game-dog-empty { font-size: 24px; }
+.game-dog.big .game-dog-empty { font-size: 36px; }
+.game-dog-mood {
+  position: absolute; right: -4px; bottom: -4px; width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center;
+  font-size: 14px; background: var(--surface); box-shadow: 0 1px 4px rgba(0, 0, 0, .15);
+}
+.game-dog.big .game-dog-mood { width: 30px; height: 30px; font-size: 17px; }
+.game-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 14px 0 4px; }
+.game-chip { padding: 5px 11px; border-radius: 99px; background: var(--surface); font-size: 14px; font-weight: 600; }
+.game-rival { display: flex; align-items: center; gap: 10px; margin: 10px 0 0; font-size: 15px; }
+.game-rival .avatar { width: 30px; height: 30px; font-size: 14px; flex: none; }
+.game-hero .btn.wide { margin-top: 14px; }
+.avatar.ava-img { overflow: hidden; background: var(--surface-2); }
+.avatar.ava-img img { width: 100%; height: 100%; object-fit: cover; }
+.game-repeat .btn { margin-top: 8px; }
+.league { list-style: none; margin: 0 0 8px; padding: 0; }
+.league-row { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-top: 1px solid var(--line); }
+.league-row:first-child { border-top: 0; }
+.league-place { width: 14px; font-weight: 700; color: var(--muted); text-align: center; flex: none; }
+.league-row .avatar { flex: none; }
+.league-who { flex: 1; min-width: 0; display: grid; gap: 3px; }
+.league-who small { color: var(--muted); font-size: 13px; }
+.league-who .mini-bar { height: 7px; }
+.league-row.me .mini-bar span { background: var(--accent); }
+.league-pts { font: 700 22px "Manrope", sans-serif; min-width: 40px; text-align: right; }
+.level-name { margin: 2px 0 10px; font: 700 20px "Manrope", sans-serif; }
+.level-bar { display: block; height: 10px; border-radius: 99px; background: var(--surface-2); overflow: hidden; margin-bottom: 8px; }
+.level-bar span { display: block; height: 100%; border-radius: 99px; background: linear-gradient(90deg, var(--accent), var(--mk-health)); }
+.topic-list { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 10px; }
+.topic-row { display: grid; grid-template-columns: minmax(0, 1fr) 90px auto; align-items: center; gap: 10px; font-size: 15px; }
+.topic-row .mini-bar { height: 7px; }
+.topic-row small { color: var(--muted); min-width: 52px; text-align: right; }
+.game-rules summary { cursor: pointer; font-weight: 700; }
+.game-rules ul { margin: 10px 0 0; padding-left: 18px; }
+.game-rules li { margin: 6px 0; }
+.game-format { margin: 0 0 6px; font-size: 14px; font-weight: 700; color: var(--muted); }
+.quiz-opts.two { grid-template-columns: 1fr 1fr; }
+.quiz-opts.two .quiz-opt { text-align: center; font-weight: 700; }
+.game-verdict { display: flex; align-items: center; gap: 12px; margin: 16px 0 6px; }
+.game-verdict p { margin: 0; }
+.game-verdict strong { font: 700 18px "Manrope", sans-serif; }
+.game-verdict.right strong { color: var(--ok); }
+.game-verdict.wrong strong { color: var(--danger); }
+.game-plus { color: var(--ok); font-weight: 800; }
+.game-plus.big { font: 700 18px "Manrope", sans-serif; margin: 4px 0; }
+.game-more { display: inline-block; margin: 2px 0 12px; font-weight: 600; color: var(--accent-text); }
+.game-q .btn.wide { margin-top: 6px; }
+.game-result { text-align: center; display: grid; justify-items: center; gap: 4px; }
+.game-result .btn.wide { margin-top: 8px; }
+.game-review { list-style: none; margin: 0; padding: 0; }
+.game-review li { display: flex; gap: 10px; padding: 12px 0; border-top: 1px solid var(--line); }
+.game-review li:first-child { border-top: 0; }
+.rv-mark { flex: none; width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; font-weight: 800; font-size: 13px; }
+.game-review li.right .rv-mark { background: var(--ok-soft); color: var(--ok); }
+.game-review li.wrong .rv-mark { background: var(--danger-soft); color: var(--danger); }
+.rv-q { margin: 0 0 4px; font-weight: 600; }
+.rv-a, .rv-rivals { margin: 0; font-size: 14px; color: var(--text-2); }
+.rv-rivals { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 4px; }
+.game-review .game-more { margin: 4px 0 0; font-size: 14px; }
+
+/* ---------- Практика: наши советы и заметки каналов ---------- */
+.practice-legend { margin: 0 0 12px; line-height: 1.45; }
+.src-line { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; }
+.src-mark { font-size: 13px; font-weight: 700; white-space: nowrap; }
+.src-mark.own { color: var(--accent-text); }
+.src-mark.ch { color: color-mix(in srgb, var(--mk-train) 75%, var(--text)); }
+.tips-list + .note-topic h3 { margin-top: 14px; }
+.season-score { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 0; }
+.season-score.now { margin-bottom: 8px; font-size: 16px; }
+.season-past-title { margin: 14px 0 6px; font-size: 15px; color: var(--muted); }
+.season-past { list-style: none; margin: 0; padding: 0; }
+.season-past li { display: grid; gap: 2px; padding: 8px 0; border-top: 1px solid var(--line); font-size: 15px; }
+.season-name small { color: var(--muted); font-weight: 400; margin-left: 6px; }
+
+/* ---------- Библиотека: разбор ситуаций и «Срочно» ---------- */
+.lib-grid .lib-tile:last-child:nth-child(odd) { grid-column: 1 / -1; }
+.case-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+.case { position: relative; padding: 16px 18px; border-radius: 20px; background: var(--card); box-shadow: var(--shadow); }
+.case.read { opacity: .85; }
+.case-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.case-head h2 { margin: 0 0 6px; font-size: 19px; }
+.case-situation h3 { margin-top: 4px; }
+.case-more summary { list-style: none; cursor: pointer; display: inline-flex; align-items: center; min-height: 44px; padding: 8px 14px; margin-top: 6px; border-radius: 99px;
+  background: var(--accent-soft); color: var(--accent-text); font-weight: 700; }
+.case-more summary::-webkit-details-marker { display: none; }
+.case-more .case-hide, .case-more[open] .case-show { display: none; }
+.case-more[open] .case-hide { display: inline; }
+.case-more[open] summary { background: transparent; padding-left: 0; }
+.urgent-jump { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0 6px; }
+.urgent-card { margin-top: 18px; scroll-margin-top: 80px; }
+.urgent-title { margin: 0 0 10px; font-size: 22px; }
+.lost-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+.chip-num { font-variant-numeric: tabular-nums; letter-spacing: .02em; }
+
+/* ---------- Что нового и приглашение в игру ---------- */
+.news h2 { margin: 4px 0 12px; }
+.news-list { list-style: none; margin: 0 0 16px; padding: 0; display: grid; gap: 12px; }
+.news-list li { display: flex; gap: 12px; align-items: flex-start; }
+.news-list li > span { font-size: 22px; line-height: 1.2; flex: none; }
+.news-list p { margin: 0; line-height: 1.45; }
+.game-invite { position: relative; margin: 0 0 18px; border-radius: 20px; background: color-mix(in srgb, var(--lavender) 60%, var(--surface)); box-shadow: var(--shadow); }
+.game-invite-link { display: flex; align-items: center; gap: 12px; padding: 14px 44px 14px 14px; color: var(--text); text-decoration: none; }
+.game-invite-text { display: grid; gap: 2px; flex: 1; min-width: 0; }
+.game-invite-text strong { font: 700 16px "Manrope", sans-serif; }
+.game-invite-text small { color: var(--text-2); font-size: 14px; }
+.game-invite .chev-sm { font-size: 22px; color: var(--muted); }
+.game-invite-x { position: absolute; top: 4px; right: 4px; width: 40px; height: 40px; border: 0; background: transparent; color: var(--muted); font-size: 22px; cursor: pointer; border-radius: 50%; }

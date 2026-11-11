@@ -124,10 +124,10 @@ service cloud.firestore {
           && request.resource.data.updatedAt == request.time
           && request.resource.data.updatedBy is string && request.resource.data.updatedBy.size() <= 40)
         || (doc == 'vet'
-          && request.resource.data.keys().hasOnly(['clinicName', 'clinicAddress', 'clinicPhone', 'vetName', 'vetPhone', 'updatedAt', 'updatedBy'])
+          && request.resource.data.keys().hasOnly(['clinicName', 'clinicAddress', 'clinicPhone', 'vetName', 'vetPhone', 'chipBase', 'updatedAt', 'updatedBy'])
           && str(request.resource.data, 'clinicName', 80) && str(request.resource.data, 'clinicAddress', 160)
           && str(request.resource.data, 'clinicPhone', 30) && str(request.resource.data, 'vetName', 80)
-          && str(request.resource.data, 'vetPhone', 30)
+          && str(request.resource.data, 'vetPhone', 30) && str(request.resource.data, 'chipBase', 120)
           && request.resource.data.updatedAt == request.time
           && request.resource.data.updatedBy is string && request.resource.data.updatedBy.size() <= 40)
         || (doc == 'photo'
@@ -185,7 +185,7 @@ service cloud.firestore {
       allow delete: if isAllowed();
     }
 
-    // Библиотека: что прочитано и лучшие результаты тестов — у каждого свой документ, чужой не виден
+    // Библиотека: что прочитано (и результаты старых тестов) — у каждого свой документ, чужой не виден
     match /reads/{uid} {
       allow read, delete: if isAllowed() && request.auth.uid == uid;
       allow create, update: if isAllowed() && request.auth.uid == uid
@@ -289,14 +289,34 @@ service cloud.firestore {
         && d.uid == request.auth.uid
         && d.name is string && d.name.size() <= 40
         && d.platform in ['ios', 'android', 'other']
-        && d.prefs is map && d.prefs.keys().hasOnly(['toilet', 'care', 'week'])
+        && d.prefs is map && d.prefs.keys().hasOnly(['toilet', 'care', 'week', 'game'])
         && d.prefs.toilet is bool && d.prefs.care is bool && d.prefs.week is bool
+        && (!('game' in d.prefs) || d.prefs.game is bool)
         && d.updatedAt == request.time;
     }
     match /pushTokens/{id} {
       allow read, delete: if isAllowed() && resource.data.uid == request.auth.uid;
       allow create: if isAllowed() && id.matches('^[0-9a-f]{40}$') && validPush(request.resource.data);
       allow update: if isAllowed() && resource.data.uid == request.auth.uid && validPush(request.resource.data);
+    }
+
+    // Игра «Разминка дня»: у каждого свой документ game/{uid}. Видят оба — для рейтинга, меняет только хозяин.
+    // Внутри: разминки по дням, ошибки на повтор, на какие вопросы отвечали верно и когда что прочитали (очки)
+    function validGame(d) {
+      return d.keys().hasOnly(['name', 'photo', 'days', 'rep', 'known', 'read', 'updatedAt'])
+        && d.name is string && d.name.size() <= 60
+        && d.photo is string && d.photo.size() <= 600
+        && (d.photo == '' || d.photo.matches('^https://[a-z0-9.-]+[.]googleusercontent[.]com/.*$'))
+        && (!('days' in d) || (d.days is map && d.days.size() <= 3000))
+        && (!('rep' in d) || (d.rep is map && d.rep.size() <= 1000))
+        && (!('known' in d) || (d.known is map && d.known.size() <= 3000))
+        && (!('read' in d) || (d.read is map && d.read.size() <= 1000))
+        && d.updatedAt == request.time;
+    }
+    match /game/{uid} {
+      allow read: if isAllowed();
+      allow create, update: if isAllowed() && request.auth.uid == uid && validGame(request.resource.data);
+      allow delete: if isAllowed() && request.auth.uid == uid;
     }
 
     // Всё остальное закрыто (в том числе push/state — что сервер уже прислал)

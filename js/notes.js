@@ -1,4 +1,4 @@
-// Вкладка «Каналы»: заметки из Telegram-каналов (файл content/kanaly.md), только чтение.
+// Заметки из Telegram-каналов (файл content/kanaly.md), только чтение. Показываются в «Практике» под теми же темами, что наши советы.
 // ## Тема → ### Подтема → #### Заметка. В заметке — строки «**Пометка:**», «**Когда актуально:**»,
 // текст, «**Комментарий кинолога:**» и «**Источники:**» со ссылками; ▶ в подписи ссылки — в посте есть видео.
 
@@ -94,41 +94,15 @@ const markBadge = (n) => (n.markText ? `<span class="badge ${n.mark}">${escapeHt
 const markLine = (n) => (n.markText ? `<span class="note-mark ${n.mark}">${escapeHtml(n.markText)}</span>` : '');
 const whenBadges = (n) => n.when.map((w) => `<span class="badge when">${escapeHtml(w)}</span>`).join('');
 
-const FILTERS = [['now', 'Актуально сейчас'], ['future', 'На будущее'], ['sci', '✅ Наука'], ['exp', '💬 Опыт']];
+export const NOTE_FILTERS = [['now', 'Актуально сейчас'], ['future', 'На будущее'], ['sci', '✅ Наука'], ['exp', '💬 Опыт']];
+const CHEV = '<svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg>';
 
-export function notesListHtml(data, f) {
-  const chev = '<svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg>';
-  let shown = 0;
-  const sections = data.sections.map((s) => {
-    let sectionShown = 0;
-    const topics = s.topics.map((t) => {
-      let topicShown = 0;
-      const items = t.notes.map((n) => {
-        const ok = noteMatches(n, f);
-        if (ok) topicShown++;
-        return `<li data-note="${n.id}"${ok ? '' : ' hidden'}><a class="card-link note-link" href="#/c/${n.id}">
-          <span class="card-name">${inline(n.title)}</span>
-          ${markLine(n)}${n.when.length ? `<span class="note-badges">${whenBadges(n)}</span>` : ''}${chev}</a></li>`;
-      }).join('');
-      sectionShown += topicShown;
-      return `<div class="note-topic" data-topic${topicShown ? '' : ' hidden'}>${t.title ? `<h3>${inline(t.title)}</h3>` : ''}<ul class="cards">${items}</ul></div>`;
-    }).join('');
-    shown += sectionShown;
-    return `<section class="group note-section" data-section${sectionShown ? '' : ' hidden'}>${s.title ? `<h2>${inline(s.title)}</h2>` : ''}${topics}</section>`;
-  }).join('');
-  const chips = FILTERS.map(([key, label]) =>
-    `<button type="button" class="filter-chip" data-action="notes-filter" data-f="${key}" aria-pressed="${!!f[key]}">${label}</button>`).join('');
-  return `${data.intro.length ? `<div class="prose notes-intro">${renderBlocks(data.intro)}</div>` : ''}
-    <div class="notes-tools">
-      <div class="filter-chips">${chips}</div>
-      <p class="muted small notes-count" aria-live="polite">${countText(shown, data.all.length)}</p>
-    </div>
-    ${sections}
-    <p class="empty notes-empty"${shown ? ' hidden' : ''}>Ничего не нашлось. Попробуйте другое слово или снимите фильтры.</p>`;
-}
-
-export function countText(shown, total) {
-  return shown === total ? `Заметок: ${total}` : `Найдено: ${shown} из ${total}`;
+// Заметка в списке «Практики»: пометка «📣 Канал» и ✅ / 💬
+export function noteItemHtml(n, shown) {
+  return `<li data-note="${n.id}"${shown ? '' : ' hidden'}><a class="card-link note-link" href="#/c/${n.id}">
+    <span class="card-name">${inline(n.title)}</span>
+    <span class="src-line"><span class="src-mark ch">📣 Канал</span>${markLine(n)}</span>
+    ${n.when.length ? `<span class="note-badges">${whenBadges(n)}</span>` : ''}${CHEV}</a></li>`;
 }
 
 export function noteHtml(n, back) {
