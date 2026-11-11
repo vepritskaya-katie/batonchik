@@ -1426,3 +1426,17 @@ a.story-date { color: inherit; text-decoration: none; }
 .urgent-title { margin: 0 0 10px; font-size: 22px; }
 .lost-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
 .chip-num { font-variant-numeric: tabular-nums; letter-spacing: .02em; }
+
+/* ---------- Что нового и приглашение в игру ---------- */
+.news h2 { margin: 4px 0 12px; }
+.news-list { list-style: none; margin: 0 0 16px; padding: 0; display: grid; gap: 12px; }
+.news-list li { display: flex; gap: 12px; align-items: flex-start; }
+.news-list li > span { font-size: 22px; line-height: 1.2; flex: none; }
+.news-list p { margin: 0; line-height: 1.45; }
+.game-invite { position: relative; margin: 0 0 18px; border-radius: 20px; background: color-mix(in srgb, var(--lavender) 60%, var(--surface)); box-shadow: var(--shadow); }
+.game-invite-link { display: flex; align-items: center; gap: 12px; padding: 14px 44px 14px 14px; color: var(--text); text-decoration: none; }
+.game-invite-text { display: grid; gap: 2px; flex: 1; min-width: 0; }
+.game-invite-text strong { font: 700 16px "Manrope", sans-serif; }
+.game-invite-text small { color: var(--text-2); font-size: 14px; }
+.game-invite .chev-sm { font-size: 22px; color: var(--muted); }
+.game-invite-x { position: absolute; top: 4px; right: 4px; width: 40px; height: 40px; border: 0; background: transparent; color: var(--muted); font-size: 22px; cursor: pointer; border-radius: 50%; }

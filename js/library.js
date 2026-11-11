@@ -13,7 +13,6 @@ export const RUBRICS = [
   { key: 'ages', title: 'Календарь взросления', icon: '🌱', sub: 'Этапы по возрасту' },
   { key: 'body', title: 'Язык тела', icon: '🐾', sub: 'Шпаргалка' },
   { key: 'dict', title: 'Словарь', icon: '🔤', sub: 'Термины' },
-  { key: 'game', title: 'Игра', icon: '🏆', sub: 'Разминка дня', href: '#/game' },
   { key: 'books', title: 'Что почитать', icon: '📚', sub: 'Книги и сайты' },
 ];
 const SECTION_KEY = {

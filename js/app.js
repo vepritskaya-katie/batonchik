@@ -185,7 +185,7 @@ const store = createStore({
   onLost(v) { S.lost = v; render(); },
   onSocial(map) { S.social = map || {}; render(); },
   onCare(map) { S.care = map || {}; render(); },
-  onGame(players) { S.gamePlayers = players || []; render(); },
+  onGame(players) { S.gamePlayers = players || []; S.gameLoaded = true; render(); },
   onMonths(dates) {
     // Список фото месяца изменился (в том числе на другом телефоне): «Как рос» перечитает фото,
     // а уменьшенные копии с другой датой или убранные — забываем
@@ -948,6 +948,7 @@ function renderHome() {
   return `${pageHead({ eyebrow: cap(dayTitle(S.day)), title: greeting() })}
     ${statusBanner()}
     ${heroHtml()}
+    ${gameInviteHtml()}
     ${weekCardHtml()}
     ${homeJournalHtml()}
     ${factHtml()}
@@ -1471,6 +1472,44 @@ function gameNext() {
   } else S.gameUi.reveal = null;
   render();
   window.scrollTo(0, 0);
+}
+
+// ---------- Что нового и приглашение в игру ----------
+// Один раз на телефоне — окно с коротким списком больших обновлений и кнопкой «Попробовать игру».
+// На главной — плашка «Новое: игра», пока человек не начал играть (или не скрыл её)
+const NEWS_VERSION = '2026-11-game';
+const lsGet = (k) => { try { return localStorage.getItem(k); } catch { return null; } };
+const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch { /* память недоступна */ } };
+
+function newsSheet() {
+  lsSet('bt.news', NEWS_VERSION);
+  openSheet(`<div class="news"><p class="eyebrow">Обновление</p><h2>Что нового в «Батончике»</h2>
+    <ul class="news-list">
+      <li><span aria-hidden="true">🏆</span><p><b>Игра «Разминка дня».</b> Каждый день 5 вопросов на пару минут — у вас двоих одинаковые. Очки, серия, рейтинг недели и кубки.</p></li>
+      <li><span aria-hidden="true">🧭</span><p><b>Практика.</b> Наши советы и заметки из каналов теперь вместе, по темам.</p></li>
+      <li><span aria-hidden="true">🧩</span><p><b>Разбор ситуаций</b> и 9 новых статей в Библиотеке.</p></li>
+      <li><span aria-hidden="true">🚑</span><p><b>«Срочно».</b> Что делать, если собака потерялась: чип, фото, объявление.</p></li>
+      <li><span aria-hidden="true">🔔</span><p><b>Напоминание о разминке</b> в 20:00 — включается в «Настройках» → «Уведомления».</p></li>
+    </ul>
+    <div class="form-actions"><button type="button" class="btn" data-action="sheet-close">Позже</button><a class="btn primary" href="#/game" data-action="sheet-close-link">Попробовать игру</a></div></div>`);
+}
+// Показываем после входа, на главной, когда ничего другого не открыто
+function maybeShowNews() {
+  if (S.newsShown || lsGet('bt.news') === NEWS_VERSION) return;
+  if (!canWrite() || !S.contentReady || route().page !== 'today' || !sheet.hidden || S.pendingAdd) return;
+  S.newsShown = true;
+  setTimeout(() => { if (sheet.hidden && route().page === 'today') newsSheet(); else S.newsShown = false; }, 700);
+}
+
+function gameInviteHtml() {
+  if (!canWrite() || !S.gameLoaded || !S.questions || S.questions.error || lsGet('bt.gameInvite') === 'off') return '';
+  const { me, others } = gamePlayers();
+  if (Object.keys(me.days || {}).length) return '';
+  const rival = others.find((p) => Object.keys(p.days || {}).length);
+  const sub = rival ? `${escapeHtml(playerName(rival))} уже играет — 5 вопросов на пару минут` : '5 вопросов на пару минут — кто из вас знает о собаках больше?';
+  return `<section class="game-invite"><a class="game-invite-link" href="#/game">${dogAva('🏆')}
+      <span class="game-invite-text"><strong>Новое: игра «Разминка дня»</strong><small>${sub}</small></span><span class="chev-sm" aria-hidden="true">›</span></a>
+    <button type="button" class="game-invite-x" data-action="game-invite-off" aria-label="Скрыть">×</button></section>`;
 }
 
 // ---------- Неделя Батончика ----------
@@ -3293,6 +3332,7 @@ function render(force) {
     a.classList.toggle('on', on);
     if (on) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
   });
+  maybeShowNews();
   // Пришли по ссылке #/add/… — окно записи, как только можно записывать (после входа)
   if (S.pendingAdd && canWrite() && sheet.hidden) {
     const type = S.pendingAdd;
@@ -3797,6 +3837,7 @@ const actions = {
     render();
   },
   'game-pick': (el) => gamePick(+el.dataset.k),
+  'game-invite-off': () => { lsSet('bt.gameInvite', 'off'); render(); },
   'game-next': () => gameNext(),
   'vet-edit': () => vetSheet(),
   'chip-edit': () => chipSheet(),
