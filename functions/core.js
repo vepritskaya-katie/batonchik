@@ -3,7 +3,7 @@
 // Подсказка «Пора в туалет», сроки ухода и даты — тем же кодом, что в приложении: перед выкладкой файлы
 // js/diary.js, js/care.js, js/passport.js и js/md.js копируются в functions/shared (см. firebase.json).
 
-import { toiletRhythm, toiletHint, plural } from './shared/diary.js';
+import { toiletGaps, rhythmOf, toiletHint, plural, RHYTHM_SAMPLES } from './shared/diary.js';
 import { CARE_ITEMS, careDue } from './shared/care.js';
 
 export const APP_URL = 'https://vepritskaya-katie.github.io/batonchik/';
@@ -52,23 +52,25 @@ export async function send(db, messaging, tokens, { title, body, link = '', tag 
   return res.successCount;
 }
 
-// «Пора в туалет»: ритм по журналу за 14 дней (раз в день), подсказка — от прошлого туалета, по записям за последние сутки.
+// «Пора в туалет»: как на главной — середина последних 30 дневных промежутков между туалетами, отсчёт от прошлого туалета.
+// Промежутки прошлых дней (из журнала за 14 дней) берём раз в день и храним в push/state, сегодняшние — по записям за последние сутки.
 // Присылаем один раз на каждую подсказку, если время подошло не больше часа назад и сейчас не ночь
 async function toiletMessage(db, state, now, patch) {
   const today = dayKey(now);
   const hour = mskHour(now);
   if (hour < 6) return null;
-  let rhythm = state.rhythm;
-  if (!rhythm || state.rhythmDay !== today) {
+  let before = state.rhythmGaps;
+  if (!Array.isArray(before) || state.rhythmDay !== today) {
     const snap = await db.collection('events').where('day', '>=', addDays(today, -14)).where('day', '<', today).get();
-    rhythm = toiletRhythm(snap.docs.map((d) => event(d.data())));
-    patch.rhythm = { gap: rhythm.gap };
+    before = toiletGaps(snap.docs.map((d) => event(d.data()))).slice(-RHYTHM_SAMPLES);
+    patch.rhythmGaps = before;
     patch.rhythmDay = today;
   }
-  if (!rhythm.gap) return null;
   const snap = await db.collection('events').where('at', '>=', new Date(now.getTime() - 30 * H)).get();
   const recent = snap.docs.map((d) => event(d.data())).filter((e) => e.type !== 'train');
   if (!recent.length) return null;
+  const rhythm = rhythmOf([...before, ...toiletGaps(recent.filter((e) => e.day === today))]);
+  if (!rhythm.gap) return null;
   const latest = recent.reduce((a, b) => (b.at > a.at ? b : a));
   const hint = toiletHint(rhythm, recent, latest.day);
   if (!hint) return null;

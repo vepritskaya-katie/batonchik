@@ -259,10 +259,11 @@ const median = (nums) => {
   return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
 };
 const MIN_SAMPLES = 6; // меньше — подсказку не показываем: по двум-трём записям легко ошибиться
+export const RHYTHM_SAMPLES = 30; // берём последние 30 промежутков (примерно 4–5 дней): Батончик растёт и терпит всё дольше
 
-// Обычный ритм по журналу за последние дни: сколько обычно проходит между выходами в туалет днём
-// (туалет на улице и аварии — одинаково). Ночь и промежутки дольше 6 часов не считаем
-export function toiletRhythm(events) {
+// Промежутки между выходами в туалет днём, от старых к новым (туалет на улице и аварии — одинаково).
+// Только внутри одного дня; ночь (между ними было «Легли»), двойные отметки (до 5 минут) и промежутки дольше 6 часов не считаем
+export function toiletGaps(events) {
   const at = (e) => new Date(e.at).getTime();
   const all = events.filter((e) => e.type !== 'train').slice().sort((a, b) => at(a) - at(b));
   const elim = all.filter((e) => e.type === 'toilet' || e.type === 'accident');
@@ -274,8 +275,16 @@ export function toiletRhythm(events) {
     const slept = all.some((e) => e.type === 'bed' && at(e) > at(a) && at(e) < at(b));
     if (a.day === b.day && !slept && gap > 5 * 60000 && gap <= 6 * 3600000) gaps.push(gap);
   }
-  return { gap: gaps.length >= MIN_SAMPLES ? median(gaps) : null };
+  return gaps;
 }
+
+// Обычный ритм — середина (медиана) последних 30 промежутков: один случайно долгий или короткий её почти не сдвигает
+export function rhythmOf(gaps) {
+  const last = gaps.slice(-RHYTHM_SAMPLES);
+  return { gap: last.length >= MIN_SAMPLES ? median(last) : null };
+}
+
+export const toiletRhythm = (events) => rhythmOf(toiletGaps(events));
 
 // «около 2 ч 10 мин», «около 35 мин» — округляем до 5 минут
 export function aboutText(ms) {
