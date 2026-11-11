@@ -1169,8 +1169,8 @@ function playerAva(p) {
     ? `<span class="avatar ava-img"><img src="${escapeHtml(photo)}" alt="" referrerpolicy="no-referrer"></span>`
     : `<span class="avatar">${escapeHtml(name.charAt(0).toUpperCase())}</span>`;
 }
-// Батончик рядом с вопросами: фото из паспорта и значок настроения
-const dogAva = (mood, big) => `<span class="game-dog${big ? ' big' : ''}">${S.photo ? `<img src="${escapeHtml(S.photo)}" alt="">` : '<span class="game-dog-empty" aria-hidden="true">🐶</span>'}${mood ? `<span class="game-dog-mood" aria-hidden="true">${mood}</span>` : ''}</span>`;
+// Батончик в игре — иконка приложения: она квадратная и всегда есть, в отличие от фото из паспорта
+const dogAva = (mood, big) => `<span class="game-dog${big ? ' big' : ''}"><img src="icons/icon-192.png" alt="" width="72" height="72">${mood ? `<span class="game-dog-mood" aria-hidden="true">${mood}</span>` : ''}</span>`;
 const daysText = (n) => `${n} ${plural(n, 'день', 'дня', 'дней')}`;
 const ptsText = (n) => `${n} ${plural(n, 'очко', 'очка', 'очков')}`;
 
