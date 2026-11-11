@@ -52,7 +52,7 @@ export function parseQuestions(source) {
     else {
       let id = hash(`${q.format}|${norm(q.text)}`);
       if (qs.some((x) => x.id === id)) errors.push(`Вопрос ${where} повторяется.`);
-      else qs.push({ id, format: q.format, text: q.text, topic: q.topic || TOPICS[0], options: q.options, answer: q.answer, why: q.why.trim(), more: q.more });
+      else qs.push({ id, format: q.format, text: q.text, topic: q.topic || TOPICS[0], options: q.options, answer: q.answer, why: q.why.trim().replace(/^./, (c) => c.toUpperCase()), more: q.more });
     }
     q = null;
   };
