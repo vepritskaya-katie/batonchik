@@ -11,7 +11,7 @@ import { HEALTH_KINDS, NEXT_OPTIONS, nextDate, suggestNext, dueText, ageText, up
 import { pickPhotos, compressPhoto } from './photo.js';
 import { fmtNum, parseNum, series, deltaText, lineChartSvg } from './growth.js';
 import { buildIndex, resultsHtml } from './search.js';
-import { RUBRICS, parseLibrary, readKey, readCount, readBtn, metaChips, articleBody, foldList, agesHtml, dictHtml, booksHtml, introHtml, casesHtml } from './library.js';
+import { RUBRICS, parseLibrary, readKey, readCount, readBtn, metaChips, articleBody, foldList, agesHtml, dictHtml, booksHtml, introHtml, casesHtml, healthBody, fillBlocks, fillItems } from './library.js';
 import {
   FORMATS, DAILY, POINTS, READ_POINTS, LEVELS, parseQuestions, formatOf, optionOrder, todayIds, answered, finished, rightCount, readPoints,
   totalPoints, weekPoints, level, streak, playedDays, sharedDays, trophies, dueRepeats, afterRepeat, newMistake, topicProgress, seasons, seasonPoints, seasonLeft,
@@ -103,7 +103,8 @@ const S = {
   gamePlayers: [],    // игроки: свой документ и чужие (для рейтинга)
   gameUi: { reveal: null, rep: null }, // разминка: открытое пояснение; повтор ошибок: { day, ids, i, picked }
   vet: null,          // «Срочно»: круглосуточная клиника, наш ветеринар и база, где зарегистрирован чип
-  weeks: [],          // «Неделя Батончика»: { id: воскресенье, joy, choice, sleep, ribs, waist, notes }
+  fields: {},         // поля «___» в карточках «Здоровья» («Норма Батончика»): { ключ: { v: значение, d: дата } }
+  weeks: [],          // «Неделя Батончика»: { id: воскресенье, joy, choice, sleep, ribs, waist, notes, coat, stool, vigor, ticks, lastTicks, lastWorms }
   factShift: 0,       // «Факт дня» на главной: нажатие — следующий
   stories: {},        // дневник: заметки о днях { 'ГГГГ-ММ-ДД': { title, text, special, hasPhoto, photoCount, photoKey } } — все, без фото
   storyPhotos: {},    // фото к заметкам, загруженные по требованию: { день: { key, list: [data:image…], loading, failedAt } }
@@ -180,6 +181,7 @@ const store = createStore({
   onGrowth(list) { S.growth = list || []; render(); },
   onReads(r) { S.reads = r || { items: {}, quiz: {} }; render(); },
   onVet(v) { S.vet = v; render(); },
+  onFields(map) { S.fields = map || {}; render(); },
   onWeeks(list) { S.weeks = list || []; render(); },
   onStories(map) { S.stories = map || {}; render(); },
   onLost(v) { S.lost = v; render(); },
@@ -948,8 +950,8 @@ function renderHome() {
   return `${pageHead({ eyebrow: cap(dayTitle(S.day)), title: greeting() })}
     ${statusBanner()}
     ${heroHtml()}
-    ${gameInviteHtml()}
     ${weekCardHtml()}
+    ${gameInviteHtml()}
     ${homeJournalHtml()}
     ${factHtml()}
     ${homeTrainingsHtml()}
@@ -1318,7 +1320,7 @@ function gameRulesHtml() {
   const formats = FORMATS.map((f) => `${f.icon} ${escapeHtml(f.title)}`).join(', ');
   return `<details class="card game-rules"><summary>Как устроена игра</summary><div class="prose"><ul>
     <li><b>Разминка дня</b> — ${DAILY} вопросов, по одному каждого формата: ${formats} Вопросы у вас обоих одинаковые и новые, пока не кончатся.</li>
-    <li><b>Очки:</b> +${POINTS.right} за верный ответ, +${POINTS.perfect} за все верные, +${POINTS.fix} за исправленную ошибку. В Библиотеке за отметку «Прочитано»: статья или разбор ситуации — +${READ_POINTS.a}, вопрос-ответ или миф — +${READ_POINTS.qa}.</li>
+    <li><b>Очки:</b> +${POINTS.right} за верный ответ, +${POINTS.perfect} за все верные, +${POINTS.fix} за исправленную ошибку. В Библиотеке за отметку «Прочитано»: статья, карточка «Здоровья» или разбор ситуации — +${READ_POINTS.a}, вопрос-ответ или миф — +${READ_POINTS.qa}.</li>
     <li><b>Ошибки</b> возвращаются через 1, 3 и 7 дней, пока не запомнятся, — до трёх в день.</li>
     <li><b>Серия 🔥</b> — дни подряд с разминкой; один пропуск в неделю её не обрывает. <b>Вместе 🤝</b> — дни, когда сыграли оба.</li>
     <li><b>Сезон</b> длится, пока не кончатся новые вопросы, потом они идут по второму кругу — начинается следующий сезон. Медаль 🥇 — тому, у кого за сезон больше очков. Новые вопросы, добавленные в игру, попадают в ближайшую разминку.</li>
@@ -1520,6 +1522,15 @@ const WEEK_QS = [
   ['sleep', 'Хватало тихого сна?'],
 ];
 const FIGURE = [['ribs', 'Рёбра прощупываются легко'], ['waist', 'Сверху видна талия']];
+// «Здоровье за неделю» (после «Фигуры»): три галочки, найденные клещи, последние обработки
+const WEEK_HEALTH = [
+  ['coat', 'Уши, лапы и кожа без нового запаха, покраснения и расчёсов'],
+  ['stool', 'Стул нормальный всю неделю'],
+  ['vigor', 'Ест с аппетитом и бодрый'],
+];
+// Последняя сделанная обработка из паспорта (kind: ticks, worms) не позже дня day
+const lastTreat = (kind, day) => S.health.filter((r) => r.kind === kind && r.done && r.date <= day).map((r) => r.date).sort().pop() || '';
+const hasWeekHealth = (w) => WEEK_HEALTH.some(([k]) => w[k]) || !!(w.ticks || w.lastTicks || w.lastWorms);
 const isSunday = (key) => new Date(`${key}T00:00:00Z`).getUTCDay() === 0;
 const lastSunday = (key) => addDays(key, -new Date(`${key}T00:00:00Z`).getUTCDay());
 const weekOf = (day) => S.weeks.find((w) => w.id === day);
@@ -1529,8 +1540,11 @@ function weekSummaryHtml(w, day) {
   const yes = WEEK_QS.filter(([k]) => w[k]).length;
   const fig = FIGURE.map(([k, label]) => (w[k] ? `${label.toLowerCase()}: ${w[k] === 'yes' ? 'да' : 'нет'}` : '')).filter(Boolean).join(' · ');
   const kg = weightOn(day);
+  const short = (d) => dayTitle(d, { day: 'numeric', month: 'long' });
+  const health = hasWeekHealth(w) ? [`здоровье: ${WEEK_HEALTH.filter(([k]) => w[k]).length} из 3`, w.ticks && `клещи: ${w.ticks}`,
+    w.lastTicks && `от клещей — ${short(w.lastTicks)}`, w.lastWorms && `от глистов — ${short(w.lastWorms)}`].filter(Boolean).join(' · ') : '';
   return `<p class="week-line"><strong>${yes} из 3</strong> «да» о благополучии${kg ? ` · вес ${fmtNum(kg)} кг` : ''}</p>
-    ${fig ? `<p class="muted small">${escapeHtml(cap(fig))}</p>` : ''}${w.notes ? `<p class="week-notes">${inline(w.notes)}</p>` : ''}`;
+    ${fig ? `<p class="muted small">${escapeHtml(cap(fig))}</p>` : ''}${health ? `<p class="muted small">${escapeHtml(cap(health))}</p>` : ''}${w.notes ? `<p class="week-notes">${inline(w.notes)}</p>` : ''}`;
 }
 
 // Карточка на главной — только по воскресеньям и только пока неделя не заполнена; заполненная уходит в историю
@@ -1539,7 +1553,7 @@ function weekCardHtml() {
   return `<section class="card week-card-sun">
     <div class="card-head"><h2>Неделя Батончика</h2><a class="text-link" href="#/weeks">История ›</a></div>
     <p class="week-invite">Сегодня воскресенье — время подвести неделю.</p>
-    <p class="muted">Три вопроса о благополучии, вес и фигура — пара минут. Ответы сохранятся с датой, вес попадёт в «Рост и вес».</p>
+    <p class="muted">Три вопроса о благополучии, вес, фигура и здоровье — пара минут. Ответы сохранятся с датой, вес попадёт в «Рост и вес».</p>
     ${canWrite() ? `<button class="btn primary wide" data-action="week-edit" data-day="${S.day}">Заполнить</button>` : ''}
   </section>`;
 }
@@ -1552,11 +1566,19 @@ function weekSheet(day) {
     <fieldset><legend>Благополучие</legend>${WEEK_QS.map(([k, q]) => `<label class="check-row"><input type="checkbox" name="${k}"${w[k] ? ' checked' : ''}>${q}</label>`).join('')}</fieldset>
     <label>Вес, кг <span class="muted">(попадёт в «Рост и вес»)</span><input name="weight" inputmode="decimal" autocomplete="off" placeholder="Например: 13,3" value="${kg ? fmtNum(kg) : ''}"></label>
     ${FIGURE.map(([k, label]) => `<fieldset><legend>${label}</legend>${yn(k)}</fieldset>`).join('')}
+    <fieldset><legend>Здоровье за неделю</legend>${WEEK_HEALTH.map(([k, q]) => `<label class="check-row"><input type="checkbox" name="${k}"${w[k] ? ' checked' : ''}>${q}</label>`).join('')}
+      <label>Найденные клещи (дата)<input name="ticks" maxlength="200" autocomplete="off" placeholder="Например: 8 ноября, за ухом" value="${escapeHtml(w.ticks || '')}"></label>
+      <label>Последняя обработка от клещей<input type="date" name="lastTicks" value="${escapeHtml(w.lastTicks ?? lastTreat('ticks', day))}"></label>
+      <label>Последняя обработка от глистов<input type="date" name="lastWorms" value="${escapeHtml(w.lastWorms ?? lastTreat('worms', day))}"></label>
+      <p class="muted small">Даты обработок подставлены из паспорта, если они там есть.</p></fieldset>
     <label>Заметки <textarea name="notes" rows="3" maxlength="2000" placeholder="Что получилось на этой неделе, что было трудно, что пробуем дальше">${escapeHtml(w.notes || '')}</textarea></label>
     <div class="form-actions"><button type="button" class="btn" data-action="sheet-close">Отмена</button><button class="btn primary">Сохранить</button></div>
   </form>`, (fd) => {
     const rec = { joy: fd.get('joy') === 'on', choice: fd.get('choice') === 'on', sleep: fd.get('sleep') === 'on',
-      ribs: String(fd.get('ribs') || ''), waist: String(fd.get('waist') || ''), notes: String(fd.get('notes') || '').trim() };
+      ribs: String(fd.get('ribs') || ''), waist: String(fd.get('waist') || ''), notes: String(fd.get('notes') || '').trim(),
+      coat: fd.get('coat') === 'on', stool: fd.get('stool') === 'on', vigor: fd.get('vigor') === 'on', ticks: String(fd.get('ticks') || '').trim().slice(0, 200),
+      lastTicks: /^\d{4}-\d{2}-\d{2}$/.test(fd.get('lastTicks') || '') ? fd.get('lastTicks') : '',
+      lastWorms: /^\d{4}-\d{2}-\d{2}$/.test(fd.get('lastWorms') || '') ? fd.get('lastWorms') : '' };
     store.saveWeek(day, rec);
     const weight = parseNum(fd.get('weight'));
     if (weight && weight <= 150 && weight !== kg) {
@@ -1572,7 +1594,7 @@ function renderWeeks() {
   const list = [...S.weeks].sort((a, b) => (a.id < b.id ? 1 : -1));
   const pts = series(S.growth, 'weight');
   const sun = lastSunday(S.day);
-  return `${back}${pageHead({ eyebrow: 'По воскресеньям', title: 'Неделя Батончика', sub: 'Что было радостного, выбирал ли он сам, хватало ли сна — и как меняются вес и фигура.' })}
+  return `${back}${pageHead({ eyebrow: 'По воскресеньям', title: 'Неделя Батончика', sub: 'Что было радостного, выбирал ли он сам, хватало ли сна — и как меняются вес, фигура и здоровье.' })}
     ${canWrite() ? `<button class="btn${weekOf(sun) ? '' : ' primary'} wide" data-action="week-edit" data-day="${sun}">${weekOf(sun) ? 'Изменить' : 'Заполнить'} за ${dayTitle(sun, { day: 'numeric', month: 'long' })}</button>` : ''}
     ${pts.length ? `<section class="growth-card weeks-weight"><p class="eyebrow">Вес</p>
       <div class="growth-now"><strong>${fmtNum(pts[pts.length - 1].value)}<small>кг</small></strong><span>${escapeHtml(deltaText(pts, 'кг'))}</span></div>
@@ -1593,7 +1615,7 @@ const BACK_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 
 function rubricNote(key) {
   const lib = S.lib;
   const r = RUBRICS.find((x) => x.key === key);
-  if (r.read) { const c = readCount(lib, key, S.reads.items); return c.done ? `прочитано ${c.done} из ${c.total}` : `${c.total} ${key === 'a' ? plural(c.total, 'статья', 'статьи', 'статей') : key === 'qa' ? plural(c.total, 'вопрос', 'вопроса', 'вопросов') : key === 'cases' ? plural(c.total, 'разбор', 'разбора', 'разборов') : plural(c.total, 'миф', 'мифа', 'мифов')}`; }
+  if (r.read) { const c = readCount(lib, key, S.reads.items); return c.done ? `прочитано ${c.done} из ${c.total}` : `${c.total} ${key === 'a' ? plural(c.total, 'статья', 'статьи', 'статей') : key === 'qa' ? plural(c.total, 'вопрос', 'вопроса', 'вопросов') : key === 'cases' ? plural(c.total, 'разбор', 'разбора', 'разборов') : key === 'health' ? plural(c.total, 'карточка', 'карточки', 'карточек') : plural(c.total, 'миф', 'мифа', 'мифов')}`; }
   if (key === 'ages') { const m = ageMonths(S.pet && S.pet.birth, S.day); const now = m != null && lib.ages.find((s) => s.range && m >= s.range.from && m < s.range.to); return now ? `сейчас: ${now.label}` : r.sub; }
   if (key === 'dict') return `${lib.dict.length} ${plural(lib.dict.length, 'термин', 'термина', 'терминов')}`;
   return r.sub;
@@ -1607,11 +1629,14 @@ function renderLibrary(r) {
   if (S.lib.error) return tipsPage('lib', '<div class="banner warn">Не удалось загрузить Библиотеку. Проверьте интернет.</div>');
   const rubric = RUBRICS.find((x) => x.key === r.id && !x.href);
   if (!rubric) {
-    const tiles = RUBRICS.filter((x) => !x.urgent).map((x) => `<a class="lib-tile" href="${x.href || `#/lib/${x.key}`}"><span class="lib-icon" aria-hidden="true">${x.icon}</span>
+    const feature = RUBRICS.filter((x) => x.feature).map((x) => `<a class="lib-feature" href="#/lib/${x.key}"><span aria-hidden="true">${x.icon}</span>
+      <span><strong>${x.title}</strong><small>${escapeHtml(x.sub)} · ${escapeHtml(rubricNote(x.key))}</small></span><span aria-hidden="true">›</span></a>`).join('');
+    const tiles = RUBRICS.filter((x) => !x.urgent && !x.feature).map((x) => `<a class="lib-tile" href="${x.href || `#/lib/${x.key}`}"><span class="lib-icon" aria-hidden="true">${x.icon}</span>
       <strong>${x.title}</strong><span>${escapeHtml(rubricNote(x.key))}</span></a>`).join('');
-    return tipsPage('lib', `<div class="prose lib-intro">${introHtml(S.lib)}</div><div class="lib-grid">${tiles}</div>`);
+    return tipsPage('lib', `<div class="prose lib-intro">${introHtml(S.lib)}</div>${feature}<div class="lib-grid">${tiles}</div>`);
   }
   if (rubric.key === 'a' && r.sub) return renderArticle(r.sub);
+  if (rubric.key === 'health' && r.sub) return renderHealthCard(r.sub);
   if (rubric.key === 'vet') return renderVet();
   const can = canWrite();
   const back = searchBack(`<a class="back" href="#/lib">${BACK_SVG}Библиотека</a>`);
@@ -1623,6 +1648,13 @@ function renderLibrary(r) {
       const on = !!S.reads.items[readKey('a', c.id)];
       return `<li class="lib-row${on ? ' read' : ''}"><a class="lib-link" href="#/lib/a/${c.id}"><strong>${inline(c.title)}</strong>
         <span class="lib-chips">${metaChips(c)}</span></a>${readBtn('a', c.id, on, can)}</li>`;
+    }).join('')}</ul>`;
+  } else if (rubric.key === 'health') {
+    body = `${S.lib.healthIntro.length ? `<div class="prose lib-intro">${renderBlocks(S.lib.healthIntro)}</div>` : ''}
+      <ul class="lib-list">${S.lib.health.map((c) => {
+      const on = !!S.reads.items[readKey('health', c.id)];
+      return `<li class="lib-row${on ? ' read' : ''}"><a class="lib-link" href="#/lib/health/${c.id}"><strong>${inline(c.title)}</strong>
+        <span class="lib-chips">${metaChips(c)}</span></a>${readBtn('health', c.id, on, can)}</li>`;
     }).join('')}</ul>`;
   } else if (rubric.key === 'qa' || rubric.key === 'myths') body = foldList(S.lib, rubric.key, S.reads.items, can, r.sub);
   else if (rubric.key === 'cases') body = casesHtml(S.lib, S.reads.items, can, r.sub);
@@ -1732,6 +1764,73 @@ function renderArticle(id) {
     <div class="prose article">${articleBody(c)}</div>
     <button class="btn wide read-toggle${on ? ' on' : ''}" data-action="lib-read" data-id="${readKey('a', c.id)}"${canWrite() ? '' : ' disabled'}>${on ? '✓ Прочитано' : 'Отметить прочитанной'}</button>
     ${next ? `<a class="next-link" href="#/lib/a/${next.id}"><span class="muted small">Следующая статья</span><strong>${inline(next.title)}</strong></a>` : ''}`;
+}
+
+// Карточка рубрики «Здоровье»: метки срочности — цветными плашками, поля «___» — с кнопкой «Заполнить»
+function renderHealthCard(id) {
+  const list = S.lib.health;
+  const i = list.findIndex((c) => c.id === id);
+  const back = searchBack(`<a class="back" href="#/lib/health">${BACK_SVG}Здоровье</a>`);
+  if (i < 0) return `${back}<p class="empty">Карточка не найдена.</p>`;
+  const c = list[i];
+  const on = !!S.reads.items[readKey('health', c.id)];
+  const next = list[i + 1];
+  return `${back}
+    <p class="eyebrow">Здоровье · ${i + 1} из ${list.length}</p>
+    <h1 class="card-title">${inline(c.title)}</h1>
+    <div class="lib-chips big">${metaChips(c)}</div>
+    <div class="prose article">${healthBody(c, (items, n) => fillBoxHtml(c, items, n))}</div>
+    <button class="btn wide read-toggle${on ? ' on' : ''}" data-action="lib-read" data-id="${readKey('health', c.id)}"${canWrite() ? '' : ' disabled'}>${on ? '✓ Прочитано' : 'Отметить прочитанной'}</button>
+    ${next ? `<a class="next-link" href="#/lib/health/${next.id}"><span class="muted small">Следующая карточка</span><strong>${inline(next.title)}</strong></a>` : ''}`;
+}
+
+const fillDate = (d) => dayTitle(d, { day: 'numeric', month: 'long', year: 'numeric' });
+function fillBoxHtml(card, items, n) {
+  const rows = items.map((f) => {
+    const x = S.fields[f.key];
+    return `<li><span class="fill-label">${escapeHtml(f.label)}</span>
+      <span class="fill-val">${x ? escapeHtml(`${x.v}${f.unit ? ` ${f.unit}` : ''}`) : '<span class="muted">—</span>'}</span>
+      ${x ? `<span class="fill-date">записали ${escapeHtml(fillDate(x.d))}</span>` : ''}</li>`;
+  }).join('');
+  const any = items.some((f) => S.fields[f.key]);
+  return `<div class="fill-box"><ul class="fill-list">${rows}</ul>
+    ${canWrite() ? `<button type="button" class="btn small" data-action="fill-edit" data-card="${card.id}" data-n="${n}">${any ? 'Изменить' : 'Заполнить'}</button>` : ''}</div>`;
+}
+
+// Последний вес из «Роста и веса» — подсказка для поля «Вес»
+const lastWeight = () => { const pts = series(S.growth, 'weight'); return pts.length ? pts[pts.length - 1].value : 0; };
+
+function fillSheet(cardId, n) {
+  const card = S.lib && S.lib.health.find((c) => c.id === cardId);
+  const block = card && fillBlocks(card)[+n];
+  if (!block) return;
+  const at = card.blocks.indexOf(block);
+  const head = card.blocks.slice(0, at).reverse().find((b) => b.type === 'heading');
+  const items = fillItems(block);
+  const kg = lastWeight();
+  openSheet(`<form class="form"><h2>${escapeHtml(head ? head.text : card.title)}</h2>
+    <p class="muted small">Каждое новое значение сохранится с сегодняшней датой. Видно вам обоим.</p>
+    ${items.map((f) => {
+      const x = S.fields[f.key];
+      const val = x ? x.v : (/^вес$/i.test(f.label) && kg ? fmtNum(kg) : '');
+      const num = /°C|в минуту|кг/.test(f.unit);
+      return `<label>${escapeHtml(f.label)}${f.unit ? ` <span class="muted">(${escapeHtml(f.unit)})</span>` : ''}
+        <input name="${f.key}" maxlength="60" autocomplete="off"${num ? ' inputmode="decimal"' : ''} value="${escapeHtml(val)}"></label>`;
+    }).join('')}
+    <div class="form-actions"><button type="button" class="btn" data-action="sheet-close">Отмена</button><button class="btn primary">Сохранить</button></div>
+  </form>`, (fd) => {
+    const next = { ...S.fields };
+    let changed = 0;
+    items.forEach((f) => {
+      const val = String(fd.get(f.key) || '').trim().slice(0, 60);
+      const old = S.fields[f.key];
+      if (val === (old ? old.v : '')) return;
+      changed++;
+      if (val) next[f.key] = { v: val, d: S.day }; else delete next[f.key];
+    });
+    if (changed) store.saveFields(next);
+    toast(changed ? 'Сохранено.' : 'Ничего не изменилось.');
+  });
 }
 
 // «Факт дня» на главной: каждый день следующий по кругу, по нажатию — ещё один
@@ -3840,6 +3939,7 @@ const actions = {
   'game-invite-off': () => { lsSet('bt.gameInvite', 'off'); render(); },
   'game-next': () => gameNext(),
   'vet-edit': () => vetSheet(),
+  'fill-edit': (el) => fillSheet(el.dataset.card, el.dataset.n),
   'chip-edit': () => chipSheet(),
   'jump-to': (el) => { const t = document.getElementById(el.dataset.id); if (t) t.scrollIntoView({ behavior: 'smooth', block: 'start' }); },
   'week-edit': (el) => weekSheet(el.dataset.day),

@@ -143,6 +143,12 @@ service cloud.firestore {
           && str(request.resource.data, 'signs', 400) && str(request.resource.data, 'note', 300)
           && request.resource.data.updatedAt == request.time
           && request.resource.data.updatedBy is string && request.resource.data.updatedBy.size() <= 40)
+        // Поля «___» в карточках «Здоровья» («Норма Батончика»): { ключ: { v: значение, d: дата } }
+        || (doc == 'fields'
+          && request.resource.data.keys().hasOnly(['values', 'updatedAt', 'updatedBy'])
+          && request.resource.data.values is map && request.resource.data.values.size() <= 40
+          && request.resource.data.updatedAt == request.time
+          && request.resource.data.updatedBy is string && request.resource.data.updatedBy.size() <= 40)
         // Даты фото месяца: { '5': '2026-10-29' } — чтобы календарь знал, где фото, не загружая их
         || (doc == 'months'
           && request.resource.data.keys().hasOnly(['dates', 'updatedAt', 'updatedBy'])
@@ -195,12 +201,21 @@ service cloud.firestore {
         && request.resource.data.updatedAt == request.time;
     }
 
-    // «Неделя Батончика»: ответы за воскресенье — три вопроса о благополучии, фигура, заметки
+    // «Неделя Батончика»: ответы за воскресенье — три вопроса о благополучии, фигура, заметки,
+    // здоровье за неделю (три галочки, найденные клещи, даты последних обработок от клещей и глистов)
+    function weekDate(d, key) {
+      return !(key in d) || (d[key] is string && (d[key] == '' || d[key].matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')));
+    }
     match /weeks/{day} {
       allow read: if isAllowed();
       allow create, update: if isAllowed()
         && day.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
-        && request.resource.data.keys().hasOnly(['joy', 'choice', 'sleep', 'ribs', 'waist', 'notes', 'updatedAt', 'updatedBy'])
+        && request.resource.data.keys().hasOnly(['joy', 'choice', 'sleep', 'ribs', 'waist', 'notes', 'coat', 'stool', 'vigor', 'ticks', 'lastTicks', 'lastWorms', 'updatedAt', 'updatedBy'])
+        && (!('coat' in request.resource.data) || request.resource.data.coat is bool)
+        && (!('stool' in request.resource.data) || request.resource.data.stool is bool)
+        && (!('vigor' in request.resource.data) || request.resource.data.vigor is bool)
+        && str(request.resource.data, 'ticks', 200)
+        && weekDate(request.resource.data, 'lastTicks') && weekDate(request.resource.data, 'lastWorms')
         && request.resource.data.joy is bool && request.resource.data.choice is bool && request.resource.data.sleep is bool
         && request.resource.data.ribs in ['', 'yes', 'no'] && request.resource.data.waist in ['', 'yes', 'no']
         && request.resource.data.notes is string && request.resource.data.notes.size() <= 2000

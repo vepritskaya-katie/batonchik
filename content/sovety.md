@@ -190,6 +190,8 @@
 - [Вопрос — ответ: «Можно ли давать кости?»](#/lib/qa/mozhno-li-davat-kosti)
 - [Срочно к ветеринару: когда нельзя ждать](#/lib/vet)
 - [Питание и вес: как понять, что кормим правильно](#/lib/a/pitanie-i-ves-kak-ponyat-chto-kormim-pravilno)
+- [Здоровье → Проглотил несъедобное: салфетка, кость, игрушка](#/lib/health/proglotil-nesedobnoe-salfetka-kost-igrushka)
+- [Здоровье → Отравления в городе: приманки, яды, антифриз](#/lib/health/otravleniya-v-gorode-primanki-yady-antifriz)
 
 ## Находка уже в пасти
 Аварийное изъятие
@@ -464,6 +466,7 @@ N/N не значит, что ему можно всё: передозировк
 - [Опасные лекарства при MDR1: полный список с названиями](#/t/opasnye-lekarstva-pri-mdr1)
 - [Генетика и здоровье: что значит «красный мрамор» и за чем следить у аусси](#/lib/a/genetika-i-zdorove-chto-znachit-krasnyy-mramor-i-za-chem-sle)
 - [Срочно к ветеринару: когда нельзя ждать](#/lib/vet)
+- [Здоровье → Домашний осмотр: температура, дыхание, пульс, аптечка](#/lib/health/domashniy-osmotr-temperatura-dyhanie-puls-aptechka) — блок «Домашняя аптечка»
 
 ## Опасные лекарства при MDR1
 Действующие вещества и названия на упаковке
@@ -614,6 +617,10 @@ N/N не значит, что ему можно всё: передозировк
 - [Генетика и здоровье: что значит «красный мрамор» и за чем следить у аусси](#/lib/a/genetika-i-zdorove-chto-znachit-krasnyy-mramor-i-za-chem-sle)
 - [Ветеринар без стресса: кооперативный уход и намордник](#/lib/a/veterinar-bez-stressa-kooperativnyy-uhod-i-namordnik)
 - [Вакцинация и паразиты: логика защиты](#/lib/a/vakcinaciya-i-parazity-logika-zaschity)
+- [Здоровье → Уши: отит, грибок и ушной клещ](#/lib/health/ushi-otit-gribok-i-ushnoy-klesch)
+- [Здоровье → Глаза: покраснение, прищур, помутнение](#/lib/health/glaza-pokrasnenie-prischur-pomutnenie)
+- [Здоровье → Клещи и пироплазмоз: главный риск Москвы](#/lib/health/kleschi-i-piroplazmoz-glavnyy-risk-moskvy)
+- [Здоровье → Запахи: что нормально, а что нет](#/lib/health/zapahi-chto-normalno-a-chto-net)
 
 # Город и поездки
 

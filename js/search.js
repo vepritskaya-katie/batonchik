@@ -46,6 +46,7 @@ export function buildIndex({ lib, cat, notes, k, g }) {
   if (lib && !lib.error) {
     const L = 'Библиотека';
     (lib.vet || []).forEach((c, i) => out.push(item(L, 'Срочно', c.title, i ? `#/lib/vet/${c.id}` : '#/lib/vet', plainText(c.blocks))));
+    (lib.health || []).forEach((c) => out.push(item(L, 'Здоровье', c.title, `#/lib/health/${c.id}`, plainText(c.blocks))));
     (lib.a || []).forEach((c) => out.push(item(L, 'Статьи', c.title, `#/lib/a/${c.id}`, plainText(c.blocks))));
     (lib.qa || []).forEach((c) => out.push(item(L, 'Вопрос — ответ', c.title, `#/lib/qa/${c.id}`, plainText(c.blocks))));
     (lib.myths || []).forEach((c) => out.push(item(L, 'Мифы и факты', c.title, `#/lib/myths/${c.id}`, plainText(c.blocks))));
