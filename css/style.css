@@ -1128,6 +1128,8 @@ a.story-date { color: inherit; text-decoration: none; }
 .search-results mark, .lib-hit mark { background: color-mix(in srgb, var(--mk-health) 28%, transparent); color: inherit; border-radius: 3px; padding: 0 1px; }
 .search-more { margin-top: 10px; }
 .search-empty { margin-top: 8px; }
+/* Запись, которую открыли из поиска, — подсвечена в дне под календарём */
+.ev-list li.found .ev-row { background: color-mix(in srgb, var(--mk-health) 16%, transparent); border-radius: 12px; }
 /* Место, куда привёл поиск: под шапкой, с мягкой подсветкой */
 [id^="lib-"] { scroll-margin-top: 84px; }
 .lib-hit { background: color-mix(in srgb, var(--mk-health) 14%, transparent); border-radius: 10px; box-shadow: 0 0 0 8px color-mix(in srgb, var(--mk-health) 14%, transparent); }
