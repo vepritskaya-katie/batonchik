@@ -10,7 +10,7 @@ import {
 import { HEALTH_KINDS, NEXT_OPTIONS, nextDate, suggestNext, dueText, ageText, upcoming, doneRecords, googleCalendarUrl, icsText, healthRowHtml, daysBetween, ageShort, ageMonths, hasTime, TIME_RE } from './passport.js';
 import { pickPhotos, compressPhoto } from './photo.js';
 import { fmtNum, parseNum, series, deltaText, lineChartSvg } from './growth.js';
-import { buildIndex, resultsHtml } from './search.js';
+import { buildIndex, resultsHtml, entryItems } from './search.js';
 import { RUBRICS, parseLibrary, readKey, readCount, readBtn, metaChips, articleBody, foldList, agesHtml, dictHtml, booksHtml, introHtml, casesHtml, healthBody, fillBlocks, fillItems } from './library.js';
 import {
   FORMATS, DAILY, POINTS, READ_POINTS, LEVELS, parseQuestions, formatOf, optionOrder, todayIds, answered, finished, rightCount, readPoints,
@@ -90,7 +90,8 @@ const S = {
   edit: { trainings: false },
   notes: null,        // вкладка «Каналы»: заметки из Telegram-каналов (только чтение)
   notesFilter: { q: '', p: false, c: false, now: false, future: false, sci: false, exp: false }, // «Практика»: свои советы / каналы и фильтры заметок
-  searchQ: '',        // поиск (лупа в шапке): советы, тренировки и игры
+  searchQ: '',        // поиск (лупа в шапке): ваши записи, советы, тренировки и игры
+  entries: { list: null, loading: false, loadedAt: 0, failed: false }, // для поиска: записи журнала с текстом за все дни
   searchMore: {},     // разделы результатов, где нажали «Показать ещё»
   searchFrom: '',     // откуда открыли поиск — туда ведёт «Отмена»
   pet: null,          // паспорт: { name, breed, birth, sex, chip, mdr1, weight }
@@ -108,7 +109,7 @@ const S = {
   factShift: 0,       // «Факт дня» на главной: нажатие — следующий
   stories: {},        // дневник: заметки о днях { 'ГГГГ-ММ-ДД': { title, text, special, hasPhoto, photoCount, photoKey } } — все, без фото
   storyPhotos: {},    // фото к заметкам, загруженные по требованию: { день: { key, list: [data:image…], loading, failedAt } }
-  cal: { month: '', sel: '', memShift: 0 }, // календарь в Дневнике: месяц ГГГГ-ММ, выбранный день, «другое воспоминание»
+  cal: { month: '', sel: '', memShift: 0, hit: '', jump: false }, // календарь в Дневнике: месяц ГГГГ-ММ, выбранный день, «другое воспоминание», запись из поиска
   months: {},         // журнал по месяцам для календаря: { 'ГГГГ-ММ': { events, loading, loadedAt } }
   lost: null,         // «Если потерялся»: { name1, phone1, name2, phone2, signs, note }
   social: {},         // социализация: { пункт: { title (у своих), log: [{ d, r }] } }
@@ -1024,14 +1025,32 @@ let searchIndex = null;
 function searchResultsHtml() {
   const src = { lib: S.lib, cat: S.catalogs.t, notes: S.notes, k: S.catalogs.k, g: S.catalogs.g };
   if (!searchIndex || Object.keys(src).some((key) => searchIndex[key] !== src[key])) searchIndex = { ...src, items: buildIndex(src) };
+  // Ваши записи: загруженные за все дни, а за текущий день — живые, со всеми свежими правками
+  const events = [...(S.entries.list || []).filter((e) => e.day !== S.day), ...S.events];
+  const items = canWrite() ? [...entryItems({ events, stories: S.stories, today: S.day }), ...searchIndex.items] : searchIndex.items;
   const loading = Object.values(src).some((x) => !x);
-  return `${resultsHtml(searchIndex.items, S.searchQ, S.searchMore)}${loading ? '<p class="muted small">Ещё загружаем часть текстов…</p>' : ''}`;
+  const mineLoading = canWrite() && !S.entries.list && !S.entries.failed;
+  return `${resultsHtml(items, S.searchQ, S.searchMore)}${mineLoading ? '<p class="muted small">Загружаем ваши записи из журнала…</p>' : ''}
+    ${S.entries.failed && !S.entries.list ? '<p class="muted small">Записи журнала за прошлые дни не загрузились — проверьте интернет.</p>' : ''}
+    ${loading ? '<p class="muted small">Ещё загружаем часть текстов…</p>' : ''}`;
 }
 
-const SEARCH_HINT = `<div class="search-hint muted"><p>Ищет в советах (Библиотека и Практика — вместе с заметками из каналов), тренировках и играх.</p>
-  <p>Можно писать часть слова: «повод» найдёт и «поводок», и «поводке». Несколько слов — найдутся места, где есть все.</p></div>`;
+// Записи журнала с текстом за все дни — при каждом открытии поиска (не чаще раза в 30 секунд)
+function loadEntries() {
+  if (!canWrite() || S.entries.loading || Date.now() - S.entries.loadedAt < 30000) return;
+  S.entries.loading = true;
+  store.loadNotes()
+    .then((list) => { S.entries = { list, loading: false, loadedAt: Date.now(), failed: false }; })
+    .catch((err) => { console.error(err); S.entries = { ...S.entries, loading: false, loadedAt: Date.now(), failed: true }; })
+    .finally(() => { if (route().page === 'search') applySearch(); });
+}
+
+const SEARCH_HINT = `<div class="search-hint muted"><p>Ищет в ваших записях — заметках и комментариях в журнале и заметках в Дневнике, — а ещё в советах (Библиотека и Практика вместе с заметками из каналов), тренировках и играх.</p>
+  <p>Ваши записи — первыми, от новых к старым: сразу видно, когда это было в прошлый раз. Нажмите на запись — откроется этот день в Дневнике.</p>
+  <p>Можно писать часть слова: «вырв» найдёт и «вырвало», и «вырвал». Несколько слов — найдутся места, где есть все.</p></div>`;
 
 function renderSearch() {
+  setTimeout(loadEntries, 0);
   const q = S.searchQ.trim();
   return `<div class="search-bar"><div class="search-box"><svg class="search-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4 4"/></svg>
       <input class="search-input" type="search" enterkeyhint="search" autocomplete="off" placeholder="Найти" aria-label="Поиск" value="${escapeHtml(S.searchQ)}">
@@ -2284,7 +2303,7 @@ function selectedDayHtml(day) {
     ${health.length ? `<ul class="health-list">${health.map((r) => healthRowHtml(r, S.day)).join('')}</ul>` : ''}
     ${monthHtml}
     ${storyHtml}
-    ${st && st.notes.length ? `<ul class="ev-list notes">${st.notes.map((e) => eventRow(e)).join('')}</ul>` : ''}
+    ${st && st.notes.length ? `<ul class="ev-list notes">${st.notes.map((e) => (e.id === S.cal.hit ? eventRow(e).replace('<li>', '<li class="found">') : eventRow(e))).join('')}</ul>` : ''}
     ${st && st.list.length ? `<details class="intro"><summary>Все записи (${st.list.length})</summary><ul class="ev-list">${st.list.map((e) => eventRow(e)).join('')}</ul></details>` : ''}
   </section>`;
 }
@@ -2381,6 +2400,10 @@ function renderDiary() {
   if (!canWrite()) return `${head}${statusBanner()}<p class="muted">Дневник появится после входа.</p>`;
   setTimeout(() => loadMonth(S.cal.month), 0);
   if (sel && monthOf(sel) !== S.cal.month) setTimeout(() => loadMonth(monthOf(sel)), 0);
+  if (S.cal.jump && sel) {
+    S.cal.jump = false;
+    setTimeout(() => { const card = document.getElementById('day-sel'); if (card) card.scrollIntoView({ block: 'start' }); }, 60);
+  }
   return `${head}${featureHtml()}${calendarHtml(S.cal.month)}${sel ? selectedDayHtml(sel) : ''}`;
 }
 
@@ -3345,8 +3368,20 @@ function takeAddLink() {
   if (EVENT_TYPES[m[1]] && !EVENT_TYPES[m[1]].retired) S.pendingAdd = m[1];
 }
 
+// Найденная запись журнала: #/d/day/ГГГГ-ММ-ДД/id → Дневник с этим днём под календарём, запись подсвечена
+function takeDayLink() {
+  const m = location.hash.match(/^#\/d\/day\/(\d{4}-\d{2}-\d{2})(?:\/([^/]+))?/);
+  if (!m) return;
+  S.cal.sel = m[1];
+  S.cal.month = monthOf(m[1]);
+  S.cal.hit = m[2] ? decodeURIComponent(m[2]) : '';
+  S.cal.jump = true;
+  history.replaceState(null, '', `${location.pathname}${location.search}#/d`);
+}
+
 function onHashChange() {
   takeAddLink();
+  takeDayLink();
   scrollMemory[currentHash] = window.scrollY;
   prevHash = currentHash;
   currentHash = location.hash || '#/';
@@ -3867,6 +3902,7 @@ const actions = {
   'cal-pick': (el) => {
     const day = el.dataset.day;
     S.cal.sel = S.cal.sel === day && !el.dataset.scroll ? '' : day;
+    S.cal.hit = '';
     S.cal.month = monthOf(day);
     render();
     const card = S.cal.sel && document.getElementById('day-sel');
@@ -4277,6 +4313,7 @@ setInterval(checkDay, 30000);
 setInterval(updateSince, 30000);
 updateNet();
 takeAddLink();
+takeDayLink();
 currentHash = location.hash || '#/';
 renderHeader();
 render();

@@ -147,6 +147,8 @@ function localStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onPet 
       write('bt.cards', all);
       onCards(all);
     },
+    // Для поиска: все записи журнала с текстом (заметки и комментарии)
+    async loadNotes() { return allEvents().filter((e) => e.text && e.type !== 'train'); },
     async loadHistory(from, to) {
       const days = {};
       try {
@@ -577,6 +579,14 @@ function firebaseStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onE
       if (!ready()) return;
       const { doc, deleteDoc } = fb.fs;
       deleteDoc(doc(db, 'cards', `${tab}__${cardId}`)).catch(fail);
+    },
+
+    // Для поиска: все записи журнала с текстом — заметки и комментарии к кормлению, туалету и другим записям
+    async loadNotes() {
+      if (!ready()) return [];
+      const { collection, query, where, getDocs } = fb.fs;
+      const snap = await getDocs(query(collection(db, 'events'), where('text', '!=', '')));
+      return snap.docs.map(toEvent).filter((e) => e.type !== 'train');
     },
 
     // История для дневника: записи журнала и отметки расписания за дни from…to (включительно)

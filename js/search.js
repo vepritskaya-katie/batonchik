@@ -1,9 +1,11 @@
-// Поиск (лупа в шапке): советы — Библиотека и Практика (наши советы и заметки из каналов), — а также тренировки и игры.
+// Поиск (лупа в шапке): ваши записи (заметки и комментарии в журнале, заметки о днях в Дневнике),
+// советы — Библиотека и Практика (наши советы и заметки из каналов), — а также тренировки и игры.
 // Ищет слова и части слов: без учёта регистра и «ё»; у длинных слов отбрасывает окончание,
 // поэтому «собаки» находит и «собака», и «собаку». Несколько слов — должны встретиться все.
 
 import { escapeHtml, plainText, slug } from './md.js';
 import { bookLines } from './library.js';
+import { EVENT_TYPES, SUBS, dayTitle, fmtTime, plural } from './diary.js';
 
 // Строчные буквы и «е» вместо «ё». Длина строки не меняется — места совпадений совпадают с исходным текстом
 export function norm(s) {
@@ -83,6 +85,37 @@ export function buildIndex({ lib, cat, notes, k, g }) {
   return out;
 }
 
+// «Ваши записи»: заметки и комментарии из журнала (у любой записи — кормления, туалета, аварии…) и заметки о днях в Дневнике.
+// Ищутся только по тексту и показываются от новых к старым — чтобы сразу видеть, когда это было в прошлый раз
+export const MINE = 'Ваши записи';
+const DAY_MS = 86400000;
+function agoText(day, today) {
+  const n = Math.round((Date.parse(`${today}T00:00:00Z`) - Date.parse(`${day}T00:00:00Z`)) / DAY_MS);
+  if (n <= 0) return 'сегодня';
+  if (n === 1) return 'вчера';
+  return `${n} ${plural(n, 'день', 'дня', 'дней')} назад`;
+}
+const capFirst = (x) => x.charAt(0).toUpperCase() + x.slice(1);
+const whenText = (day, today) => capFirst(dayTitle(day, { weekday: 'short', day: 'numeric', month: 'long', ...(day.slice(0, 4) !== today.slice(0, 4) ? { year: 'numeric' } : {}) }));
+const mine = (src, title, href, text, sort) => { const x = clean(text); return { group: MINE, src, title, href, text: x, nt: '', nx: norm(x), sort }; };
+
+export function entryItems({ events = [], stories = {}, today }) {
+  const out = [];
+  for (const e of events) {
+    if (!e.text || !e.day || e.type === 'train') continue;
+    const t = EVENT_TYPES[e.type] || { icon: '•', label: 'Запись' };
+    const what = `${t.icon} ${t.label}${e.sub && SUBS[e.sub] ? ` — ${SUBS[e.sub]}` : ''}${e.grams ? ` — ${e.grams} г` : ''}`;
+    const at = e.at instanceof Date ? e.at : new Date(e.at);
+    out.push(mine([what, e.name].filter(Boolean).join(' · '), `${whenText(e.day, today)} · ${fmtTime(at)} · ${agoText(e.day, today)}`,
+      `#/d/day/${e.day}/${encodeURIComponent(e.id)}`, e.text, at.toISOString()));
+  }
+  for (const [day, st] of Object.entries(stories || {})) {
+    if (!st || !(st.title || st.text)) continue;
+    out.push(mine('📔 Дневник', `${whenText(day, today)} · ${agoText(day, today)}`, `#/d/${day}`, [st.title, st.text].filter(Boolean).join('. '), `${day}T20:59:59.999Z`));
+  }
+  return out;
+}
+
 // Совпадения: сначала те, где слова есть в названии, потом — где их больше в тексте
 export function search(index, q) {
   const words = queryWords(q);
@@ -156,10 +189,11 @@ export function snippet(text, words, before = 50, after = 120) {
   return `${a > 0 ? '…' : ''}${text.slice(a, b)}${b < text.length ? '…' : ''}`;
 }
 
-const GROUPS = ['Библиотека', 'Практика', 'Каналы', 'Тренировки', 'Игры'];
+const GROUPS = [MINE, 'Библиотека', 'Практика', 'Каналы', 'Тренировки', 'Игры'];
 const PAGE = 20; // столько находок в разделе показываем сразу, остальные — по кнопке
 
-// Результаты, по разделам. Раздел с лучшим совпадением — первым. more — разделы, где нажали «Показать все»
+// Результаты, по разделам. «Ваши записи» — всегда первыми и от новых к старым; остальные разделы — по лучшему совпадению.
+// more — разделы, где нажали «Показать все»
 export function resultsHtml(index, q, more = {}) {
   const { words, hits } = search(index, q);
   if (!words.length) return '';
@@ -168,7 +202,9 @@ export function resultsHtml(index, q, more = {}) {
   }
   const chev = '<svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg>';
   const groups = GROUPS.map((g) => hits.filter((h) => h.it.group === g)).filter((list) => list.length);
-  groups.sort((a, b) => b[0].score - a[0].score);
+  groups.sort((a, b) => (b[0].it.group === MINE) - (a[0].it.group === MINE) || b[0].score - a[0].score);
+  const own = groups.find((list) => list[0].it.group === MINE);
+  if (own) own.sort((a, b) => (a.it.sort < b.it.sort ? 1 : a.it.sort > b.it.sort ? -1 : 0));
   const html = groups.map((list) => {
     const g = list[0].it.group;
     const shown = more[g] ? list : list.slice(0, PAGE);
