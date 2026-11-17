@@ -19,7 +19,7 @@ import {
 import { pickIdeas } from './ideas.js';
 import { parseNotes, noteItemHtml, noteHtml, noteMatches, NOTE_FILTERS } from './notes.js';
 import {
-  CARE_ITEMS, EVERY_OPTIONS, everyText, careState, daysAgoText, careDue, REACTIONS, SOCIAL_GROUPS, SOCIAL_ITEMS, isOwnSocial, socialState, addReaction,
+  CARE_ITEMS, EVERY_OPTIONS, everyText, careState, daysAgoText, careDue, REACTIONS, SOCIAL_GROUPS, SOCIAL_ITEMS, isOwnSocial, socialState, addReaction, checklistMapper,
   socialSummary, reactionLine, LOST_STEPS, hasLostPhones, lostLines, lostText, lostPosterHtml, lostPosterImage,
 } from './care.js';
 
@@ -1091,7 +1091,7 @@ const searchBack = (fallback) => (fromSearch() ? `<a class="back" href="#/search
 // ---------- Практика: наши советы и заметки из каналов ----------
 // По темам (# в sovety.md и ## в kanaly.md): сначала наши правила и протоколы 🧭, потом заметки из Telegram-каналов 📣
 
-const SRC_FILTERS = [['p', '🧭 Практика'], ['c', '📣 Каналы']];
+const SRC_FILTERS = [['p', '🧭 Практика'], ['c', '📣 Каналы и чат']];
 const NOTE_ONLY = NOTE_FILTERS.map(([k]) => k);
 // Внутри пары («Практика» / «Каналы», «сейчас» / «на будущее», ✅ / 💬) — «или», между парами — «и».
 // Фильтры заметок (сейчас, на будущее, ✅, 💬) оставляют только заметки
@@ -1113,7 +1113,7 @@ function practiceThemes() {
 
 function practiceCount(shown, tips, notes) {
   return shown === tips + notes
-    ? `Советов: ${tips}${notes ? ` · заметок из каналов: ${notes}` : ''}`
+    ? `Советов: ${tips}${notes ? ` · заметок из каналов и чата: ${notes}` : ''}`
     : `Найдено: ${shown} из ${tips + notes}`;
 }
 
@@ -1158,7 +1158,7 @@ function renderTipsPage() {
   const notesState = !S.notes ? '<p class="muted small">Загружаем заметки из каналов…</p>'
     : S.notes.error ? '<div class="banner warn">Не удалось загрузить заметки из каналов. Проверьте интернет.</div>' : '';
   return tipsPage('t', `${errors}${intro}
-    <p class="muted small practice-legend">🧭 <b>Практика</b> — наши правила и протоколы. 📣 <b>Канал</b> — заметки из Telegram-каналов: ✅ наука и консенсус или 💬 опыт, который подходит не всем собакам.
+    <p class="muted small practice-legend">🧭 <b>Практика</b> — наши правила и протоколы. 📣 <b>Канал</b> и 👥 <b>Чат</b> — заметки из Telegram-каналов и чата Aussie Moscow: ✅ наука и консенсус или 💬 опыт, который подходит не всем собакам.
       <a href="#/lib/a/kak-proveryat-sovety-nauka-mnenie-i-marketing">Как проверять советы ›</a></p>
     <div class="notes-tools"><div class="filter-chips">${chips}</div>
       <p class="muted small notes-count" aria-live="polite" data-tips="${tips}" data-notes="${notes}">${practiceCount(shown, tips, notes)}</p></div>
@@ -1890,7 +1890,21 @@ function renderNote(id) {
     : `<a class="back" href="#/t">${arrow}Практика</a>`;
   if (!S.notes) return `${back}<p class="muted">Загружаем…</p>`;
   const n = S.notes.byId && S.notes.byId.get(id);
-  return n ? noteHtml(n, back) : `${back}<h1>Не найдено</h1><p class="muted">Возможно, заметку переименовали.</p>`;
+  if (!n) return `${back}<h1>Не найдено</h1><p class="muted">Возможно, заметку переименовали.</p>`;
+  // Чек-лист социализации: каждая строка — пункт «Нового для Батончика», отметка общая на двоих, с датой и реакцией
+  const toSocial = checklistMapper();
+  const task = (text) => {
+    const sid = toSocial(text);
+    if (!sid) return `<span class="li-text">${inline(text)}</span>`;
+    const st = socialState(S.social[sid]);
+    const meta = st.last ? `${REACTIONS[st.last.r].label.toLowerCase()} · ${dayTitle(st.last.d, { day: 'numeric', month: 'long' })}${st.count > 1 ? ` · встреч: ${st.count}` : ''}` : '';
+    return `<button type="button" class="check-social${st.last ? ' on' : ''}${st.again ? ' again' : ''}" data-action="social-open" data-id="${sid}"${canWrite() ? '' : ' disabled'}>
+      <span class="cs-box" aria-hidden="true">${st.last ? REACTIONS[st.last.r].icon : ''}</span>
+      <span class="cs-text">${inline(text)}${meta ? `<small>${escapeHtml(meta)}</small>` : ''}</span></button>`;
+  };
+  const isChecklist = n.text.some((b) => b.type === 'list' && b.items.some((it) => it.task !== null));
+  const hint = isChecklist ? `<p class="hint-box checklist-hint">Нажмите на пункт и отметьте, как он отреагировал. Отметка общая на двоих, с датой — та же, что в <a href="#/social">«Новом для ${escapeHtml(DOG() === 'Батончик' ? 'Батончика' : DOG())}»</a>.</p>` : '';
+  return noteHtml(n, back, { task }).replace('<section class="blk"><div class="prose">', `${hint}<section class="blk"><div class="prose">`);
 }
 
 // Фильтры «Практики» прячут лишнее прямо на странице, без перерисовки
@@ -2676,7 +2690,8 @@ function renderSocial() {
       <p>Насторожился — отойдите подальше, дайте понюхать землю, похвалите. Испугался — уходите спокойно, без утешений и рывков поводка. В следующий раз начните издалека.</p>
       <p>Не тяните ближе и не держите, «чтобы привык». Пусть он сам решает, подойти или нет.</p>
       <p>Примерно с 6 до 14 месяцев у многих собак бывает второй период страхов: знакомое вдруг пугает. Это нормально — вернитесь к расстоянию, где ему спокойно.</p>
-      <p><a href="#/k/posmotri-na-eto">«Посмотри на это» ›</a></p></div></details>
+      <p><a href="#/k/posmotri-na-eto">«Посмотри на это» ›</a></p>
+      <p>Весь список — по чек-листу социализации Екатерины Усовой: <a href="#/c/kak-polzovatsya-chek-listom-socializacii">как им пользоваться ›</a></p></div></details>
     <div class="filter-chips">${chip('all', 'Все', sum.total)}${chip('new', 'Ещё не было', sum.total - sum.met)}${chip('again', 'Повторить', sum.again)}</div>
     ${body || `<p class="empty">${f === 'again' ? 'Повторять пока нечего: последние встречи прошли спокойно.' : 'Всё из списка уже встречали. Добавьте своё через «+».'}</p>`}`;
 }

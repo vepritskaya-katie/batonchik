@@ -97,21 +97,26 @@ const whenBadges = (n) => n.when.map((w) => `<span class="badge when">${escapeHt
 export const NOTE_FILTERS = [['now', 'Актуально сейчас'], ['future', 'На будущее'], ['sci', '✅ Наука'], ['exp', '💬 Опыт']];
 const CHEV = '<svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg>';
 
-// Заметка в списке «Практики»: пометка «📣 Канал» и ✅ / 💬
+// Откуда заметка: все источники из чата Aussie Moscow — «👥 Чат», иначе — «📣 Канал»
+export const isChatNote = (n) => n.sources.length > 0 && n.sources.every((x) => /t\.me\/aussy_Moscow\//i.test(x.url));
+const srcMark = (n) => (isChatNote(n) ? '<span class="src-mark ch">👥 Чат</span>' : '<span class="src-mark ch">📣 Канал</span>');
+
+// Заметка в списке «Практики»: пометка «📣 Канал» или «👥 Чат» и ✅ / 💬
 export function noteItemHtml(n, shown) {
   return `<li data-note="${n.id}"${shown ? '' : ' hidden'}><a class="card-link note-link" href="#/c/${n.id}">
     <span class="card-name">${inline(n.title)}</span>
-    <span class="src-line"><span class="src-mark ch">📣 Канал</span>${markLine(n)}</span>
+    <span class="src-line">${srcMark(n)}${markLine(n)}</span>
     ${n.when.length ? `<span class="note-badges">${whenBadges(n)}</span>` : ''}${CHEV}</a></li>`;
 }
 
-export function noteHtml(n, back) {
+// opts.task(text) — строка чек-листа «- [ ] …» (в «Практике» она связана с «Новым для Батончика»)
+export function noteHtml(n, back, opts = {}) {
   const sources = n.sources.map((s) => `<li><a href="${escapeHtml(s.url)}" target="_blank" rel="noopener">${escapeHtml(s.label)}</a>${s.video ? ' <span class="badge video">▶ видео</span>' : ''}</li>`).join('');
   return `${back}
     <h1 class="card-title">${inline(n.title)}</h1>
     <p class="muted note-path">${[n.section, n.topic].filter(Boolean).map(escapeHtml).join(' · ')}</p>
     <div class="note-badges big">${markBadge(n)}${n.when.length ? `<span class="muted small">Когда актуально:</span>${whenBadges(n)}` : ''}</div>
-    ${n.text.length ? `<section class="blk"><div class="prose">${renderBlocks(n.text)}</div></section>` : ''}
+    ${n.text.length ? `<section class="blk"><div class="prose">${renderBlocks(n.text, opts)}</div></section>` : ''}
     ${n.comment.length ? `<section class="blk blk-comment"><h2>Комментарий кинолога</h2><div class="prose">${renderBlocks(n.comment)}</div></section>` : ''}
     ${sources ? `<section class="blk"><h2>Источники</h2><ul class="sources">${sources}</ul></section>` : ''}`;
 }
