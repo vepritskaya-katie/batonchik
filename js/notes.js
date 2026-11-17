@@ -102,10 +102,11 @@ export const isChatNote = (n) => n.sources.length > 0 && n.sources.every((x) => 
 const srcMark = (n) => (isChatNote(n) ? '<span class="src-mark ch">👥 Чат</span>' : '<span class="src-mark ch">📣 Канал</span>');
 
 // Заметка в списке «Практики»: пометка «📣 Канал» или «👥 Чат» и ✅ / 💬
-export function noteItemHtml(n, shown) {
+// read — отмечена «Прочитано» (галочка в списке)
+export function noteItemHtml(n, shown, read = false) {
   return `<li data-note="${n.id}"${shown ? '' : ' hidden'}><a class="card-link note-link" href="#/c/${n.id}">
     <span class="card-name">${inline(n.title)}</span>
-    <span class="src-line">${srcMark(n)}${markLine(n)}</span>
+    <span class="src-line">${srcMark(n)}${markLine(n)}${read ? '<span class="src-mark read">✓ прочитано</span>' : ''}</span>
     ${n.when.length ? `<span class="note-badges">${whenBadges(n)}</span>` : ''}${CHEV}</a></li>`;
 }
 
@@ -115,7 +116,7 @@ export function noteHtml(n, back, opts = {}) {
   return `${back}
     <h1 class="card-title">${inline(n.title)}</h1>
     <p class="muted note-path">${[n.section, n.topic].filter(Boolean).map(escapeHtml).join(' · ')}</p>
-    <div class="note-badges big">${markBadge(n)}${n.when.length ? `<span class="muted small">Когда актуально:</span>${whenBadges(n)}` : ''}</div>
+    <div class="note-badges big">${markBadge(n)}${n.when.length ? `<span class="note-when"><span class="muted small">Когда актуально:</span>${whenBadges(n)}</span>` : ''}</div>
     ${n.text.length ? `<section class="blk"><div class="prose">${renderBlocks(n.text, opts)}</div></section>` : ''}
     ${n.comment.length ? `<section class="blk blk-comment"><h2>Комментарий кинолога</h2><div class="prose">${renderBlocks(n.comment)}</div></section>` : ''}
     ${sources ? `<section class="blk"><h2>Источники</h2><ul class="sources">${sources}</ul></section>` : ''}`;

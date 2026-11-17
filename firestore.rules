@@ -191,12 +191,12 @@ service cloud.firestore {
       allow delete: if isAllowed();
     }
 
-    // Библиотека: что прочитано (и результаты старых тестов) — у каждого свой документ, чужой не виден
+    // Библиотека и «Практика»: что прочитано (и результаты старых тестов) — у каждого свой документ, чужой не виден
     match /reads/{uid} {
       allow read, delete: if isAllowed() && request.auth.uid == uid;
       allow create, update: if isAllowed() && request.auth.uid == uid
         && request.resource.data.keys().hasOnly(['items', 'quiz', 'updatedAt'])
-        && (!('items' in request.resource.data) || (request.resource.data.items is map && request.resource.data.items.size() <= 500))
+        && (!('items' in request.resource.data) || (request.resource.data.items is map && request.resource.data.items.size() <= 1500))
         && (!('quiz' in request.resource.data) || (request.resource.data.quiz is map && request.resource.data.quiz.size() <= 20))
         && request.resource.data.updatedAt == request.time;
     }
@@ -325,7 +325,7 @@ service cloud.firestore {
         && (!('days' in d) || (d.days is map && d.days.size() <= 3000))
         && (!('rep' in d) || (d.rep is map && d.rep.size() <= 1000))
         && (!('known' in d) || (d.known is map && d.known.size() <= 3000))
-        && (!('read' in d) || (d.read is map && d.read.size() <= 1000))
+        && (!('read' in d) || (d.read is map && d.read.size() <= 1500))
         && d.updatedAt == request.time;
     }
     match /game/{uid} {
