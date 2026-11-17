@@ -269,11 +269,12 @@ service cloud.firestore {
       allow delete: if isAllowed();
     }
 
-    // Уход: когти, зубы, вычёсывание, уши, купание. log — дни, когда делали; every — раз в сколько дней напоминать
+    // Уход (когти, зубы, вычёсывание, уши, купание) и чистота (миски, их дезинфекция, игрушки, лежанка, амуниция,
+    // контейнер для корма). log — дни, когда делали; every — раз в сколько дней напоминать
     match /care/{id} {
       allow read: if isAllowed();
       allow create, update: if isAllowed()
-        && id in ['nails', 'teeth', 'brush', 'ears', 'bath']
+        && id in ['nails', 'teeth', 'brush', 'ears', 'bath', 'bowls', 'bowls-deep', 'toys', 'bed', 'gear', 'food-box']
         && request.resource.data.keys().hasOnly(['log', 'every', 'updatedAt', 'updatedBy'])
         && request.resource.data.log is list && request.resource.data.log.size() <= 60
         && request.resource.data.every is int && request.resource.data.every >= 0 && request.resource.data.every <= 120

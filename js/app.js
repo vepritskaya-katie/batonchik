@@ -2566,8 +2566,13 @@ function renderPassport() {
     </section>
     <section class="card">
       <div class="card-head"><h2>Уход</h2></div>
-      <ul class="health-list care-list">${CARE_ITEMS.map((item) => careRowHtml(item, careState(item, S.care[item.id], S.day))).join('')}</ul>
+      <ul class="health-list care-list">${careRows(false)}</ul>
       <p class="muted small care-note">«Сегодня» — отметить, что сделали. Нажмите на строку, чтобы выбрать другой день или как часто напоминать.</p>
+    </section>
+    <section class="card" id="clean">
+      <div class="card-head"><h2>Чистота</h2></div>
+      <ul class="health-list care-list">${careRows(true)}</ul>
+      <p class="muted small care-note">Миски, игрушки, лежанка и амуниция. Напоминания — как в «Уходе». <a href="#/t/chistota-miski-igrushki-lezhanka">Что мыть и как ›</a></p>
     </section>
     <section class="card">
       <div class="card-head"><h2>История</h2></div>
@@ -2602,8 +2607,10 @@ function linkCard(href, icon, title, sub, cls = '') {
     <span><strong>${title}</strong><small>${sub}</small></span><span class="link-arrow" aria-hidden="true">›</span></a>`;
 }
 
-// ---------- Уход ----------
+// ---------- Уход и чистота ----------
 
+const careRows = (home) => CARE_ITEMS.filter((item) => !!item.home === home)
+  .map((item) => careRowHtml(item, careState(item, S.care[item.id], S.day))).join('');
 function careRowHtml(item, st) {
   const today = st.last === S.day;
   const when = `${daysAgoText(st.days)}${st.due && st.last ? ' · пора' : ''}`;
@@ -2639,7 +2646,7 @@ function careSheet(id) {
   const recent = st.log.slice(-6).reverse();
   const every = EVERY_OPTIONS.includes(st.every) ? EVERY_OPTIONS : [...EVERY_OPTIONS, st.every].sort((a, b) => a - b);
   openSheet(`<form class="form"><h2>${item.icon} ${item.name}</h2>
-    <p class="muted">${escapeHtml(cap(item.what))}.${item.card ? ` <a href="#/k/${item.card}" data-action="sheet-close-link">Как приучить ›</a>` : ''}</p>
+    <p class="muted">${escapeHtml(cap(item.what))}.${item.card ? ` <a href="#/k/${item.card}" data-action="sheet-close-link">Как приучить ›</a>` : ''}${item.tip ? ` <a href="#/t/${item.tip}" data-action="sheet-close-link">Подробнее ›</a>` : ''}</p>
     <label>Напоминать<select name="every">${every.map((n) => `<option value="${n}"${n === st.every ? ' selected' : ''}>${everyText(n)}</option>`).join('')}</select></label>
     ${canWrite() ? `<label>Когда сделали <input type="date" name="date" value="${S.day}" max="${S.day}" required></label>` : ''}
     ${recent.length ? `<p class="care-hist"><b>Последние разы:</b> ${recent.map((d) => escapeHtml(dayTitle(d, { day: 'numeric', month: 'short' }))).join(', ')}</p>` : '<p class="muted">Пока ни разу не отмечали.</p>'}
@@ -2779,7 +2786,7 @@ function summaryData() {
   const notes = all.filter((e) => days.includes(e.day) && e.text && e.type !== 'train')
     .sort((a, b) => new Date(b.at) - new Date(a.at)).slice(0, 12)
     .map((e) => `${dayTitle(e.day, { day: 'numeric', month: 'short' })}, ${fmtTime(new Date(e.at))} — ${EVENT_TYPES[e.type] ? EVENT_TYPES[e.type].label.toLowerCase() : e.type}: ${e.text}`);
-  const care = CARE_ITEMS.map((item) => ({ item, st: careState(item, S.care[item.id], S.day) })).filter(({ st }) => st.last)
+  const care = CARE_ITEMS.filter((item) => !item.home).map((item) => ({ item, st: careState(item, S.care[item.id], S.day) })).filter(({ st }) => st.last)
     .map(({ item, st }) => `${item.name}: ${daysAgoText(st.days)}`);
   return {
     title: `${DOG()}${pet.breed ? ` — ${pet.breed.toLowerCase()}` : ''}`,
