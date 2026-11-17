@@ -109,7 +109,7 @@ const S = {
   factShift: 0,       // «Факт дня» на главной: нажатие — следующий
   stories: {},        // дневник: заметки о днях { 'ГГГГ-ММ-ДД': { title, text, special, hasPhoto, photoCount, photoKey } } — все, без фото
   storyPhotos: {},    // фото к заметкам, загруженные по требованию: { день: { key, list: [data:image…], loading, failedAt } }
-  cal: { month: '', sel: '', memShift: 0, hit: '', jump: false }, // календарь в Дневнике: месяц ГГГГ-ММ, выбранный день, «другое воспоминание», запись из поиска
+  cal: { month: '', sel: '', feat: '', memShift: 0, hit: '', jump: false }, // календарь в Дневнике: месяц ГГГГ-ММ, выбранный день, выбранный «день, который хочется помнить» (наверху), «другое воспоминание», запись из поиска
   months: {},         // журнал по месяцам для календаря: { 'ГГГГ-ММ': { events, loading, loadedAt } }
   lost: null,         // «Если потерялся»: { name1, phone1, name2, phone2, signs, note }
   social: {},         // социализация: { пункт: { title (у своих), log: [{ d, r }] } }
@@ -1134,7 +1134,7 @@ function renderTipsPage() {
       return `<li data-tip${ok ? '' : ' hidden'}><a class="card-link" href="#/t/${c.id}">
         <span class="card-name">${inline(c.name)}</span>
         ${c.subtitle ? `<span class="card-sub">${inline(c.subtitle)}</span>` : ''}
-        <span class="src-line"><span class="src-mark own">🧭 Практика</span></span>${CHEV_SVG}</a></li>`;
+        <span class="src-line"><span class="src-mark own">🧭 Практика</span>${isRead(readKey('tip', c.id)) ? READ_MARK : ''}</span>${CHEV_SVG}</a></li>`;
     }).join('');
     const topics = t.topics.map((tp) => {
       let n = 0;
@@ -1142,7 +1142,7 @@ function renderTipsPage() {
         const ok = noteShown(note, f);
         notes++;
         if (ok) n++;
-        return noteItemHtml(note, ok);
+        return noteItemHtml(note, ok, isRead(readKey('note', note.id)));
       }).join('');
       visible += n;
       return `<div class="note-topic" data-topic${n ? '' : ' hidden'}>${tp.title ? `<h3>${inline(tp.title)}</h3>` : ''}<ul class="cards">${items}</ul></div>`;
@@ -1339,7 +1339,7 @@ function gameRulesHtml() {
   const formats = FORMATS.map((f) => `${f.icon} ${escapeHtml(f.title)}`).join(', ');
   return `<details class="card game-rules"><summary>Как устроена игра</summary><div class="prose"><ul>
     <li><b>Разминка дня</b> — ${DAILY} вопросов, по одному каждого формата: ${formats} Вопросы у вас обоих одинаковые и новые, пока не кончатся.</li>
-    <li><b>Очки:</b> +${POINTS.right} за верный ответ, +${POINTS.perfect} за все верные, +${POINTS.fix} за исправленную ошибку. В Библиотеке за отметку «Прочитано»: статья, карточка «Здоровья» или разбор ситуации — +${READ_POINTS.a}, вопрос-ответ или миф — +${READ_POINTS.qa}.</li>
+    <li><b>Очки:</b> +${POINTS.right} за верный ответ, +${POINTS.perfect} за все верные, +${POINTS.fix} за исправленную ошибку. В Библиотеке за отметку «Прочитано»: статья, карточка «Здоровья» или разбор ситуации — +${READ_POINTS.a}, вопрос-ответ или миф — +${READ_POINTS.qa}. В «Практике» — +${READ_POINTS.note} за каждый совет или заметку.</li>
     <li><b>Ошибки</b> возвращаются через 1, 3 и 7 дней, пока не запомнятся, — до трёх в день.</li>
     <li><b>Серия 🔥</b> — дни подряд с разминкой; один пропуск в неделю её не обрывает. <b>Вместе 🤝</b> — дни, когда сыграли оба.</li>
     <li><b>Сезон</b> длится, пока не кончатся новые вопросы, потом они идут по второму кругу — начинается следующий сезон. Медаль 🥇 — тому, у кого за сезон больше очков. Новые вопросы, добавленные в игру, попадают в ближайшую разминку.</li>
@@ -1774,14 +1774,13 @@ function renderArticle(id) {
   const back = searchBack(`<a class="back" href="#/lib/a">${BACK_SVG}Статьи</a>`);
   if (i < 0) return `${back}<p class="empty">Статья не найдена.</p>`;
   const c = list[i];
-  const on = !!S.reads.items[readKey('a', c.id)];
   const next = list[i + 1];
   return `${back}
     <p class="eyebrow">Статья ${i + 1} из ${list.length}</p>
     <h1 class="card-title">${inline(c.title)}</h1>
     <div class="lib-chips big">${metaChips(c)}</div>
     <div class="prose article">${articleBody(c)}</div>
-    <button class="btn wide read-toggle${on ? ' on' : ''}" data-action="lib-read" data-id="${readKey('a', c.id)}"${canWrite() ? '' : ' disabled'}>${on ? '✓ Прочитано' : 'Отметить прочитанной'}</button>
+    ${readToggle(readKey('a', c.id))}
     ${next ? `<a class="next-link" href="#/lib/a/${next.id}"><span class="muted small">Следующая статья</span><strong>${inline(next.title)}</strong></a>` : ''}`;
 }
 
@@ -1792,18 +1791,26 @@ function renderHealthCard(id) {
   const back = searchBack(`<a class="back" href="#/lib/health">${BACK_SVG}Здоровье</a>`);
   if (i < 0) return `${back}<p class="empty">Карточка не найдена.</p>`;
   const c = list[i];
-  const on = !!S.reads.items[readKey('health', c.id)];
   const next = list[i + 1];
   return `${back}
     <p class="eyebrow">Здоровье · ${i + 1} из ${list.length}</p>
     <h1 class="card-title">${inline(c.title)}</h1>
     <div class="lib-chips big">${metaChips(c)}</div>
     <div class="prose article">${healthBody(c, (items, n) => fillBoxHtml(c, items, n))}</div>
-    <button class="btn wide read-toggle${on ? ' on' : ''}" data-action="lib-read" data-id="${readKey('health', c.id)}"${canWrite() ? '' : ' disabled'}>${on ? '✓ Прочитано' : 'Отметить прочитанной'}</button>
+    ${readToggle(readKey('health', c.id))}
     ${next ? `<a class="next-link" href="#/lib/health/${next.id}"><span class="muted small">Следующая карточка</span><strong>${inline(next.title)}</strong></a>` : ''}`;
 }
 
 const fillDate = (d) => dayTitle(d, { day: 'numeric', month: 'long', year: 'numeric' });
+
+// Большая кнопка «Прочитано» внизу статьи (Библиотека) и в «Практике» (совет — tip_…, заметка — note_…).
+// Первая отметка даёт очки в игре — см. READ_POINTS
+const isRead = (key) => !!S.reads.items[key];
+function readToggle(key, word = 'прочитанной') {
+  const on = isRead(key);
+  return `<button class="btn wide read-toggle${on ? ' on' : ''}" data-action="lib-read" data-id="${key}"${canWrite() ? '' : ' disabled'}>${on ? '✓ Прочитано' : `Отметить ${word}`}</button>`;
+}
+const READ_MARK = '<span class="src-mark read">✓ прочитано</span>';
 function fillBoxHtml(card, items, n) {
   const rows = items.map((f) => {
     const x = S.fields[f.key];
@@ -1904,7 +1911,8 @@ function renderNote(id) {
   };
   const isChecklist = n.text.some((b) => b.type === 'list' && b.items.some((it) => it.task !== null));
   const hint = isChecklist ? `<p class="hint-box checklist-hint">Нажмите на пункт и отметьте, как он отреагировал. Отметка общая на двоих, с датой — та же, что в <a href="#/social">«Новом для ${escapeHtml(DOG() === 'Батончик' ? 'Батончика' : DOG())}»</a>.</p>` : '';
-  return noteHtml(n, back, { task }).replace('<section class="blk"><div class="prose">', `${hint}<section class="blk"><div class="prose">`);
+  return noteHtml(n, back, { task }).replace('<section class="blk"><div class="prose">', `${hint}<section class="blk"><div class="prose">`)
+    + readToggle(readKey('note', n.id));
 }
 
 // Фильтры «Практики» прячут лишнее прямо на странице, без перерисовки
@@ -2004,7 +2012,8 @@ function renderCard(tab, id) {
     ${prog}
     ${tab === 'k' ? placesHtml(tab, card) : ''}
     ${card.steps.length || card.hasResult ? statusBanner() : ''}
-    ${body}`;
+    ${body}
+    ${tab === 't' ? readToggle(readKey('tip', card.id), 'прочитанным') : ''}`;
 }
 
 // Блок «Итог»: одна галочка «Освоено» — большая кнопка на всю карточку, несколько — общие галочки
@@ -2322,21 +2331,25 @@ function selectedDayHtml(day) {
   </section>`;
 }
 
-// Большая карточка вверху: заметка о сегодняшнем дне, а если её нет — воспоминание
+// Большая карточка вверху: выбранный в календаре «день, который хочется помнить»,
+// иначе заметка о сегодняшнем дне, а если её нет — воспоминание
 function memoryPool() {
   const past = Object.keys(S.stories).filter((d) => d < S.day && (S.stories[d].title || S.stories[d].text)).sort();
   const special = past.filter((d) => isSpecial(S.stories[d]));
   return special.length ? special : past;
 }
+const isMemorable = (day) => !!day && hasStory(S.stories[day]) && isSpecial(S.stories[day]);
+function featureDay() {
+  if (isMemorable(S.cal.feat)) return S.cal.feat;
+  if (hasStory(S.stories[S.day])) return S.day;
+  const pool = memoryPool();
+  if (!pool.length) return '';
+  const seed = Math.floor(Date.parse(`${S.day}T00:00:00Z`) / 86400000) + S.cal.memShift;
+  return pool[((seed % pool.length) + pool.length) % pool.length];
+}
 function featureHtml() {
   const can = canWrite();
-  const today = S.stories[S.day];
-  let day = hasStory(today) ? S.day : '';
-  const pool = day ? [] : memoryPool();
-  if (!day && pool.length) {
-    const seed = Math.floor(Date.parse(`${S.day}T00:00:00Z`) / 86400000) + S.cal.memShift;
-    day = pool[((seed % pool.length) + pool.length) % pool.length];
-  }
+  const day = featureDay();
   if (!day) {
     return `<article class="story-feature empty"><div class="story-body">
       <p class="eyebrow">День, который хочется помнить</p>
@@ -2348,7 +2361,9 @@ function featureHtml() {
   const [, mm, dd] = day.split('-').map(Number);
   const eyebrow = day === S.day ? (isSpecial(s) ? 'Сегодня · день, который хочется помнить' : 'Сегодня')
     : (isSpecial(s) ? 'День, который хочется помнить' : 'Воспоминание');
-  // Дата и заголовок открывают запись целиком — как страницу дневника
+  // Есть ли что показать вместо этой записи
+  const others = memoryPool().filter((d) => d !== day).length + (day !== S.day && hasStory(S.stories[S.day]) ? 1 : 0);
+  // Дата, заголовок и «Открыть день» открывают запись целиком — как страницу дневника
   return `<article class="story-feature">
     <a class="story-date" href="#/d/${day}" aria-label="Открыть запись за ${escapeHtml(dayTitle(day, { day: 'numeric', month: 'long' }))}"><strong>${dd}</strong><span>${MONTHS_SHORT[mm - 1]}</span></a>
     <div class="story-body">
@@ -2358,7 +2373,7 @@ function featureHtml() {
       ${s.text ? `<div class="story-text">${inline(s.text).replace(/\n/g, '<br>')}</div>` : ''}
       <div class="story-actions">
         ${day === S.day ? (can ? `<button class="btn small ghost" data-action="story-edit" data-day="${day}">Изменить</button>` : '')
-          : `<button class="btn small ghost" data-action="cal-pick" data-day="${day}" data-scroll="1">Открыть день</button>${pool.length > 1 ? '<button class="btn small ghost" data-action="memory-next">Другое воспоминание</button>' : ''}`}
+          : `<a class="btn small ghost" href="#/d/${day}">Открыть день</a>${others ? '<button class="btn small ghost" data-action="memory-next">Другое воспоминание</button>' : ''}`}
       </div>
     </div></article>`;
 }
@@ -2405,7 +2420,16 @@ function renderStoryPage(day) {
   ${prev || next ? `<nav class="story-page-nav" aria-label="Соседние записи">${nav(prev, 'Раньше')}${nav(next, 'Позже')}</nav>` : ''}`;
 }
 
-// Дневник: большая карточка и календарь; день открывается под календарём только по нажатию на число
+// Плавно к большой карточке наверху или к выбранному дню под календарём
+function scrollDiaryTo(where, smooth = true) {
+  const el = where === 'top' ? view.querySelector('.story-feature') : document.getElementById('day-sel');
+  if (!el) return;
+  const calm = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  el.scrollIntoView({ block: 'start', behavior: smooth && !calm ? 'smooth' : 'auto' });
+}
+
+// Дневник: большая карточка и календарь. Нажатие на число: «день, который хочется помнить» — наверх, в большую
+// карточку (и под календарём), остальные дни — под календарём, страница едет к ним
 function renderDiary() {
   if (!S.cal.month) S.cal.month = monthOf(S.day);
   const sel = S.cal.sel;
@@ -2416,7 +2440,7 @@ function renderDiary() {
   if (sel && monthOf(sel) !== S.cal.month) setTimeout(() => loadMonth(monthOf(sel)), 0);
   if (S.cal.jump && sel) {
     S.cal.jump = false;
-    setTimeout(() => { const card = document.getElementById('day-sel'); if (card) card.scrollIntoView({ block: 'start' }); }, 60);
+    setTimeout(() => scrollDiaryTo('day', false), 60);
   }
   return `${head}${featureHtml()}${calendarHtml(S.cal.month)}${sel ? selectedDayHtml(sel) : ''}`;
 }
@@ -3390,6 +3414,7 @@ function takeDayLink() {
   S.cal.sel = m[1];
   S.cal.month = monthOf(m[1]);
   S.cal.hit = m[2] ? decodeURIComponent(m[2]) : '';
+  S.cal.feat = '';
   S.cal.jump = true;
   history.replaceState(null, '', `${location.pathname}${location.search}#/d`);
 }
@@ -3913,18 +3938,26 @@ const actions = {
     if (r) download('batonchik-napominanie.ics', icsText(r, DOG()), 'text/calendar');
   },
   'story-edit': (el) => storySheet(el.dataset.day || (route().page === 'd' && S.cal.sel && S.cal.sel <= S.day ? S.cal.sel : S.day)),
-  // Нажатие на число — день под календарём; повторное нажатие на то же число — скрыть
+  // Нажатие на число — день под календарём; повторное нажатие на то же число — скрыть.
+  // «День, который хочется помнить» ещё и встаёт наверх в большую карточку — страница едет вверх, остальные — вниз к дню
   'cal-pick': (el) => {
     const day = el.dataset.day;
-    S.cal.sel = S.cal.sel === day && !el.dataset.scroll ? '' : day;
+    S.cal.sel = S.cal.sel === day ? '' : day;
     S.cal.hit = '';
     S.cal.month = monthOf(day);
+    S.cal.feat = isMemorable(S.cal.sel) ? day : '';
     render();
-    const card = S.cal.sel && document.getElementById('day-sel');
-    if (card) card.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    if (S.cal.sel) scrollDiaryTo(S.cal.feat ? 'top' : 'day');
   },
   'cal-month': (el) => { S.cal.month = addMonths(S.cal.month, +el.dataset.dir); render(); },
-  'memory-next': () => { S.cal.memShift++; render(); },
+  // Другое воспоминание: выбранный особый день уходит из большой карточки; если выпал тот же день — следующее
+  'memory-next': () => {
+    const was = featureDay();
+    S.cal.feat = '';
+    S.cal.memShift++;
+    if (featureDay() === was) S.cal.memShift++;
+    render();
+  },
   'story-photo': async () => {
     const f = storyForm;
     const token = f.token;
@@ -4134,11 +4167,9 @@ sheet.addEventListener('submit', (e) => {
 // 2. Запасное: если iOS сообщает сдвиг (visualViewport.offsetTop), смещаем шапку и вкладки
 //    на эту разницу — только вниз, вверх никогда.
 // 3. Что видел телефон, записывается (последние 8 случаев) — это видно в «Настройках» → «Экран iPhone».
-const isTyping = () => {
-  const a = document.activeElement;
-  return !!a && (a.isContentEditable || a.tagName === 'TEXTAREA' || a.tagName === 'SELECT'
-    || (a.tagName === 'INPUT' && !['checkbox', 'radio', 'file', 'button', 'submit', 'range', 'color'].includes(a.type)));
-};
+const isField = (a) => !!a && (a.isContentEditable || a.tagName === 'TEXTAREA' || a.tagName === 'SELECT'
+  || (a.tagName === 'INPUT' && !['checkbox', 'radio', 'file', 'button', 'submit', 'range', 'color'].includes(a.type)));
+const isTyping = () => isField(document.activeElement);
 const vvShift = { top: 0, bottom: 0 };
 const VV_LOG = 'bt.vvlog';
 function viewportNow() {
@@ -4222,8 +4253,11 @@ window.addEventListener('resize', fitViewport);
 window.addEventListener('pageshow', () => { fitViewport(); healViewport('открыли снова'); });
 document.addEventListener('visibilitychange', () => { if (!document.hidden) { fitViewport(); healViewport('вернулись в приложение'); } });
 document.addEventListener('focusin', fitViewport);
-// Поле ввода потеряло курсор и другое его не взяло — клавиатура уезжает. Лечим сразу и когда она точно скрылась
-document.addEventListener('focusout', () => {
+// Поле ввода потеряло курсор и другое его не взяло — клавиатура уезжает. Лечим сразу и когда она точно скрылась.
+// Кнопка — не поле: на Android нажатая кнопка получает фокус и теряет его при перерисовке, клавиатуры не было,
+// а прокрутка «на то же место» оборвала бы плавную прокрутку (например, к дню под календарём)
+document.addEventListener('focusout', (e) => {
+  if (!isField(e.target)) return;
   setTimeout(() => healViewport('поле закрыто'), 50);
   // Второй раз — если уже не листают: прокрутка «на место» остановила бы движение пальцем
   setTimeout(() => { if (Date.now() - lastScrollAt > 300) healViewport('поле закрыто'); }, 450);
