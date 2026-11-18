@@ -334,7 +334,7 @@ const TICKS = [1, 10, 60, 600, 3600, 4 * 3600];
 export function aloneChartSvg(points, reds = []) {
   const all = [...points, ...reds];
   if (!all.length) return '';
-  const W = 340, H = 200, L = 46, R = 10, T = 30, B = 28, PAD = 12;
+  const W = 340, H = 200, L = 54, R = 10, T = 30, B = 28, PAD = 12;
   const lo = Math.max(1, Math.min(...all.map((p) => p.s)) / 1.6);
   const hi = Math.max(...all.map((p) => p.s)) * 1.6;
   const ly = (v) => Math.log10(v);
