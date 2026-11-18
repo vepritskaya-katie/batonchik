@@ -540,6 +540,19 @@ function cardProgress(tab, card) {
 
 const PLUS_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>';
 
+// Рисунки линией в цвет раздела: у заголовков разделов и в пустых местах
+const DOODLES = {
+  paw: '<path d="M8.2 15.7c.9-2 2.3-3.1 3.8-3.1s2.9 1.1 3.8 3.1c.7 1.6.3 3.4-1.4 3.4-.9 0-1.5-.4-2.4-.4s-1.5.4-2.4.4c-1.7 0-2.1-1.8-1.4-3.4z"/><ellipse cx="6.3" cy="10.8" rx="1.6" ry="2.1" transform="rotate(-22 6.3 10.8)"/><ellipse cx="9.6" cy="7" rx="1.7" ry="2.2" transform="rotate(-6 9.6 7)"/><ellipse cx="14.4" cy="7" rx="1.7" ry="2.2" transform="rotate(6 14.4 7)"/><ellipse cx="17.7" cy="10.8" rx="1.6" ry="2.1" transform="rotate(22 17.7 10.8)"/>',
+  ball: '<circle cx="12" cy="12" r="8"/><path d="M5.6 7.4c3 1.8 3.8 7 0 9.4M18.4 7.4c-3 1.8-3.8 7 0 9.4"/>',
+  bone: '<path transform="rotate(-30 12 12)" d="M8.86 10.6H15.14A2.3 2.3 0 1 1 17.97 12A2.3 2.3 0 1 1 15.14 13.4H8.86A2.3 2.3 0 1 1 6.03 12A2.3 2.3 0 1 1 8.86 10.6Z"/>',
+  leash: '<ellipse cx="6.2" cy="6.2" rx="2.9" ry="2.6" transform="rotate(-45 6.2 6.2)"/><path d="M8.3 8.3c2.4 1.6 3.4 3.9 4.6 5.8.7 1.1 1.4 1.7 2.3 2.1"/><rect x="15.3" y="15.2" width="3.4" height="5.4" rx="1.7" transform="rotate(-45 17 17.9)"/>',
+  bowl: '<path d="M3.5 12.5h17l-1.7 4.9a2 2 0 0 1-1.9 1.4H7.1a2 2 0 0 1-1.9-1.4z"/><path d="M7.5 12.5c.6-2.4 2.4-3.8 4.5-3.8s3.9 1.4 4.5 3.8"/><path d="M10.6 6.2l.4-1.2M13.4 6.2l-.4-1.2"/>',
+  house: '<path d="M3.8 11.2 12 4.6l8.2 6.6"/><path d="M6 9.5v9.5h12V9.5"/><path d="M10 19v-3.8a2 2 0 0 1 4 0V19"/>',
+};
+const doodle = (name, cls = '') => `<svg class="doodle${cls ? ` ${cls}` : ''}" viewBox="0 0 24 24" aria-hidden="true">${DOODLES[name]}</svg>`;
+// Пусто: рисунок и текст по центру
+const emptyArt = (text, name = 'paw', tag = 'p') => `<${tag} class="empty empty-art">${doodle(name)}<span>${text}</span></${tag}>`;
+
 // Шапка страницы: надпись сверху, заголовок, подзаголовок и круглая кнопка «+»
 function pageHead({ eyebrow = '', title, sub = '', plus = null }) {
   return `<div class="page-head">
@@ -609,7 +622,7 @@ function journalHtml() {
     ${todaySummary(st)}
     ${nightLine(night)}
     ${list.length ? `<ul class="ev-list">${list.map((e) => eventRow(e, { editable: can })).join('')}</ul>`
-      : '<p class="muted">Сегодня ещё ничего не записано. Нажмите кнопку, и запись появится здесь с временем и именем.</p>'}
+      : emptyArt('Сегодня ещё ничего не записано. Нажмите кнопку, и запись появится здесь с временем и именем.', 'paw')}
   </section>`;
 }
 
@@ -639,6 +652,14 @@ function todayTrains() {
   const counts = {};
   S.events.filter((e) => e.type === 'train').forEach((e) => { counts[e.card] = (counts[e.card] || 0) + 1; });
   return counts;
+}
+
+// Дорожка следов: сделанные повторы — закрашенные лапки (до 6 повторов; больше — обычная полоска)
+const PAW_PATH = 'M169.86-485Q132-485 106-511.14t-26-64Q80-613 106.14-639t64-26Q208-665 234-638.86t26 64Q260-537 233.86-511t-64 26ZM291-681.14q-26-26.14-26-64T291.14-809q26.14-26 64-26T419-808.86q26 26.14 26 64T418.86-681q-26.14 26-64 26T291-681.14Zm250 0q-26-26.14-26-64T541.14-809q26.14-26 64-26T669-808.86q26 26.14 26 64T668.86-681q-26.14 26-64 26T541-681.14ZM789.86-485Q752-485 726-511.14t-26-64Q700-613 726.14-639t64-26Q828-665 854-638.86t26 64Q880-537 853.86-511t-64 26ZM266-75q-42 0-69-31.53-27-31.52-27-74.47 0-42 25.5-74.5T250-318q22-22 41-46.5t36-50.5q29-44 65-82t88-38q52 0 88.5 38t65.5 83q17 26 35.5 50t40.5 46q29 30 54.5 62.5T790-181q0 42.95-27 74.47Q736-75 694-75q-54 0-107-9t-107-9q-54 0-107 9t-107 9Z';
+const pawIcon = (cls = '') => `<svg class="paw-ico${cls ? ` ${cls}` : ''}" viewBox="0 -960 960 960" aria-hidden="true"><path d="${PAW_PATH}"/></svg>`;
+function pawTrail(n, target) {
+  if (target > 6) return `<span class="mini-bar"><span style="width:${Math.min(100, Math.round(n / target * 100))}%"></span></span>`;
+  return `<span class="paw-trail" aria-hidden="true">${Array.from({ length: target }, (_, j) => pawIcon(j < n ? 'on' : '')).join('')}</span>`;
 }
 
 // Текущий шаг тренировки — первый неосвоенный
@@ -679,8 +700,7 @@ function trainingsHtml(title = '') {
     const name = card ? card.name : 'Карточка не найдена';
     // Плитка (по две в ряд): название, шаг, счёт и «+1». В режиме правки — строки, как раньше: там стрелки и «Убрать»
     if (!edit) {
-      const bar = `<span class="mini-bar"><span style="width:${Math.min(100, Math.round(n / target * 100))}%"></span></span>`;
-      const count = `<span class="tr-count">${n} из ${target}</span>${bar}`;
+      const count = `<span class="tr-count">${n} из ${target}</span>${pawTrail(n, target)}`;
       return `<li class="item tr tr-tile${done ? ' done' : ''}">
         <div class="tr-tile-top">
           ${card ? `<a class="item-title link" href="#/${tab}/${id}">${escapeHtml(name)}</a>` : `<span class="item-title muted">${name}</span>`}
@@ -733,7 +753,7 @@ function trainingsHtml(title = '') {
     ${chosen ? `<p class="muted small">Неделя с ${dayTitle(week, { day: 'numeric', month: 'long' })}.</p>` : ''}
     <details class="intro"><summary>Как устроены занятия</summary><div class="prose">${t.intro && t.intro.length ? renderBlocks(t.intro) : ''}
       <p>Одно нажатие на «+1» — один повтор. Сделали все повторы — плитка станет зелёной и уйдёт вниз. Ошиблись — нажмите на счёт «2 из 5», чтобы убрать лишний повтор. Счёт начинается заново после «Легли вечером».</p></div></details>
-    <ul class="list${edit ? '' : ' tr-tiles'}">${items || '<li class="empty">Список пуст. Нажмите «Изменить», чтобы добавить тренировки.</li>'}</ul>
+    <ul class="list${edit ? '' : ' tr-tiles'}">${items || emptyArt('Список пуст. Нажмите «Изменить», чтобы добавить тренировки.', 'ball', 'li')}</ul>
     ${edit ? `<div class="edit-actions">
       <button class="btn" data-action="tr-add">+ Добавить на сегодня</button>
       <button class="btn" data-action="week-pick">${chosen ? 'Изменить выбор на неделю' : 'Выбрать на неделю'}</button>
@@ -867,7 +887,7 @@ function greeting() {
   return 'Добрый вечер';
 }
 
-const PAW_SVG = '<svg class="ms" viewBox="0 -960 960 960" aria-hidden="true"><path d="M169.86-485Q132-485 106-511.14t-26-64Q80-613 106.14-639t64-26Q208-665 234-638.86t26 64Q260-537 233.86-511t-64 26ZM291-681.14q-26-26.14-26-64T291.14-809q26.14-26 64-26T419-808.86q26 26.14 26 64T418.86-681q-26.14 26-64 26T291-681.14Zm250 0q-26-26.14-26-64T541.14-809q26.14-26 64-26T669-808.86q26 26.14 26 64T668.86-681q-26.14 26-64 26T541-681.14ZM789.86-485Q752-485 726-511.14t-26-64Q700-613 726.14-639t64-26Q828-665 854-638.86t26 64Q880-537 853.86-511t-64 26ZM266-75q-42 0-69-31.53-27-31.52-27-74.47 0-42 25.5-74.5T250-318q22-22 41-46.5t36-50.5q29-44 65-82t88-38q52 0 88.5 38t65.5 83q17 26 35.5 50t40.5 46q29 30 54.5 62.5T790-181q0 42.95-27 74.47Q736-75 694-75q-54 0-107-9t-107-9q-54 0-107 9t-107 9Z"/></svg>';
+const PAW_SVG = `<svg class="ms" viewBox="0 -960 960 960" aria-hidden="true"><path d="${PAW_PATH}"/></svg>`;
 
 // Фото Батончика и прогресс дня
 function heroHtml() {
@@ -884,7 +904,8 @@ function heroHtml() {
       <h2>${headline}</h2>
       <p>${p.total ? `Повторы: ${p.done} из ${p.total}` : 'Выберите тренировки на неделю — и здесь появится прогресс.'}</p>
       <div class="hero-meta"><span>Прогресс дня</span><strong>${pct}%</strong></div>
-      <div class="hero-track" role="img" aria-label="Прогресс дня ${pct}%"><span style="width:${pct}%"></span></div>
+      <div class="hero-trackwrap"><div class="hero-track" role="img" aria-label="Прогресс дня ${pct}%"><span style="width:${pct}%"></span></div>
+        <span class="hero-paw" style="left:${pct}%">${pawIcon()}</span></div>
     </div>
   </section>`;
 }
@@ -1033,13 +1054,12 @@ function renderTrainingsPage() {
     ${statusBanner()}
     ${t.raw ? `<div class="prose">${safe(() => renderBlocks(parseBlocks(t.raw)), t.raw)}</div>` : trainingsHtml('План на неделю')}
     ${t.error ? '<p class="empty">Не удалось загрузить план. Проверьте интернет.</p>' : ''}
+    <div class="entry-cards">${socialEntryHtml()}${aloneEntryHtml()}</div>
     ${ideasHtml()}
     ${daySectionsHtml()}
-    ${socialEntryHtml()}
-    ${aloneEntryHtml()}
-    <h2 class="lib-title">Все тренировки и игры</h2>
-    ${catalogBody('k')}
-    ${catalogBody('g', { showTitle: true })}`;
+    <h2 class="lib-title">${doodle('ball')}Все тренировки и игры</h2>
+    ${catalogBody('k', { fold: true })}
+    ${catalogBody('g', { showTitle: true, fold: true })}`;
 }
 
 // ---------- Советы и Каналы ----------
@@ -1186,8 +1206,8 @@ function renderTipsPage() {
       return `<div class="note-topic" data-topic${n ? '' : ' hidden'}>${tp.title ? `<h3>${inline(tp.title)}</h3>` : ''}<ul class="cards">${items}</ul></div>`;
     }).join('');
     shown += visible;
-    return `<section class="group note-section" data-section${visible ? '' : ' hidden'}><h2>${inline(t.title)}</h2>
-      ${cards ? `<ul class="cards tips-list">${cards}</ul>` : ''}${topics}</section>`;
+    return foldHtml(`t:${t.title}`, inline(t.title), `<span data-count>${countText(visible)}</span>`,
+      `${cards ? `<ul class="cards tips-list">${cards}</ul>` : ''}${topics}`, { cls: 'group note-section', attrs: ` data-section${visible ? '' : ' hidden'}` });
   }).join('');
   const chips = [...SRC_FILTERS, ...NOTE_FILTERS].map(([key, label]) =>
     `<button type="button" class="filter-chip" data-action="notes-filter" data-f="${key}" aria-pressed="${!!f[key]}">${label}</button>`).join('');
@@ -1677,7 +1697,7 @@ function renderWeeks() {
       <p class="week-qs">${WEEK_QS.map(([k]) => `<span class="${w[k] ? 'yes' : 'no'}">${w[k] ? '✓' : '—'}</span>`).join('')}</p>
       ${weekSummaryHtml(w, w.id)}
       ${canWrite() ? `<button class="text-link" data-action="week-edit" data-day="${w.id}">Изменить</button>` : ''}</li>`).join('')}</ul></section>`
-      : '<p class="empty">Записей пока нет. Первая карточка появится в воскресенье на вкладке «День».</p>'}`;
+      : emptyArt('Записей пока нет. Первая карточка появится в воскресенье на вкладке «День».', 'paw')}`;
 }
 
 // ---------- Учимся оставаться дома (дневник тренировки «Оставаться одному») ----------
@@ -2411,6 +2431,8 @@ function renderNote(id) {
 }
 
 // Фильтры «Практики» прячут лишнее прямо на странице, без перерисовки
+// Сколько внутри темы «Практики»: советы и заметки вместе
+const countText = (n) => `${n} ${plural(n, 'материал', 'материала', 'материалов')}`;
 function applyNotesFilter() {
   const f = S.notesFilter;
   let shown = 0;
@@ -2420,7 +2442,12 @@ function applyNotesFilter() {
     if (!li.hidden) shown++;
   });
   view.querySelectorAll('[data-topic]').forEach((el) => { el.hidden = !el.querySelector('[data-note]:not([hidden])'); });
-  view.querySelectorAll('[data-section]').forEach((el) => { el.hidden = !el.querySelector('[data-note]:not([hidden]), [data-tip]:not([hidden])'); });
+  view.querySelectorAll('[data-section]').forEach((el) => {
+    const n = el.querySelectorAll('[data-note]:not([hidden]), [data-tip]:not([hidden])').length;
+    el.hidden = !n;
+    const c = el.querySelector('[data-count]');
+    if (c) c.textContent = countText(n);
+  });
   const count = view.querySelector('.notes-count');
   if (count) count.textContent = practiceCount(shown, +count.dataset.tips, +count.dataset.notes);
   const empty = view.querySelector('.notes-empty');
@@ -2439,7 +2466,7 @@ view.addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target.matc
 
 // ---------- Каталоги ----------
 
-function catalogBody(tab, { showTitle = false } = {}) {
+function catalogBody(tab, { showTitle = false, fold = false } = {}) {
   const cat = S.catalogs[tab];
   if (!cat) return '<p class="muted">Загружаем…</p>';
   const errors = cat.errors.map((e) => `<div class="banner warn">${escapeHtml(e)}</div>`).join('');
@@ -2466,10 +2493,17 @@ function catalogBody(tab, { showTitle = false } = {}) {
         ? `<details class="intro"><summary>Вступление к разделу</summary><div class="prose">${blocksHtml(g.intro, tab, null)}</div></details>`
         : `<div class="prose">${blocksHtml(g.intro, tab, null)}</div>`)
       : '';
+    const list = cards ? `<ul class="cards">${cards}</ul>` : (g.intro.length ? '' : emptyArt('Здесь пока пусто.', 'bone'));
+    if (fold && g.title) {
+      const done = g.cards.filter((c) => { const p = cardProgress(tab, c); return p.mastered || (p.total > 0 && p.done === p.total); }).length;
+      const n = g.cards.length;
+      const meta = `${n} ${tab === 'g' ? plural(n, 'игра', 'игры', 'игр') : plural(n, 'карточка', 'карточки', 'карточек')}${done ? ` · освоено ${done}` : ''}`;
+      return foldHtml(`${tab}:${g.title}`, inline(g.title), meta, `${intro}${list}`, { cls: 'group' });
+    }
     return `<section class="group">
       ${g.title && !single ? `<h2>${inline(g.title)}</h2>` : ''}
       ${intro}
-      ${cards ? `<ul class="cards">${cards}</ul>` : (g.intro.length ? '' : '<p class="empty">Здесь пока пусто.</p>')}
+      ${list}
     </section>`;
   }).join('');
   return `${errors}${loose}${groups}`;
@@ -2495,6 +2529,10 @@ function renderCard(tab, id) {
         ? { step: (item) => markButton(stepId(tab, card, stepKeyFor(item.text))) } : {};
       const old = b.kind === 'steps' ? oldStepsHtml(tab, card) : '';
       const anchor = b.kind === 'important' ? ' id="blk-vazhno"' : b.kind === 'steps' ? ' id="blk-shagi"' : '';
+      // «Зачем и что значит» и «Понадобится» читают один раз — они свёрнуты, чтобы шаги были ближе
+      if (b.kind === 'why' || b.kind === 'need') {
+        return `<details class="blk blk-${b.kind} blk-fold"><summary><h2>${inline(b.title)}</h2>${FOLD_CHEV}</summary><div class="prose">${blocksHtml(b.content, tab, card, opts)}</div></details>`;
+      }
       return `<section class="blk blk-${b.kind}"${anchor}><h2>${inline(b.title)}</h2><div class="prose">${blocksHtml(b.content, tab, card, opts)}</div>${old}</section>`;
     }).join('');
   }, card.title + '\n\n' + card.blocks.map((b) => b.title + '\n' + plainText(b.content)).join('\n\n'));
@@ -2900,7 +2938,7 @@ function renderStoryPage(day) {
   const s = S.stories[day];
   const date = cap(dayTitle(day, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }));
   if (!hasStory(s)) {
-    return `${back}<h1 class="story-page-title">${escapeHtml(date)}</h1><p class="empty">Записи об этом дне пока нет.</p>
+    return `${back}<h1 class="story-page-title">${escapeHtml(date)}</h1>${emptyArt('Записи об этом дне пока нет.', 'paw')}
       ${day <= S.day ? `<button class="btn primary wide" data-action="story-edit" data-day="${day}">Написать о дне</button>` : ''}`;
   }
   const age = ageText(S.pet && S.pet.birth, day);
@@ -3070,12 +3108,12 @@ function renderPassport() {
         : '<p class="muted">Запланированных событий нет. Нажмите «+», чтобы добавить прививку, обработку от клещей, глистогонное или визит к врачу.</p>'}
     </section>
     <section class="card">
-      <div class="card-head"><h2>Уход</h2></div>
+      <div class="card-head"><h2 class="with-doodle">${doodle('bone')}Уход</h2></div>
       <ul class="health-list care-list">${careRows(false)}</ul>
       <p class="muted small care-note">«Сегодня» — отметить, что сделали. Нажмите на строку, чтобы выбрать другой день или как часто напоминать.</p>
     </section>
     <section class="card" id="clean">
-      <div class="card-head"><h2>Чистота</h2></div>
+      <div class="card-head"><h2 class="with-doodle">${doodle('bowl')}Чистота</h2></div>
       <ul class="health-list care-list">${careRows(true)}</ul>
       <p class="muted small care-note">Миски, игрушки, лежанка и амуниция. Напоминания — как в «Уходе». <a href="#/t/chistota-miski-igrushki-lezhanka">Что мыть и как ›</a></p>
     </section>
@@ -3106,6 +3144,30 @@ function petSheet() {
 }
 
 // ---------- Ссылка-карточка (паспорт, дневник, тренировки) ----------
+
+// ---------- Свёрнутые разделы ----------
+// Длинные списки (группы «Все тренировки и игры», темы «Практики», группы «Нового для Батончика») свёрнуты:
+// видно название и сколько внутри. Что раскрыто — запоминается на этом телефоне, чтобы после карточки вернуться к тому же
+const FOLD_KEY = 'bt.open';
+const openFolds = new Set((() => { try { return JSON.parse(lsGet(FOLD_KEY) || '[]'); } catch { return []; } })());
+view.addEventListener('toggle', (e) => {
+  const d = e.target;
+  if (!d.matches || !d.matches('details[data-fold]')) return;
+  if (d.open) openFolds.add(d.dataset.fold); else openFolds.delete(d.dataset.fold);
+  lsSet(FOLD_KEY, JSON.stringify([...openFolds]));
+}, true);
+const FOLD_CHEV = '<svg class="fold-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>';
+function foldHtml(key, title, meta, body, { cls = '', attrs = '', open = false } = {}) {
+  return `<details class="fold${cls ? ` ${cls}` : ''}" data-fold="${escapeHtml(key)}"${attrs}${open || openFolds.has(key) ? ' open' : ''}>
+    <summary><span class="fold-head"><h2>${title}</h2>${meta ? `<span class="fold-meta">${meta}</span>` : ''}</span>${FOLD_CHEV}</summary>
+    <div class="fold-body">${body}</div></details>`;
+}
+
+// Плитка раздела: надпись сверху (как у страницы раздела), название, строка с итогами
+function entryCard(href, icon, eyebrow, title, sub) {
+  return `<a class="link-card entry-card" href="${href}"><span class="link-icon" aria-hidden="true">${icon}</span>
+    <span><small class="entry-eyebrow">${eyebrow}</small><strong>${title}</strong><small>${sub}</small></span><span class="link-arrow" aria-hidden="true">›</span></a>`;
+}
 
 function linkCard(href, icon, title, sub, cls = '') {
   return `<a class="link-card${cls ? ` ${cls}` : ''}" href="${href}"><span class="link-icon" aria-hidden="true">${icon}</span>
@@ -3195,12 +3257,11 @@ function placesMini(tab, card) {
 
 function socialEntryHtml() {
   const sum = socialSummary(S.social);
-  return `<h2 class="lib-title">Социализация</h2>
-    ${linkCard('#/social', '🧭', `Новое для ${escapeHtml(DOG() === 'Батончик' ? 'Батончика' : DOG())}`,
-      `встретили ${sum.met} из ${sum.total}${sum.again ? ` · повторить ${sum.again}` : ''}`)}`;
+  return entryCard('#/social', '🧭', 'Социализация', `Новое для ${escapeHtml(DOG() === 'Батончик' ? 'Батончика' : DOG())}`,
+    `встретили ${sum.met} из ${sum.total}${sum.again ? ` · повторить ${sum.again}` : ''}`);
 }
 
-// Тренировки → «Одиночество» → «Учимся оставаться дома» — плитка, как у социализации
+// Тренировки → плитка «Одиночество · Учимся оставаться дома» (рядом с «Социализация · Новое для Батончика»)
 function aloneEntryHtml() {
   const step = AL.currentStep(aloneDone(), S.alone);
   const rec = AL.allRecords(S.alone);
@@ -3208,8 +3269,7 @@ function aloneEntryHtml() {
   const sub = S.alone.length
     ? [sessActive() ? 'идёт сессия' : '', step ? `шаг ${step} из 13` : 'все шаги отмечены', `сессий за неделю: ${ws.sessions}`, rec.front ? `за входной дверью — ${AL.fmtDur(rec.front)}` : ''].filter(Boolean).join(' · ')
     : 'проверки, сессии с подсказкой длительности, записи';
-  return `<h2 class="lib-title">Одиночество</h2>
-    ${linkCard('#/alone', '🏠', 'Учимся оставаться дома', escapeHtml(sub))}`;
+  return entryCard('#/alone', '🏠', 'Одиночество', 'Учимся оставаться дома', escapeHtml(sub));
 }
 
 const socialName = (id) => (isOwnSocial(id) ? (S.social[id] && S.social[id].title) || 'Своё' : (SOCIAL_ITEMS.find((x) => x.id === id) || {}).name || id);
@@ -3224,10 +3284,12 @@ function renderSocial() {
   const body = groups.map((g) => {
     const rows = g.items.map((item) => ({ item, st: socialState(S.social[item.id]) })).filter(({ st }) => fits(st));
     if (!rows.length) return '';
-    return `<section class="group"><h2>${escapeHtml(g.title)}</h2><ul class="social-list">${rows.map(({ item, st }) => `<li>
+    const list = `<ul class="social-list">${rows.map(({ item, st }) => `<li>
       <button class="social-row${st.again ? ' again' : ''}" data-action="social-open" data-id="${item.id}">
         <span class="social-main"><strong>${escapeHtml(item.name)}</strong><span>${escapeHtml(reactionLine(st))}</span></span>
-        <span class="social-mark" aria-hidden="true">${st.last ? REACTIONS[st.last.r].icon : '＋'}</span></button></li>`).join('')}</ul></section>`;
+        <span class="social-mark" aria-hidden="true">${st.last ? REACTIONS[st.last.r].icon : '＋'}</span></button></li>`).join('')}</ul>`;
+    const met = rows.filter(({ st }) => st.count).length;
+    return foldHtml(`social:${g.title}`, escapeHtml(g.title), f === 'all' ? `встретили ${met} из ${rows.length}` : `${rows.length}`, list, { cls: 'group', open: f !== 'all' });
   }).join('');
   const chip = (key, label, n) => `<button class="filter-chip${f === key ? ' on' : ''}" data-action="social-filter" data-f="${key}" aria-pressed="${f === key}">${label} <b>${n}</b></button>`;
   return `${back}${pageHead({ eyebrow: 'Социализация', title: `Новое для ${escapeHtml(DOG() === 'Батончик' ? 'Батончика' : DOG())}`,
@@ -3241,7 +3303,7 @@ function renderSocial() {
       <p><a href="#/k/posmotri-na-eto">«Посмотри на это» ›</a></p>
       <p>Весь список — по чек-листу социализации Екатерины Усовой: <a href="#/c/kak-polzovatsya-chek-listom-socializacii">как им пользоваться ›</a></p></div></details>
     <div class="filter-chips">${chip('all', 'Все', sum.total)}${chip('new', 'Ещё не было', sum.total - sum.met)}${chip('again', 'Повторить', sum.again)}</div>
-    ${body || `<p class="empty">${f === 'again' ? 'Повторять пока нечего: последние встречи прошли спокойно.' : 'Всё из списка уже встречали. Добавьте своё через «+».'}</p>`}`;
+    ${body || emptyArt(f === 'again' ? 'Повторять пока нечего: последние встречи прошли спокойно.' : 'Всё из списка уже встречали. Добавьте своё через «+».', 'leash')}`;
 }
 
 function socialSheet(id) {
@@ -3953,7 +4015,7 @@ function onHashChange() {
 }
 
 // Название страницы для кнопки «Назад»; для правки карточки — нет (туда не возвращаемся)
-const PAGE_TITLES = { search: 'Поиск', today: 'Главная', day: 'День', k: 'Тренировки', g: 'Тренировки', pass: 'Паспорт', growth: 'Рост и вес', lib: 'Библиотека', weeks: 'Неделя Батончика', t: 'Практика', c: 'Практика', game: 'Игра', d: 'Дневник', me: 'Настройки', social: 'Новое', alone: 'Учимся оставаться дома' };
+const PAGE_TITLES = { search: 'Поиск', today: 'Главная', day: 'День', k: 'Тренировки', g: 'Тренировки', pass: 'Паспорт', growth: 'Рост и вес', lib: 'Библиотека', weeks: 'Неделя Батончика', t: 'Практика', c: 'Практика', game: 'Игра', d: 'Дневник', me: 'Настройки', social: 'Новое для Батончика', alone: 'Учимся оставаться дома' };
 // Вложенные страницы со своим названием для «Назад»
 const SUB_TITLES = { 'pass/summary': 'Для ветеринара', 'pass/lost': 'Если потерялся', 'pass/months': 'Как рос', 'game/play': 'Разминка', 'game/repeat': 'Повтор ошибок', 'alone/go': 'Сессия' };
 // Какая вкладка внизу подсвечена: игры с собакой живут во вкладке «Тренировки», Практика, заметки каналов и игра на знания — в «Советах»
@@ -4031,8 +4093,10 @@ function render(force) {
     window.scrollTo(0, pendingScroll.y);
   }
   if (pendingScroll && (Math.abs(window.scrollY - pendingScroll.y) < 2 || Date.now() >= pendingScroll.until)) pendingScroll = null;
+  const current = r.page === 'edit' ? TAB_OF[r.tab] : (TAB_OF[r.page] || (r.page === 'me' ? 'me' : 'today'));
+  if (document.body.dataset.tab !== current) { document.body.dataset.tab = current; updateThemeColor(); }
+  updateTopbar(current);
   document.querySelectorAll('.tabbar a').forEach((a) => {
-    const current = r.page === 'edit' ? TAB_OF[r.tab] : (TAB_OF[r.page] || (r.page === 'me' ? 'me' : 'today'));
     const on = a.dataset.tab === current;
     a.classList.toggle('on', on);
     if (on) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
@@ -4056,6 +4120,50 @@ function renderHeader() {
 }
 
 function updateNet() { $('#net').hidden = navigator.onLine; }
+
+// Цвет строки состояния телефона — как шапка раздела (Android; в Safari — цвет панели браузера)
+let colorProbe = null;
+function updateThemeColor() {
+  if (!colorProbe) {
+    colorProbe = document.createElement('i');
+    colorProbe.style.cssText = 'position:absolute;width:0;height:0;overflow:hidden;background:var(--wash)';
+    colorProbe.setAttribute('aria-hidden', 'true');
+    document.body.append(colorProbe);
+  }
+  const v = getComputedStyle(colorProbe).backgroundColor;
+  const m = v.match(/color\(srgb ([\d.e-]+) ([\d.e-]+) ([\d.e-]+)/);
+  const color = m ? `#${m.slice(1, 4).map((x) => Math.max(0, Math.min(255, Math.round(+x * 255))).toString(16).padStart(2, '0')).join('')}` : v;
+  if (color) document.querySelectorAll('meta[name="theme-color"]').forEach((el) => { el.content = color; });
+}
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', updateThemeColor);
+
+// ---------- Шапка: где ты ----------
+// Пока заголовок страницы на экране, в шапке — «Батончик». Заголовок уехал вверх — шапка показывает название
+// страницы, а на вложенных страницах ещё стрелку «назад» и куда она ведёт (то же, что ссылка «‹ …» над заголовком).
+// На главной всегда «Батончик». Нажатие на название — наверх страницы
+let titleObserver = null;
+function updateTopbar(tab) {
+  const h1 = view.querySelector('h1');
+  const back = view.querySelector('a.back');
+  const title = h1 ? h1.textContent.replace(/\s+/g, ' ').trim() : '';
+  if (titleObserver) { titleObserver.disconnect(); titleObserver = null; }
+  if (!h1 || !title || (tab === 'today' && !back)) { document.body.classList.remove('tb-on'); return; }
+  $('#tb-title').textContent = title;
+  $('#tb-where').classList.toggle('inner', !!back);
+  if (back) {
+    const tb = $('#tb-back');
+    const label = back.textContent.replace(/\s+/g, ' ').trim();
+    tb.setAttribute('href', back.getAttribute('href'));
+    if (back.dataset.action) tb.dataset.action = back.dataset.action; else delete tb.dataset.action;
+    tb.setAttribute('aria-label', `Назад: ${label}`);
+    $('#tb-parent').textContent = label;
+  }
+  const top = document.querySelector('.topbar').getBoundingClientRect().bottom;
+  titleObserver = new IntersectionObserver(([en]) => {
+    document.body.classList.toggle('tb-on', !en.isIntersecting && en.boundingClientRect.top < top);
+  }, { rootMargin: `-${Math.round(top)}px 0px 0px 0px` });
+  titleObserver.observe(h1);
+}
 
 // ---------- Окно правки ----------
 
@@ -4135,14 +4243,51 @@ function pastTime(hm, type) {
   return { at, day: eventDayFor(at, type) };
 }
 
-function saveTrain(ref) {
+function saveTrain(ref, allDone = false) {
   const at = new Date();
   const n = (todayTrains()[ref] || 0) + 1; // считаем до записи: хранилище может обновить журнал сразу
   const id = store.addEvent({ type: 'train', card: ref, at, day: S.day });
   const it = todayItems().find((f) => f.card === ref);
-  toast(`${TRAIN.label}: ${cardName(ref)}${it ? ` — ${Math.min(n, 99)} из ${targetOf(it)}` : ''}`, {
+  toast(allDone ? 'Все тренировки на сегодня сделаны! Батончик молодец 🐾' : `${TRAIN.label}: ${cardName(ref)}${it ? ` — ${Math.min(n, 99)} из ${targetOf(it)}` : ''}`, {
     label: 'Отменить', onClick: () => { if (id) store.deleteEvent(id); },
   });
+}
+
+// ---------- Маленькие радости ----------
+// «+1» оставляет отпечаток лапы, последний повтор тренировки и «Освоено» — россыпь лапок, телефон коротко вздрагивает
+// (Android). Если в телефоне включено «Уменьшить движение», анимаций нет
+const calmMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
+function haptic(pattern) { try { if (navigator.vibrate) navigator.vibrate(pattern); } catch { /* нет вибрации */ } }
+function joyAt(rect, cls, html, life) {
+  const el = document.createElement('div');
+  el.className = cls;
+  el.setAttribute('aria-hidden', 'true');
+  el.style.left = `${rect.left + rect.width / 2}px`;
+  el.style.top = `${rect.top + rect.height / 2}px`;
+  el.innerHTML = html;
+  document.body.append(el);
+  setTimeout(() => el.remove(), life);
+  return el;
+}
+function pawStamp(rect, text = '+1') {
+  if (calmMotion() || !rect) return;
+  const el = joyAt(rect, 'paw-stamp', `${pawIcon()}${text ? `<b>${text}</b>` : ''}`, 1000);
+  el.style.setProperty('--rot', `${Math.round(Math.random() * 40 - 20)}deg`);
+}
+function pawBurst(rect, count = 10) {
+  if (calmMotion() || !rect) return;
+  const colors = ['var(--accent)', '#a65c36', '#d8a47b', 'var(--ok)'];
+  for (let i = 0; i < count; i++) {
+    const a = (Math.PI * 2 * i) / count + Math.random() * 0.6;
+    const d = 56 + Math.random() * 56;
+    const el = joyAt(rect, 'paw-fly', pawIcon(), 1300);
+    el.style.setProperty('--dx', `${Math.round(Math.cos(a) * d)}px`);
+    el.style.setProperty('--dy', `${Math.round(Math.sin(a) * d - 28)}px`);
+    el.style.setProperty('--rot', `${Math.round(Math.random() * 120 - 60)}deg`);
+    el.style.setProperty('--size', `${14 + Math.round(Math.random() * 10)}px`);
+    el.style.color = colors[i % colors.length];
+    el.style.animationDelay = `${i * 14}ms`;
+  }
 }
 
 // Добавить тренировку или игру только на сегодня
@@ -4378,11 +4523,29 @@ const actions = {
     if (on) {
       if (S.marks[id]) store.setMark(id, false);
       legacyIds(id).filter((x) => S.marks[x]).forEach((x) => store.setMark(x, false));
-    } else store.setMark(id, true);
+    } else {
+      store.setMark(id, true);
+      // «Освоено» — россыпь лапок; галочка в списке — отпечаток
+      haptic(el.classList.contains('mark-btn') ? [12, 60, 18] : 10);
+      if (el.classList.contains('mark-btn')) pawBurst(el.getBoundingClientRect(), 12); else pawStamp(el.getBoundingClientRect(), '');
+    }
   },
   'edit-toggle': (el) => { S.edit[el.dataset.section] = !S.edit[el.dataset.section]; render(); },
   // Тренировки на сегодня
-  'tr-tap': (el) => saveTrain(el.dataset.card),
+  'tr-tap': (el) => {
+    const ref = el.dataset.card;
+    const p = dayProgress();
+    const it = p.items.find((f) => f.card === ref);
+    const n = (p.counts[ref] || 0) + 1;
+    const rect = el.getBoundingClientRect();
+    // Эта тренировка добралась до цели — и, может быть, последняя на сегодня
+    const finished = !!it && n === targetOf(it);
+    const allDone = finished && p.items.every((f) => f === it || (p.counts[f.card] || 0) >= targetOf(f));
+    haptic(finished ? [12, 60, 18] : 10);
+    pawStamp(rect);
+    saveTrain(ref, allDone);
+    if (finished) pawBurst(rect, allDone ? 18 : 9);
+  },
   'tr-target': (el) => {
     const item = currentPlan().focus.find((x) => x.id === el.dataset.id);
     if (!item) return;
@@ -4616,6 +4779,7 @@ const actions = {
     }
   },
   'back': () => history.back(),
+  'to-top': () => window.scrollTo({ top: 0, behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' }),
   // Учимся оставаться дома
   'alone-start': () => {
     if (!canWrite()) return;
@@ -4947,6 +5111,7 @@ function applyTheme() {
   const v = getTheme();
   if (v === 'auto') delete document.documentElement.dataset.theme;
   else document.documentElement.dataset.theme = v;
+  if (document.body.dataset.tab) updateThemeColor();
 }
 
 // ---------- Уведомления ----------

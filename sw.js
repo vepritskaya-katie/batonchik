@@ -1,7 +1,7 @@
 // Работа без интернета: файлы приложения и памятки хранятся на телефоне.
 // При наличии сети всегда берётся свежая версия, без сети — сохранённая.
 
-const VERSION = 'batonchik-v41';
+const VERSION = 'batonchik-v42';
 const SDK = 'https://www.gstatic.com/firebasejs/12.19.0/';
 const APP_FILES = [
   './', 'index.html', 'manifest.webmanifest', 'css/style.css',
@@ -9,7 +9,7 @@ const APP_FILES = [
   'fonts/manrope-cyrillic.woff2', 'fonts/manrope-latin.woff2',
   'content/komandy.md', 'content/igry.md', 'content/sovety.md', 'content/rasporyadok.md', 'content/kanaly.md', 'content/biblioteka.md', 'content/igra.md',
   'content/priuchenie-k-kletke-14-dney.pdf',
-  'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png',
+  'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png', 'img/merle.svg',
 ];
 const SDK_FILES = ['firebase-app.js', 'firebase-auth.js', 'firebase-firestore.js'].map((f) => SDK + f);
 

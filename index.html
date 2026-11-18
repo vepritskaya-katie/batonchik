@@ -23,10 +23,18 @@
 </head>
 <body>
   <header class="topbar">
-    <a class="logo" href="#/">
-      <img src="icons/icon-192.png" alt="" width="32" height="32">
-      <span>Батончик</span>
-    </a>
+    <!-- Пока заголовок страницы на экране — «Батончик»; прокрутили — название страницы и «назад» (app.js, updateTopbar) -->
+    <div class="tb-left">
+      <a class="logo" href="#/">
+        <img src="icons/icon-192.png" alt="" width="32" height="32">
+        <span>Батончик</span>
+      </a>
+      <div id="tb-where" class="tb-where">
+        <a id="tb-back" class="tb-back" href="#/" aria-label="Назад"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></a>
+        <a id="tb-home" class="tb-home" href="#/" aria-label="Главная"><img src="icons/icon-192.png" alt="" width="30" height="30"></a>
+        <button id="tb-text" type="button" class="tb-text" data-action="to-top" aria-label="Наверх"><span id="tb-parent" class="tb-parent"></span><strong id="tb-title" class="tb-title"></strong></button>
+      </div>
+    </div>
     <span id="net" class="net" hidden>Нет сети</span>
     <a id="search-btn" class="me-btn search-btn" href="#/search" aria-label="Поиск"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5L20.5 20.5"/></svg></a>
     <a id="me-btn" class="me-btn" href="#/me" aria-label="Аккаунт и настройки"></a>
