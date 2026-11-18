@@ -77,7 +77,7 @@ const localPlayers = () => [
 // Фото месяца: только даты — { 5: '2026-10-29' } (сами фото — по запросу)
 const localMonthDates = () => Object.fromEntries(Object.entries(read('bt.monthPhotos', {})).map(([n, p]) => [n, p.date || '']));
 
-function localStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onPet = () => {}, onPhoto = () => {}, onHealth = () => {}, onGrowth = () => {}, onReads = () => {}, onVet = () => {}, onWeeks = () => {}, onStories = () => {}, onLost = () => {}, onSocial = () => {}, onCare = () => {}, onMonths = () => {}, onGame = () => {}, onFields = () => {} }) {
+function localStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onPet = () => {}, onPhoto = () => {}, onHealth = () => {}, onGrowth = () => {}, onReads = () => {}, onVet = () => {}, onWeeks = () => {}, onStories = () => {}, onLost = () => {}, onSocial = () => {}, onCare = () => {}, onMonths = () => {}, onGame = () => {}, onFields = () => {}, onAlone = () => {} }) {
   let day = null;
   const state = { mode: 'local', status: 'ready', user: { name: '' } };
   const mark = () => ({ uid: 'local', name: '', at: new Date().toISOString() });
@@ -87,6 +87,8 @@ function localStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onPet 
     write('bt.events', list.map((e) => ({ ...e, at: e.at.toISOString() })));
     onEvents(allEvents().filter((e) => e.day === day));
   };
+  // «Учимся оставаться дома» (дневник тренировки «Оставаться одному»): { id: запись }, время — строкой
+  const localAlone = () => Object.entries(read('bt.alone', {})).map(([id, r]) => ({ ...r, id, at: new Date(r.at) }));
 
   return {
     start() {
@@ -108,6 +110,7 @@ function localStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onPet 
       onCare(cleanCare(read('bt.care', {})));
       onGame(localPlayers());
       onMonths(localMonthDates());
+      onAlone(localAlone());
     },
     setDay(key) {
       day = key;
@@ -168,7 +171,7 @@ function localStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onPet 
         plan: read('bt.plan', null), marks: read('bt.marks', {}), days, events: read('bt.events', []), cards: read('bt.cards', {}),
         pet: read('bt.pet', null), health: read('bt.health', {}), stories: read('bt.stories', {}), growth: read('bt.growth', {}),
         weeks: read('bt.weeks', {}), lost: read('bt.lost', null), social: read('bt.social', {}), care: read('bt.care', {}),
-        game: read('bt.game', {}), fields: read('bt.fields', {}),
+        game: read('bt.game', {}), fields: read('bt.fields', {}), alone: read('bt.alone', {}),
       };
     },
     // Игра: свои ответы, повторы ошибок и очки за чтение
@@ -206,6 +209,21 @@ function localStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onPet 
       if (photo) all[n] = { data: photo.data, date: photo.date }; else delete all[n];
       write('bt.monthPhotos', all);
       onMonths(localMonthDates());
+    },
+    // «Учимся оставаться дома» (дневник тренировки «Оставаться одному»): запись — сессия, проверка или вынужденный уход
+    newAloneId: () => newId(),
+    saveAlone(id, rec) {
+      const all = read('bt.alone', {});
+      const old = all[id];
+      all[id] = { ...rec, at: rec.at.toISOString(), uid: old ? old.uid : 'local', name: old ? old.name : '' };
+      write('bt.alone', all);
+      onAlone(localAlone());
+    },
+    deleteAlone(id) {
+      const all = read('bt.alone', {});
+      delete all[id];
+      write('bt.alone', all);
+      onAlone(localAlone());
     },
     // «Неделя Батончика»: ответы за воскресенье day
     saveWeek(day, w) {
@@ -266,7 +284,7 @@ function localStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onPet 
 
 // ---------- Firebase ----------
 
-function firebaseStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onError, onPet = () => {}, onPhoto = () => {}, onHealth = () => {}, onGrowth = () => {}, onReads = () => {}, onVet = () => {}, onWeeks = () => {}, onStories = () => {}, onLost = () => {}, onSocial = () => {}, onCare = () => {}, onMonths = () => {}, onGame = () => {}, onFields = () => {} }, firebaseConfig) {
+function firebaseStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onError, onPet = () => {}, onPhoto = () => {}, onHealth = () => {}, onGrowth = () => {}, onReads = () => {}, onVet = () => {}, onWeeks = () => {}, onStories = () => {}, onLost = () => {}, onSocial = () => {}, onCare = () => {}, onMonths = () => {}, onGame = () => {}, onFields = () => {}, onAlone = () => {} }, firebaseConfig) {
   const state = { mode: 'firebase', status: 'loading', user: null, message: '' };
   let fb = null; // модули SDK
   let db = null;
@@ -382,6 +400,10 @@ function firebaseStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onE
       if (!list.some((p) => p.me)) list.unshift({ ...cleanGame({ name: state.user.name }), uid: state.user.uid, me: true });
       onGame(list);
     }, fail));
+    // «Учимся оставаться дома» (дневник тренировки «Оставаться одному»): все записи (их немного — сессия в день, проверки и вынужденные уходы)
+    unsubs.push(onSnapshot(collection(db, 'alone'), (snap) => {
+      onAlone(snap.docs.map((d) => { const v = d.data({ serverTimestamps: 'estimate' }); return { ...v, id: d.id, at: toDate(v.at) || new Date() }; }));
+    }, fail));
     unsubs.push(onSnapshot(collection(db, 'growth'), (snap) => {
       onGrowth(snap.docs.map((d) => { const v = d.data(); return { id: d.id, date: v.date, weight: v.weight || 0, height: v.height || 0 }; }));
     }, fail));
@@ -472,6 +494,7 @@ function firebaseStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onE
           onCare({});
           onMonths({});
           onGame([]);
+          onAlone([]);
           return emit({ status: 'signed-out', user: null });
         }
         checkAccess(user);
@@ -621,6 +644,7 @@ function firebaseStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onE
         marks: await all('marks'), days: await all('days'), events: await all('events'), cards: await all('cards'),
         pet: await all('pet'), health: await all('health'), stories: await all('stories'), growth: await all('growth'),
         weeks: await all('weeks'), social: await all('social'), care: await all('care'), game: await all('game'),
+        alone: await all('alone'),
       };
     },
 
@@ -684,6 +708,25 @@ function firebaseStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onE
       const { doc, setDoc, serverTimestamp, deleteField } = fb.fs;
       setDoc(doc(db, 'reads', state.user.uid), { items: { [key]: on ? true : deleteField() }, updatedAt: serverTimestamp() }, { merge: true }).catch(fail);
     },
+    // «Учимся оставаться дома» (дневник тренировки «Оставаться одному»): alone/{id}. Новую запись создаём с createdAt, дальше правим без него —
+    // правила разрешают править и удалять только свои записи
+    newAloneId() { return fb && db ? fb.fs.doc(fb.fs.collection(db, 'alone')).id : newId(); },
+    saveAlone(id, rec, { isNew = false } = {}) {
+      if (!ready()) return;
+      const { doc, setDoc, updateDoc, serverTimestamp, Timestamp } = fb.fs;
+      const data = {
+        type: rec.type, stage: rec.stage, food: rec.food, note: String(rec.note || '').slice(0, 2000),
+        reps: rec.reps.slice(0, 30).map((x) => ({ s: x.s, r: x.r, o: x.o ?? null, c: x.c || '' })),
+        did: rec.did || [], prep: rec.prep || [], at: Timestamp.fromDate(rec.at), day: rec.day, updatedAt: serverTimestamp(),
+      };
+      const ref = doc(db, 'alone', id);
+      (isNew ? setDoc(ref, { ...data, uid: state.user.uid, name: state.user.name, createdAt: serverTimestamp() }) : updateDoc(ref, data)).catch(fail);
+    },
+    deleteAlone(id) {
+      if (!ready()) return;
+      const { doc, deleteDoc } = fb.fs;
+      deleteDoc(doc(db, 'alone', id)).catch(fail);
+    },
     // «Неделя Батончика»: weeks/{воскресенье} — вопросы о благополучии, фигура, заметки (вес — в growth)
     saveWeek(day, w) {
       if (!ready()) return;
@@ -692,6 +735,11 @@ function firebaseStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onE
         joy: !!w.joy, choice: !!w.choice, sleep: !!w.sleep, ribs: w.ribs || '', waist: w.waist || '', notes: w.notes || '',
         coat: !!w.coat, stool: !!w.stool, vigor: !!w.vigor, ticks: String(w.ticks || '').slice(0, 200),
         lastTicks: DATE_RE.test(w.lastTicks || '') ? w.lastTicks : '', lastWorms: DATE_RE.test(w.lastWorms || '') ? w.lastWorms : '',
+        // Одиночество за неделю: рекорд (секунды) и ступень, вынужденные уходы дольше рекорда, был ли день отдыха
+        ...('aloneBest' in w ? {
+          aloneBest: Math.max(0, Math.min(86400, Math.round(w.aloneBest || 0))), aloneStage: ALONE_STAGES.includes(w.aloneStage) ? w.aloneStage : '',
+          aloneForced: Math.max(0, Math.min(100, Math.round(w.aloneForced || 0))), aloneRest: !!w.aloneRest,
+        } : {}),
         updatedAt: serverTimestamp(), updatedBy: state.user.name,
       }).catch(fail);
     },
@@ -860,7 +908,8 @@ function cleanFields(map) {
   return out;
 }
 // «Неделя Батончика» → «Здоровье за неделю»: три галочки, найденные клещи, последние обработки
-const WEEK_HEALTH_KEYS = ['coat', 'stool', 'vigor', 'ticks', 'lastTicks', 'lastWorms'];
+const WEEK_HEALTH_KEYS = ['coat', 'stool', 'vigor', 'ticks', 'lastTicks', 'lastWorms', 'aloneBest', 'aloneStage', 'aloneForced', 'aloneRest'];
+const ALONE_STAGES = ['', 'gate', 'door', 'front', 'both'];
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const VET_FIELDS = ['clinicName', 'clinicAddress', 'clinicPhone', 'vetName', 'vetPhone', 'chipBase'];
 // Первое фото заметки — под датой дня, следующие — с номером: 2026-10-04, 2026-10-04_2 …

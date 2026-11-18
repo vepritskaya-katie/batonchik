@@ -22,6 +22,7 @@ import {
   CARE_ITEMS, EVERY_OPTIONS, everyText, careState, daysAgoText, careDue, REACTIONS, SOCIAL_GROUPS, SOCIAL_ITEMS, isOwnSocial, socialState, addReaction, checklistMapper,
   socialSummary, reactionLine, LOST_STEPS, hasLostPhones, lostLines, lostText, lostPosterHtml, lostPosterImage,
 } from './care.js';
+import * as AL from './alone.js';
 
 // Настройки Firebase читаем отдельно: если в файле ошибка, приложение всё равно откроется
 let firebaseConfig = null;
@@ -41,8 +42,10 @@ const DIARY_STEP = 14; // вкладка «День»: две недели ис�
 const MIN_REPS = 5;   // цель по умолчанию для тренировки на сегодня: не меньше 5 повторов
 const MAX_REPS = 50;
 // Версия списка тренировок (v у пункта): 2 — цели подняты до MIN_REPS, 3 — добавлены ежедневные
-// «Протокол расслабления» и «Спокойно, пока мы едим», 4 — пояснения из памятки с охраной ресурсов
-const PLAN_VERSION = 4;
+// «Протокол расслабления» и «Спокойно, пока мы едим», 4 — пояснения из памятки с охраной ресурсов,
+// 5 — новое пояснение у «Оставаться одному» (бывшее «Одиночество»), если прежнее не меняли
+const PLAN_VERSION = 5;
+const NOTES_V5 = { 'k/ostavatsya-odnomu': 'во время одного из дневных снов' };
 const ADDED_IN_V3 = ['k/protokol-rasslableniya', 'k/spokoyno-poka-my-edim'];
 // Карточки, переименованные в файлах: старая ссылка → новая (план, журнал, дневник)
 const RENAMED = {
@@ -52,12 +55,19 @@ const RENAMED = {
   'g/tyagalka-beri-i-otday': 'g/tyagalka-beri-i-menyaemsya',
   'g/naydi-v-treh-korobkah': 'g/ischi-v-treh-korobkah',
   'k/zhdi': 'k/zhdat', // «Жди» → «Ждать»
+  'k/odinochestvo': 'k/ostavatsya-odnomu', // «Одиночество» → «Оставаться одному» (13 шагов вместо 3)
 };
 // Здесь поменялось только слово, шаги прежние — отметки читаем и под старым id
 const MARKS_FROM = {
   'g/tyagalka-beri-i-menyaemsya': 'g/tyagalka-beri-i-otday',
   'g/ischi-v-treh-korobkah': 'g/naydi-v-treh-korobkah',
   'k/zhdat': 'k/zhdi',
+  // Шаги новые, но «Освоено», «Где получается» и общие галочки — те же
+  'k/ostavatsya-odnomu': 'k/odinochestvo',
+};
+// Шаги прежней версии карточки, которых больше нет: если у них стояли галочки, показываем их под шагами
+const OLD_STEPS = {
+  'k/ostavatsya-odnomu': ['Выход из комнаты', 'Выход из квартиры', 'Дольше'],
 };
 const newRef = (ref) => RENAMED[ref] || ref;
 const withNewRefs = (events) => (events || []).map((e) => (RENAMED[e.card] ? { ...e, card: RENAMED[e.card] } : e));
@@ -72,7 +82,7 @@ const S = {
   base: {},           // k, g, t → каталог из файлов
   cardDocs: {},       // правки карточек из приложения: «k__ko-mne» → { md, group, deleted }
   catalogs: {},       // k, g, t → { groups, loose } — файлы с правками поверх
-  today: null,        // разобранный rasporyadok.md: вступление, тренировки по умолчанию, «В течение дня»
+  today: null,        // разобранный rasporyadok.md: вступление, тренировки по умолчанию, «Одиночество» и другие разделы подсказок
   contentReady: false,
   defaultPlan: null,
   plan: null,
@@ -117,6 +127,9 @@ const S = {
   care: {},           // уход: { nails: { log: [дни], every } … }
   monthDates: null,   // фото месяца: { 5: 'ГГГГ-ММ-ДД' } — за какие месяцы есть фото и когда снято (null — ещё не знаем)
   monthPhotos: { all: null, loading: false, thumbs: {}, thumbLoading: {} }, // все фото (для «Как рос») и уменьшенные — для календаря дневника
+  alone: [],          // «Учимся оставаться дома»: записи { id, type: train|check|forced, stage, food, reps: [{ s, r, o, c }], did, prep, note, at, day, uid, name }
+  aloneUi: { chart: '', more: false }, // ступень на графике, «Показать ещё» в списке записей
+  aloneFrom: '',      // откуда пришли в дневник — туда ведёт «Назад»
 };
 
 const DOG = () => (S.pet && S.pet.name) || 'Батончик';
@@ -189,6 +202,10 @@ const store = createStore({
   onSocial(map) { S.social = map || {}; render(); },
   onCare(map) { S.care = map || {}; render(); },
   onGame(players) { S.gamePlayers = players || []; S.gameLoaded = true; render(); },
+  onAlone(list) {
+    S.alone = (list || []).map((v) => AL.cleanRecord(v, v.id)).filter(Boolean).sort((a, b) => a.at - b.at);
+    render();
+  },
   onMonths(dates) {
     // Список фото месяца изменился (в том числе на другом телефоне): «Как рос» перечитает фото,
     // а уменьшенные копии с другой датой или убранные — забываем
@@ -241,7 +258,7 @@ function migratePlan() {
     return;
   }
   // Обновления списка, по одному разу: цели не меньше MIN_REPS (v2), новые ежедневные тренировки (v3),
-  // пояснения из обновлённой памятки (v4)
+  // пояснения из обновлённой памятки (v4), пояснение у «Оставаться одному» (v5)
   if (S.plan.focus.some((f) => f.v < PLAN_VERSION)) {
     S.migrated = true;
     const needsV3 = S.plan.focus.some((f) => f.v < 3);
@@ -250,6 +267,7 @@ function migratePlan() {
       p.focus.forEach((f) => {
         if (f.v < 2) f.target = Math.max(MIN_REPS, f.target);
         if (f.v < 4 && !f.day && notes.has(f.card)) f.note = notes.get(f.card);
+        else if (f.v < 5 && !f.day && notes.has(f.card) && NOTES_V5[f.card] === f.note) f.note = notes.get(f.card);
         f.v = PLAN_VERSION;
       });
       if (!needsV3) return;
@@ -458,18 +476,34 @@ function byLine(m, withDate) {
   return [m.name, when].filter(Boolean).map(escapeHtml).join(' · ');
 }
 
-// Отметки под прежним id: игры, где поменялось только слово (MARKS_FROM), и карточки,
+// Отметки под прежним id: переименованные карточки (MARKS_FROM) и карточки,
 // перенесённые из «Советов», — их отметки раньше хранились с вкладкой t
-function legacyId(id) {
-  const m = id.match(/^(step|task|card)_([kgt])_([^_]+)(.*)$/);
-  if (!m) return null;
+function legacyIds(id) {
+  const m = id.match(/^(step|task|card|lvl)_([kgt])_([^_]+)(.*)$/);
+  if (!m) return [];
+  const out = [];
   const from = MARKS_FROM[`${m[2]}/${m[3]}`];
-  if (from) return `${m[1]}_${from.replace('/', '_')}${m[4]}`;
-  return m[2] === 'k' ? `${m[1]}_${MOVED_FROM}_${m[3]}${m[4]}` : null;
+  if (from) out.push(`${m[1]}_${from.replace('/', '_')}${m[4]}`);
+  const [tab, cid] = from ? from.split('/') : [m[2], m[3]];
+  if (tab === 'k') out.push(`${m[1]}_${MOVED_FROM}_${cid}${m[4]}`);
+  return out;
 }
 function getMark(id) {
-  const old = legacyId(id);
-  return S.marks[id] || (old && S.marks[old]) || null;
+  if (S.marks[id]) return S.marks[id];
+  const old = legacyIds(id).find((x) => S.marks[x]);
+  return old ? S.marks[old] : null;
+}
+
+// «В прежней версии карточки было отмечено: «Выход из комнаты» (Катя · 3 нояб.)»
+function oldStepsHtml(tab, card) {
+  const titles = OLD_STEPS[`${tab}/${card.id}`];
+  if (!titles) return '';
+  const done = titles.map((t) => {
+    const id = stepId(tab, card, stepKeyFor(`**${t}**`));
+    return [t, getMark(id)];
+  }).filter(([, m]) => m);
+  if (!done.length) return '';
+  return `<p class="muted small old-marks">В прежней версии карточки было отмечено: ${done.map(([t, m]) => `«${escapeHtml(t)}» (${byLine(m, true)})`).join(', ')}.</p>`;
 }
 
 function markButton(id, label = 'Освоено') {
@@ -481,11 +515,12 @@ function markButton(id, label = 'Освоено') {
   </div>`;
 }
 
-function taskButton(id, text) {
+// hint — пункт уже выполнен по «Дневнику одиночества»: подсвечиваем, отметку ставит человек
+function taskButton(id, text, hint = false) {
   const m = getMark(id);
-  return `<button class="task-btn${m ? ' on' : ''}" data-action="mark" data-id="${id}" aria-pressed="${!!m}"${canWrite() ? '' : ' disabled'}>
+  return `<button class="task-btn${m ? ' on' : hint ? ' hinted' : ''}" data-action="mark" data-id="${id}" aria-pressed="${!!m}"${canWrite() ? '' : ' disabled'}>
     <span class="box"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span>
-    <span class="task-text">${inline(text)}${m ? `<span class="mark-by">${byLine(m, true)}</span>` : ''}</span></button>`;
+    <span class="task-text">${inline(text)}${m ? `<span class="mark-by">${byLine(m, true)}</span>` : hint ? '<span class="diary-hint">по дневнику ✓ — можно отметить</span>' : ''}</span></button>`;
 }
 
 const stepId = (tab, card, key) => `step_${tab}_${card.id}_${key}`;
@@ -534,7 +569,7 @@ function statusBanner() {
 }
 
 function blocksHtml(blocks, tab, card, opts = {}) {
-  return renderBlocks(blocks, { task: (text) => taskButton(taskId(tab, card, text), text), ...opts });
+  return renderBlocks(blocks, { task: (text) => taskButton(taskId(tab, card, text), text, tab === 't' && aloneHint(text)), ...opts });
 }
 
 const mdHtml = (text) => (text ? renderBlocks(parseBlocks(text)) : '');
@@ -696,8 +731,8 @@ function trainingsHtml(title = '') {
     <div class="section-head"><h2>${escapeHtml(title || t.title || 'Тренировки на сегодня')}</h2>${editBtn}</div>
     ${weekBanner}
     ${chosen ? `<p class="muted small">Неделя с ${dayTitle(week, { day: 'numeric', month: 'long' })}.</p>` : ''}
-    ${t.intro && t.intro.length ? `<details class="intro"><summary>Как устроены занятия</summary><div class="prose">${renderBlocks(t.intro)}</div></details>` : ''}
-    <p class="muted small">Одно нажатие на «+1» — один повтор. Сделали все повторы — плитка станет зелёной и уйдёт вниз. Ошиблись — нажмите на счёт «2 из 5», чтобы убрать лишний повтор. Счёт начинается заново после «Легли вечером».</p>
+    <details class="intro"><summary>Как устроены занятия</summary><div class="prose">${t.intro && t.intro.length ? renderBlocks(t.intro) : ''}
+      <p>Одно нажатие на «+1» — один повтор. Сделали все повторы — плитка станет зелёной и уйдёт вниз. Ошиблись — нажмите на счёт «2 из 5», чтобы убрать лишний повтор. Счёт начинается заново после «Легли вечером».</p></div></details>
     <ul class="list${edit ? '' : ' tr-tiles'}">${items || '<li class="empty">Список пуст. Нажмите «Изменить», чтобы добавить тренировки.</li>'}</ul>
     ${edit ? `<div class="edit-actions">
       <button class="btn" data-action="tr-add">+ Добавить на сегодня</button>
@@ -979,10 +1014,12 @@ function renderDayPage() {
 
 // ---------- Тренировки (с играми) ----------
 
-// «В течение дня» из rasporyadok.md: подсказки без отметок
+// Разделы подсказок без отметок из rasporyadok.md (сейчас их нет — «В течение дня» убран).
+// Раздел «# Одиночество» показывается не здесь, а наверху страницы «Учимся оставаться дома» (блок «Как заниматься»)
+const ALONE_SECTION = 'Одиночество';
 function daySectionsHtml() {
   const t = S.today || {};
-  return (t.sections || []).map((g) => `<section class="section">
+  return (t.sections || []).filter((g) => g.title !== ALONE_SECTION).map((g) => `<section class="section">
       ${g.title ? `<h2>${inline(g.title)}</h2>` : ''}
       ${g.intro && g.intro.length ? `<div class="prose">${renderBlocks(g.intro)}</div>` : ''}
       <ul class="list">${g.items.map((it) => `<li class="item plain"><div class="item-body">${scheduleItemHtml(it)}</div></li>`).join('')}</ul>
@@ -999,6 +1036,7 @@ function renderTrainingsPage() {
     ${ideasHtml()}
     ${daySectionsHtml()}
     ${socialEntryHtml()}
+    ${aloneEntryHtml()}
     <h2 class="lib-title">Все тренировки и игры</h2>
     ${catalogBody('k')}
     ${catalogBody('g', { showTitle: true })}`;
@@ -1562,8 +1600,10 @@ function weekSummaryHtml(w, day) {
   const short = (d) => dayTitle(d, { day: 'numeric', month: 'long' });
   const health = hasWeekHealth(w) ? [`здоровье: ${WEEK_HEALTH.filter(([k]) => w[k]).length} из 3`, w.ticks && `клещи: ${w.ticks}`,
     w.lastTicks && `от клещей — ${short(w.lastTicks)}`, w.lastWorms && `от глистов — ${short(w.lastWorms)}`].filter(Boolean).join(' · ') : '';
+  const alone = 'aloneBest' in w ? [`одиночество: рекорд ${w.aloneBest ? `${AL.fmtDur(w.aloneBest)}${w.aloneStage ? ` (${AL.STAGE_LABEL[w.aloneStage].toLowerCase()})` : ''}` : '—'}`,
+    `вынужденных дольше рекорда: ${w.aloneForced || 0}`, `день отдыха: ${w.aloneRest ? 'был' : 'не было'}`].join(' · ') : '';
   return `<p class="week-line"><strong>${yes} из 3</strong> «да» о благополучии${kg ? ` · вес ${fmtNum(kg)} кг` : ''}</p>
-    ${fig ? `<p class="muted small">${escapeHtml(cap(fig))}</p>` : ''}${health ? `<p class="muted small">${escapeHtml(cap(health))}</p>` : ''}${w.notes ? `<p class="week-notes">${inline(w.notes)}</p>` : ''}`;
+    ${fig ? `<p class="muted small">${escapeHtml(cap(fig))}</p>` : ''}${health ? `<p class="muted small">${escapeHtml(cap(health))}</p>` : ''}${alone ? `<p class="muted small">${escapeHtml(cap(alone))}</p>` : ''}${w.notes ? `<p class="week-notes">${inline(w.notes)}</p>` : ''}`;
 }
 
 // Карточка на главной — только по воскресеньям и только пока неделя не заполнена; заполненная уходит в историю
@@ -1577,9 +1617,17 @@ function weekCardHtml() {
   </section>`;
 }
 
+// «Одиночество» за неделю: рекорд и вынужденные уходы — из записей «Учимся оставаться дома», день отдыха — галочка
+// (заранее отмечена, если по дневнику был день без тренировки)
+function weekAlone(day, w) {
+  const ws = AL.weekStats(S.alone, addDays(day, -6), S.day);
+  return { ...ws, rest: 'aloneRest' in w ? !!w.aloneRest : ws.sessions > 0 && ws.restDay };
+}
+
 function weekSheet(day) {
   const w = weekOf(day) || {};
   const kg = weightOn(day);
+  const wa = weekAlone(day, w);
   const yn = (k) => `<div class="choices">${[['yes', 'Да'], ['no', 'Нет']].map(([v, l]) => `<label class="choice"><input type="radio" name="${k}" value="${v}"${w[k] === v ? ' checked' : ''}>${l}</label>`).join('')}</div>`;
   openSheet(`<form class="form"><h2>Неделя Батончика</h2><p class="muted">${escapeHtml(cap(dayTitle(day)))}</p>
     <fieldset><legend>Благополучие</legend>${WEEK_QS.map(([k, q]) => `<label class="check-row"><input type="checkbox" name="${k}"${w[k] ? ' checked' : ''}>${q}</label>`).join('')}</fieldset>
@@ -1590,6 +1638,11 @@ function weekSheet(day) {
       <label>Последняя обработка от клещей<input type="date" name="lastTicks" value="${escapeHtml(w.lastTicks ?? lastTreat('ticks', day))}"></label>
       <label>Последняя обработка от глистов<input type="date" name="lastWorms" value="${escapeHtml(w.lastWorms ?? lastTreat('worms', day))}"></label>
       <p class="muted small">Даты обработок подставлены из паспорта, если они там есть.</p></fieldset>
+    <fieldset class="week-alone"><legend>Одиночество</legend>
+      <p>Рекорд недели: <strong>${wa.best ? AL.fmtDur(wa.best) : '—'}</strong>${wa.best ? ` <span class="muted">(${escapeHtml(AL.STAGE_LABEL[wa.bestStage])})</span>` : ''}</p>
+      <p>Вынужденных уходов дольше рекорда: <strong>${wa.forcedOver}</strong></p>
+      <label class="check-row"><input type="checkbox" name="aloneRest"${wa.rest ? ' checked' : ''}>Был хотя бы один день отдыха от тренировок</label>
+      <p class="muted small">Рекорд и вынужденные уходы подставлены из записей <a href="#/alone" data-action="sheet-close-link">«Учимся оставаться дома»</a>.</p></fieldset>
     <label>Заметки <textarea name="notes" rows="3" maxlength="2000" placeholder="Что получилось на этой неделе, что было трудно, что пробуем дальше">${escapeHtml(w.notes || '')}</textarea></label>
     <div class="form-actions"><button type="button" class="btn" data-action="sheet-close">Отмена</button><button class="btn primary">Сохранить</button></div>
   </form>`, (fd) => {
@@ -1597,7 +1650,8 @@ function weekSheet(day) {
       ribs: String(fd.get('ribs') || ''), waist: String(fd.get('waist') || ''), notes: String(fd.get('notes') || '').trim(),
       coat: fd.get('coat') === 'on', stool: fd.get('stool') === 'on', vigor: fd.get('vigor') === 'on', ticks: String(fd.get('ticks') || '').trim().slice(0, 200),
       lastTicks: /^\d{4}-\d{2}-\d{2}$/.test(fd.get('lastTicks') || '') ? fd.get('lastTicks') : '',
-      lastWorms: /^\d{4}-\d{2}-\d{2}$/.test(fd.get('lastWorms') || '') ? fd.get('lastWorms') : '' };
+      lastWorms: /^\d{4}-\d{2}-\d{2}$/.test(fd.get('lastWorms') || '') ? fd.get('lastWorms') : '',
+      aloneBest: wa.best, aloneStage: wa.bestStage, aloneForced: wa.forcedOver, aloneRest: fd.get('aloneRest') === 'on' };
     store.saveWeek(day, rec);
     const weight = parseNum(fd.get('weight'));
     if (weight && weight <= 150 && weight !== kg) {
@@ -1625,6 +1679,447 @@ function renderWeeks() {
       ${canWrite() ? `<button class="text-link" data-action="week-edit" data-day="${w.id}">Изменить</button>` : ''}</li>`).join('')}</ul></section>`
       : '<p class="empty">Записей пока нет. Первая карточка появится в воскресенье на вкладке «День».</p>'}`;
 }
+
+// ---------- Учимся оставаться дома (дневник тренировки «Оставаться одному») ----------
+// Страница #/alone: сводка, подсказки, график, неделя, записи и выгрузка. Сессия тренировки — #/alone/go, на весь экран.
+// Ход сессии (какой повтор, когда ушли, пауза) хранится на этом телефоне: если приложение закрылось, сессия продолжится.
+// Повторы сразу записываются в общую базу — второй телефон видит их в реальном времени.
+
+const ALONE_ID = AL.ALONE_CARD.split('/')[1];
+const aloneCard = () => findCard('k', ALONE_ID);
+const myUid = () => (S.store.user && S.store.user.uid) || 'local';
+const isMine = (rec) => rec.uid === myUid();
+// Номера отмеченных шагов карточки «Оставаться одному» (1…13)
+function aloneDone() {
+  const card = aloneCard();
+  const done = new Set();
+  if (card) card.steps.forEach((key, i) => { if (getMark(stepId('k', card, key))) done.add(i + 1); });
+  return done;
+}
+const aloneStepTitle = (n) => { const c = aloneCard(); const key = c && c.steps[n - 1]; return key ? c.stepTitles[key] : ''; };
+const aloneStage = () => { const step = AL.currentStep(aloneDone(), S.alone); return (step && AL.STEP_STAGE[step]) || 'gate'; };
+// «Признаки прогресса»: что уже выполнено по дневнику — считаем один раз на набор записей
+let hintsCache = { list: null, map: {} };
+function aloneHint(text) {
+  if (hintsCache.list !== S.alone) hintsCache = { list: S.alone, map: AL.checklistHints(S.alone) };
+  return !!hintsCache.map[String(text).replace(/\*\*/g, '').trim()];
+}
+
+// ---- Сессия ----
+const SESSION_KEY = 'bt.aloneSession';
+let sess = (() => { try { return JSON.parse(localStorage.getItem(SESSION_KEY)) || null; } catch { return null; } })();
+function saveSession() {
+  try { if (sess) localStorage.setItem(SESSION_KEY, JSON.stringify(sess)); else localStorage.removeItem(SESSION_KEY); } catch { /* ничего */ }
+}
+const sessOthers = () => S.alone.filter((r) => !sess || r.id !== sess.id);
+const sessActive = () => !!(sess && sess.phase !== 'done' && (sess.at || sess.phase !== 'setup'));
+// Запись сессии в базе: создаём при первом повторе, дальше обновляем
+function saveSessRecord() {
+  if (!sess || !sess.reps.length) return;
+  const rec = { type: 'train', stage: sess.stage, food: sess.food, reps: sess.reps, did: [], prep: [], note: sess.note || '', at: new Date(sess.at), day: sess.day };
+  if (!sess.id) { sess.id = store.newAloneId(); store.saveAlone(sess.id, rec, { isNew: true }); } else store.saveAlone(sess.id, rec);
+  saveSession();
+}
+function toReady() {
+  const sug = AL.suggest(sessOthers(), sess.stage, sess.reps);
+  sess.next = null;
+  if (sug.done) { sess.phase = 'done'; sess.doneText = sug.done; keepAwake(false); } else { sess.phase = 'ready'; sess.plan = sug.s; sess.sugText = sug.text; }
+  saveSession();
+}
+// Выйти со страницы сессии в дневник, не оставляя её в истории «назад»
+function leaveSession() {
+  if (prevHash === '#/alone') history.back();
+  else { history.replaceState(null, '', '#/alone'); onHashChange(); }
+}
+
+// Экран не гаснет, пока идёт сессия (если телефон это умеет): на iPhone веб-приложение засыпает при блокировке
+let wakeLock = null;
+const canWake = () => 'wakeLock' in navigator;
+async function keepAwake(on) {
+  try {
+    if (on && canWake() && !wakeLock) {
+      wakeLock = await navigator.wakeLock.request('screen');
+      wakeLock.addEventListener('release', () => { wakeLock = null; });
+    } else if (!on && wakeLock) { const w = wakeLock; wakeLock = null; await w.release(); }
+  } catch { wakeLock = null; }
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible' || !sessActive()) return;
+  keepAwake(true);
+  aloneTick();
+  render();
+});
+// Короткий звук «пора возвращаться». Звук включается нажатием «Ухожу» — без нажатия телефоны его не дают
+let audioCtx = null;
+function unlockAudio() {
+  try {
+    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+  } catch { audioCtx = null; }
+}
+function beep() {
+  try {
+    if (audioCtx) {
+      const t0 = audioCtx.currentTime;
+      [0, 0.35, 0.7].forEach((d) => {
+        const o = audioCtx.createOscillator();
+        const g = audioCtx.createGain();
+        o.frequency.value = 880;
+        g.gain.setValueAtTime(0.0001, t0 + d);
+        g.gain.exponentialRampToValueAtTime(0.5, t0 + d + 0.02);
+        g.gain.exponentialRampToValueAtTime(0.0001, t0 + d + 0.25);
+        o.connect(g).connect(audioCtx.destination);
+        o.start(t0 + d);
+        o.stop(t0 + d + 0.27);
+      });
+    }
+  } catch { /* без звука */ }
+  try { if (navigator.vibrate) navigator.vibrate([300, 150, 300]); } catch { /* ничего */ }
+}
+// Таймеры считают от времени старта, а не «тиканьем»: после блокировки экрана время верное
+function aloneTick() {
+  if (!sess) return;
+  const now = Date.now();
+  const onPage = () => { const r = route(); return r.page === 'alone' && r.id === 'go'; };
+  if (sess.phase === 'away') {
+    const left = sess.plan - (now - sess.awayAt) / 1000;
+    if (left <= 0) {
+      sess.phase = 'back';
+      sess.backSec = null;
+      saveSession();
+      beep();
+      if (!onPage()) toast('Пора возвращаться', { label: 'Открыть', onClick: () => goTo('#/alone/go') });
+      render();
+      return;
+    }
+    document.querySelectorAll('[data-left]').forEach((el) => { el.textContent = AL.fmtClock(Math.ceil(left)); });
+    document.querySelectorAll('[data-ring]').forEach((el) => { el.style.setProperty('--p', String(Math.round((1 - left / sess.plan) * 100))); });
+  } else if (sess.phase === 'pause') {
+    const left = AL.PAUSE_SEC - (now - sess.pauseAt) / 1000;
+    if (left <= 0) {
+      if (isTyping()) return; // дописывают подробности — подождём
+      toReady();
+      render();
+      return;
+    }
+    document.querySelectorAll('[data-pause-left]').forEach((el) => { el.textContent = AL.fmtClock(Math.ceil(left)); });
+  }
+}
+setInterval(aloneTick, 250);
+
+const reactLine = (reps) => reps.map((x) => `<span class="ss-rep" title="${escapeHtml(AL.REACT[x.r].label)}">${AL.REACT[x.r].icon} ${AL.fmtDur(x.s)}</span>`).join('');
+
+function renderAloneSession() {
+  if (!sess) {
+    return `<div class="ss"><p class="muted">Сессии сейчас нет.</p><a class="btn wide" href="#/alone">К «Учимся оставаться дома»</a></div>`;
+  }
+  const n = sess.reps.length;
+  const repNo = Math.min(n + (['ready', 'away', 'back'].includes(sess.phase) ? 1 : 0), AL.MAX_REPS);
+  const head = `<div class="ss-head"><span><strong>${escapeHtml(AL.STAGE_LABEL[sess.stage])}</strong>${sess.phase !== 'setup' && sess.phase !== 'done' ? ` · Повтор ${repNo} из ${AL.MAX_REPS}` : ''}</span>
+    ${sess.phase === 'done' ? '' : '<button class="ss-x" data-action="as-end">Закончить</button>'}</div>`;
+  const strip = n ? `<div class="ss-reps">${reactLine(sess.reps)}</div>` : '';
+  const wakeNote = canWake() ? '' : '<p class="ss-note">Не блокируйте экран: пока он погашен, таймер и звук не работают.</p>';
+  let body = '';
+  if (sess.phase === 'setup') {
+    const recs = AL.allRecords(S.alone);
+    body = `<h1 class="ss-title">Новая сессия</h1>
+      <p class="ss-label">Ступень</p>
+      <div class="ss-stages">${AL.STAGES.map(([k, label]) => `<button class="ss-stage${sess.stage === k ? ' on' : ''}" data-action="as-stage" data-stage="${k}">
+        <strong>${escapeHtml(label)}</strong><span>${recs[k] ? `рекорд ${AL.fmtDur(recs[k])}` : 'рекорда пока нет'}</span></button>`).join('')}</div>
+      <p class="ss-label">Еда</p>
+      <div class="choices">${Object.entries(AL.FOOD).map(([k, label]) => `<button class="choice${sess.food === k ? ' on' : ''}" data-action="as-food" data-food="${k}" aria-pressed="${sess.food === k}">${escapeHtml(label)}</button>`).join('')}</div>
+      <p class="ss-note">Только когда дома никого, кроме тренирующего. Перед сессией — туалет, нюхательная прогулка и 15–20 минут покоя.</p>
+      <button class="btn primary ss-go" data-action="as-begin">Начать</button>`;
+  } else if (sess.phase === 'ready') {
+    body = `<p class="ss-label">Уходим на</p>
+      <div class="ss-adj"><button class="ss-pm" data-action="as-adj" data-d="-1" aria-label="Короче">−</button>
+        <p class="ss-big">${AL.fmtDur(sess.plan)}</p>
+        <button class="ss-pm" data-action="as-adj" data-d="1" aria-label="Дольше">+</button></div>
+      ${sess.sugText ? `<p class="ss-why">${escapeHtml(sess.sugText)}</p>` : ''}
+      ${strip}
+      <button class="btn primary ss-go" data-action="as-go">Ухожу</button>
+      ${wakeNote}`;
+  } else if (sess.phase === 'away') {
+    const left = Math.max(0, sess.plan - (Date.now() - sess.awayAt) / 1000);
+    body = `<p class="ss-label">До возвращения</p>
+      <div class="ss-ring" data-ring style="--p:${Math.round((1 - left / sess.plan) * 100)}"><p class="ss-big" data-left>${AL.fmtClock(Math.ceil(left))}</p></div>
+      <p class="ss-why">Уход на ${AL.fmtDur(sess.plan)}. Когда время выйдет, прозвучит сигнал.</p>
+      ${wakeNote}
+      <button class="btn ss-early" data-action="as-early">Вернулась раньше</button>`;
+  } else if (sess.phase === 'back') {
+    const early = sess.backSec && sess.backSec < sess.plan;
+    body = `<p class="ss-back">${early ? `Вернулись через ${AL.fmtClock(sess.backSec)}` : 'Пора возвращаться'}</p>
+      <p class="ss-label">Как он был?</p>
+      <div class="ss-react">${Object.entries(AL.REACT).map(([k, x]) => `<button class="ss-r ss-r-${k}" data-action="as-react" data-r="${k}">
+        <span class="ss-r-icon" aria-hidden="true">${x.icon}</span><span><strong>${x.label}</strong><small>${escapeHtml(x.hint)}</small></span></button>`).join('')}</div>`;
+  } else if (sess.phase === 'pause') {
+    const last = sess.reps[n - 1];
+    const left = Math.max(0, AL.PAUSE_SEC - (Date.now() - sess.pauseAt) / 1000);
+    const details = last.r === 'calm' ? '' : `<div class="ss-details">
+      <label>Беспокойство началось через, с <span class="muted">(необязательно)</span><input name="as-onset" inputmode="numeric" autocomplete="off" value="${last.o ?? ''}"></label>
+      <p class="ss-label">Успокоился сам</p>
+      <div class="choices">${[['yes', 'да'], ['no', 'нет']].map(([k, label]) => `<button class="choice${last.c === k ? ' on' : ''}" data-action="as-self" data-c="${k}" aria-pressed="${last.c === k}">${label}</button>`).join('')}</div></div>`;
+    body = `<p class="ss-saved">Записано: ${AL.REACT[last.r].icon} ${AL.fmtDur(last.s)}</p>
+      ${strip}
+      ${details}
+      <p class="ss-label">Пауза</p><p class="ss-big small" data-pause-left>${AL.fmtClock(Math.ceil(left))}</p>
+      ${sess.next ? `<p class="ss-why">Дальше: <strong>${AL.fmtDur(sess.next.s)}</strong>. ${escapeHtml(sess.next.text || '')}</p>` : ''}
+      <button class="btn primary ss-go" data-action="as-next">Дальше</button>`;
+  } else {
+    const others = sessOthers();
+    const before = AL.stageRecord(others, sess.stage);
+    const best = AL.bestCalm({ reps: sess.reps });
+    body = `<h1 class="ss-title">Итог сессии</h1>
+      ${sess.doneText ? `<p class="ss-done">${escapeHtml(sess.doneText)}</p>` : ''}
+      ${n ? `${strip}<p>Повторов: <strong>${n}</strong>${best ? ` · лучший спокойный — <strong>${AL.fmtDur(best)}</strong>` : ''}</p>
+      ${best > before ? `<p class="ss-record">Новый рекорд ступени «${escapeHtml(AL.STAGE_LABEL[sess.stage])}»: ${AL.fmtDur(best)}${before ? ` (был ${AL.fmtDur(before)})` : ''}</p>` : `<p class="muted">Рекорд ступени — ${before ? AL.fmtDur(before) : 'пока нет'}.</p>`}
+      <label class="ss-note-field">Заметка <span class="muted">(необязательно)</span><textarea name="as-note" rows="3" maxlength="2000" placeholder="Что заметили: звуки в подъезде, как встретил, что поменять">${escapeHtml(sess.note || '')}</textarea></label>` : '<p class="muted">Повторов не было — запись не сохранена.</p>'}
+      <button class="btn primary ss-go" data-action="as-finish">Готово</button>`;
+  }
+  return `<div class="ss ss-phase-${sess.phase}">${head}${body}</div>`;
+}
+
+// ---- Страница дневника ----
+function aloneRowHtml(r) {
+  const when = `${dayTitle(r.day, { day: 'numeric', month: 'short' }).replace('.', '')}, ${fmtTime(r.at)}`;
+  const what = r.type === 'forced' ? AL.TYPES.forced.label : `${AL.TYPES[r.type].label} · ${AL.STAGE_LABEL[r.stage]}`;
+  const best = AL.bestCalm(r);
+  const tail = r.type === 'train' ? (best ? `лучший спокойный ${AL.fmtDur(best)}` : 'спокойных не было') : AL.fmtDur(AL.recDuration(r));
+  return `<li><button class="alone-row" data-action="alone-open" data-id="${escapeHtml(r.id)}">
+    <span class="ar-icon" aria-hidden="true">${AL.TYPES[r.type].icon}</span>
+    <span class="ar-main"><strong>${escapeHtml(what)}</strong>
+      <span class="ar-reps">${r.reps.map((x) => AL.REACT[x.r].icon).join('')} · ${escapeHtml(tail)}</span>
+      <span class="ar-by">${escapeHtml(when)}${r.name ? ` · ${escapeHtml(r.name)}` : ''}${r.note ? ' · 📝' : ''}</span></span></button></li>`;
+}
+
+function renderAlone() {
+  if (prevHash && !prevHash.startsWith('#/alone')) S.aloneFrom = prevHash;
+  const fromTitle = S.aloneFrom === `#/${AL.ALONE_CARD}` ? 'Оставаться одному' : S.aloneFrom && pageTitle(S.aloneFrom);
+  const back = `<a class="back" href="${fromTitle ? S.aloneFrom : '#/k'}">${BACK_SVG}${escapeHtml(fromTitle || 'Тренировки')}</a>`;
+  const recs = S.alone;
+  const done = aloneDone();
+  const step = AL.currentStep(done, recs);
+  const stage = (step && AL.STEP_STAGE[step]) || 'front';
+  const records = AL.allRecords(recs);
+  const can = canWrite();
+
+  const active = sessActive() ? `<a class="banner alone-live" href="#/alone/go">Сессия идёт: ${escapeHtml(AL.STAGE_LABEL[sess.stage])}${sess.reps.length ? `, повторов ${sess.reps.length}` : ''} — вернуться ›</a>` : '';
+  const now = step ? `<p class="alone-now"><span class="muted">Сейчас</span><strong>Шаг ${step} · ${escapeHtml(aloneStepTitle(step) || '')}</strong>
+      <span class="muted">Ступень: ${escapeHtml(AL.STAGE_LABEL[stage])}</span></p>`
+    : '<p class="alone-now"><strong>Все шаги карточки отмечены 🎉</strong><span class="muted">Поддерживайте: 2–3 раза в неделю короткие будничные уходы.</span></p>';
+  const tiles = `<div class="alone-recs">${AL.STAGES.map(([k, label]) => `<div class="alone-rec${k === stage && step ? ' on' : ''}">
+      <span>${escapeHtml(label)}</span><strong>${records[k] ? AL.fmtDur(records[k]) : '—'}</strong></div>`).join('')}</div>`;
+
+  // Подсказки
+  const hints = [];
+  if (!recs.length) hints.push('<p class="hint-box">Начните с проверок на камеру (шаги 1–2 карточки): кнопка «Проверка» ниже. По ним дневник подскажет, с какого шага начинать.</p>');
+  const roomCalm = AL.roomCheckCalm(recs);
+  if (roomCalm !== null && !done.has(4) && !done.has(6) && (!step || step <= 6)) {
+    hints.push(`<p class="hint-box">${roomCalm ? 'Проверка в комнате прошла спокойно — начинайте с <b>шага 6</b> карточки, шаги 4–5 можно пропустить.' : 'В проверке в комнате он беспокоился — начинайте с <b>шага 4</b> карточки: комната за воротами.'}</p>`);
+  }
+  if (step && AL.stepMet(step, recs)) {
+    hints.push(`<div class="hint-box alone-go"><p><b>Можно переходить к следующему шагу.</b> Условие шага ${step} «${escapeHtml(aloneStepTitle(step))}» выполнено.</p>
+      ${can ? `<button class="btn small" data-action="alone-step" data-n="${step}">Отметить шаг ${step} в карточке</button>` : ''}</div>`);
+  }
+  const stuck = step ? AL.stuckOn(recs, stage) : null;
+  if (stuck) {
+    hints.push(`<div class="hint-box warn alone-stuck"><p><b>Похоже, застряли.</b> ${stuck === 'red' ? 'Три сессии подряд был голос.' : 'За 21 день рекорд на этой ступени не вырос.'} Вернитесь на ступень ниже. Если не помогает — консультация специалиста.</p>
+      <a href="#/${AL.ALONE_CARD}/vazhno">Что важно знать ›</a></div>`);
+  }
+
+  const actions = can ? `<div class="alone-actions">
+      <button class="btn primary wide alone-start" data-action="alone-start">${sessActive() ? 'Вернуться к сессии' : 'Начать сессию'}</button>
+      <div class="alone-two"><button class="btn" data-action="alone-new" data-type="check">📹 Проверка</button><button class="btn" data-action="alone-new" data-type="forced">🚪 Вынужденный уход</button></div>
+    </div>` : '';
+
+  // График
+  const chartStage = S.aloneUi.chart || stage;
+  const pts = AL.dailyBest(recs, chartStage);
+  const reds = AL.forcedRed(recs);
+  const chart = `<section class="card alone-chart-card"><div class="card-head"><h2>Спокойно — дольше всего за день</h2></div>
+    <div class="segmented alone-seg">${AL.STAGES.map(([k]) => `<button class="seg${k === chartStage ? ' on' : ''}" data-action="alone-chart" data-stage="${k}" aria-pressed="${k === chartStage}">${escapeHtml(AL.STAGE_SHORT[k])}</button>`).join('')}</div>
+    ${pts.length || reds.length ? `<figure class="growth-chart">${AL.aloneChartSvg(pts, reds)}</figure>
+      <p class="alone-legend"><span class="lg-line" aria-hidden="true"></span>тренировки: лучшая спокойная длительность${reds.length ? ' <span class="lg-red" aria-hidden="true"></span>вынужденный уход с голосом' : ''}</p>
+      <p class="muted small">Шкала растянута для коротких уходов: на одном графике видны и секунды, и часы. Нажмите на точку — появится значение.</p>`
+      : `<p class="muted">Здесь появится график, когда будут тренировки на ступени «${escapeHtml(AL.STAGE_LABEL[chartStage])}».</p>`}
+  </section>`;
+
+  const ws = AL.weekStats(recs, mondayOf(S.day), S.day);
+  const week = `<section class="card"><div class="card-head"><h2>Эта неделя</h2><span class="muted small">с понедельника</span></div>
+    <div class="alone-week">
+      <div><span>Сессий</span><strong>${ws.sessions}</strong></div>
+      <div><span>Рекорд недели</span><strong>${ws.best ? AL.fmtDur(ws.best) : '—'}</strong>${ws.best ? `<small>${escapeHtml(AL.STAGE_LABEL[ws.bestStage])}</small>` : ''}</div>
+      <div><span>Вынужденных дольше рекорда</span><strong>${ws.forcedOver}</strong></div>
+    </div></section>`;
+
+  const sorted = [...recs].sort((a, b) => b.at - a.at);
+  const shown = S.aloneUi.more ? sorted : sorted.slice(0, 15);
+  const list = sorted.length ? `<section class="card"><div class="card-head"><h2>Записи</h2>${can ? '<button class="text-link" data-action="alone-export">Выгрузить</button>' : ''}</div>
+    <ul class="alone-list">${shown.map(aloneRowHtml).join('')}</ul>
+    ${sorted.length > shown.length ? `<button class="btn small wide" data-action="alone-more">Показать ещё ${sorted.length - shown.length}</button>` : ''}
+    <p class="muted small">Свою запись можно открыть, исправить или удалить. Выгрузка — файл CSV для специалиста: одна строка — один повтор.</p></section>` : '';
+
+  // «Как заниматься» — раздел «# Одиночество» из rasporyadok.md
+  const howSec = ((S.today && S.today.sections) || []).find((g) => g.title === ALONE_SECTION);
+  const how = howSec && howSec.items.length ? `<details class="intro alone-how"><summary>Как заниматься</summary>
+      ${howSec.items.map((it) => `<div class="item-body">${scheduleItemHtml(it)}</div>`).join('')}</details>` : '';
+  return `${back}${pageHead({ eyebrow: 'Одиночество', title: 'Учимся оставаться дома', sub: 'Подсказывает, на сколько уходить, и хранит проверки, сессии и вынужденные уходы. Видно обоим.' })}
+    ${statusBanner()}${active}
+    ${how}
+    ${linkCard(`#/${AL.ALONE_CARD}`, '🐾', 'Тренировка «Оставаться одному»', escapeHtml(step ? `13 шагов · сейчас шаг ${step}` : '13 шагов'), 'alone-card-link')}
+    <section class="card alone-sum">${now}${tiles}</section>
+    ${hints.join('')}
+    ${actions}
+    ${chart}
+    ${week}
+    ${list}`;
+}
+
+// ---- Формы: проверка, вынужденный уход, правка записи ----
+const radioChoices = (name, map, val) => `<div class="choices">${Object.entries(map).map(([k, label]) => `<label class="choice"><input type="radio" name="${name}" value="${k}"${val === k ? ' checked' : ''}>${escapeHtml(label)}</label>`).join('')}</div>`;
+const checkChoices = (name, map, vals) => `<div class="choices">${Object.entries(map).map(([k, label]) => `<label class="choice"><input type="checkbox" name="${name}" value="${k}"${vals.includes(k) ? ' checked' : ''}>${escapeHtml(label)}</label>`).join('')}</div>`;
+// Длительность — тремя полями: ч, мин, с (у повторов — мин и с)
+function durFields(name, sec, hours = true) {
+  const h = hours ? Math.floor(sec / 3600) : 0;
+  const m = Math.floor((sec - h * 3600) / 60);
+  const ss = sec % 60;
+  const f = (k, v, label) => `<label><input name="${name}_${k}" inputmode="numeric" autocomplete="off" maxlength="3" value="${v || ''}" placeholder="0"><span>${label}</span></label>`;
+  return `<div class="dur">${hours ? f('h', h, 'ч') : ''}${f('m', m, 'мин')}${f('s', ss, 'с')}</div>`;
+}
+const readDur = (fd, name) => {
+  const n = (k) => Math.max(0, parseInt(String(fd.get(`${name}_${k}`) || '').replace(/\D/g, ''), 10) || 0);
+  return n('h') * 3600 + n('m') * 60 + n('s');
+};
+const readOnset = (v) => { const t = String(v || '').replace(/\D/g, ''); return t ? parseInt(t, 10) : null; };
+const reactRadios = (name, val) => `<div class="react-row">${Object.entries(AL.REACT).map(([k, x]) => `<label class="react-btn react-pick">
+  <input type="radio" name="${name}" value="${k}"${val === k ? ' checked' : ''} required><span aria-hidden="true">${x.icon}</span>${x.label}</label>`).join('')}</div>`;
+const REACT_HINT = `<p class="muted small">${Object.values(AL.REACT).map((x) => `${x.icon} ${escapeHtml(x.label.toLowerCase())} — ${escapeHtml(x.hint)}`).join('. ')}.</p>`;
+const CHECK_STAGES = { gate: 'Комната · ворота', door: 'Комната · дверь', front: 'Подъезд (входная дверь)' };
+
+function aloneRecordText(r) {
+  const rows = r.reps.map((x, i) => `<li>${r.type === 'train' ? `${i + 1}. ` : ''}${AL.REACT[x.r].icon} ${AL.fmtDur(x.s)}${x.o != null ? ` · беспокойство через ${x.o} с` : ''}${x.c && x.c !== 'na' ? ` · успокоился сам: ${AL.SELF[x.c]}` : ''}</li>`).join('');
+  return `<ul class="react-hist">${rows}</ul>
+    <p class="muted">Еда: ${escapeHtml(AL.FOOD[r.food])}${r.did.length ? ` · перед беспокойством: ${escapeHtml(r.did.map((k) => AL.DID[k]).join(', '))}` : ''}${r.prep.length ? ` · было: ${escapeHtml(r.prep.map((k) => AL.PREP[k]).join(', '))}` : ''}</p>
+    ${r.note ? `<p>${inline(r.note)}</p>` : ''}`;
+}
+
+function aloneSheet(type, id) {
+  const rec = id ? S.alone.find((r) => r.id === id) : null;
+  if (id && !rec) return;
+  const t = rec ? rec.type : type;
+  const title = `${AL.TYPES[t].icon} ${AL.TYPES[t].label}`;
+  if (rec && (!isMine(rec) || !canWrite())) {
+    openSheet(`<div class="form"><h2>${title}</h2><p class="muted">${escapeHtml(cap(dayTitle(rec.day)))}, ${fmtTime(rec.at)}${rec.type !== 'forced' ? ` · ${escapeHtml(AL.STAGE_LABEL[rec.stage])}` : ''}</p>
+      ${aloneRecordText(rec)}
+      <p class="muted small">Записал(а) ${escapeHtml(rec.name || 'другой человек')}. Исправить или удалить запись может только автор.</p>
+      <div class="form-actions"><button type="button" class="btn" data-action="sheet-close">Закрыть</button></div></div>`, null);
+    return;
+  }
+  const at = rec ? rec.at : new Date();
+  const day = rec ? rec.day : dayKey(at);
+  const time = fmtTime(at);
+  const food = rec ? rec.food : 'none';
+  const note = rec ? rec.note : '';
+  const head = `<h2>${title}</h2>
+    <div class="date-time"><label>Дата<input type="date" name="day" value="${day}" required></label><label>Время<input type="time" name="time" value="${time}" required></label></div>`;
+  const tail = `<label>Заметка<textarea name="note" rows="3" maxlength="2000" placeholder="Что заметили на камере, что было вокруг">${escapeHtml(note)}</textarea></label>
+    ${rec ? `<button type="button" class="btn small danger" data-action="alone-del" data-id="${escapeHtml(rec.id)}">Удалить запись</button>` : ''}
+    <div class="form-actions"><button type="button" class="btn" data-action="sheet-close">Отмена</button><button class="btn primary">Сохранить</button></div>`;
+  let body;
+  if (t === 'train') {
+    body = `<fieldset><legend>Ступень</legend>${radioChoices('stage', AL.STAGE_LABEL, rec.stage)}</fieldset>
+      <fieldset><legend>Еда</legend>${radioChoices('food', AL.FOOD, food)}</fieldset>
+      <fieldset><legend>Повторы</legend><div class="rep-edits">${rec.reps.map((x, i) => `<div class="rep-edit">
+        <p class="rep-n">Повтор ${i + 1}</p>
+        ${durFields(`d${i}`, x.s, x.s >= 3600)}
+        <label>Реакция<select name="r${i}">${Object.entries(AL.REACT).map(([k, y]) => `<option value="${k}"${x.r === k ? ' selected' : ''}>${y.icon} ${y.label}</option>`).join('')}</select></label>
+        <div class="rep-more"><label>Беспокойство через, с<input name="o${i}" inputmode="numeric" autocomplete="off" value="${x.o ?? ''}"></label>
+        <label>Успокоился сам<select name="c${i}"><option value="">—</option>${Object.entries(AL.SELF).map(([k, label]) => `<option value="${k}"${x.c === k ? ' selected' : ''}>${label}</option>`).join('')}</select></label></div>
+        <label class="check-row"><input type="checkbox" name="x${i}">Удалить этот повтор</label></div>`).join('')}</div></fieldset>`;
+  } else {
+    const x = rec ? rec.reps[0] : { s: t === 'check' ? 120 : 3600, r: '', o: null, c: '' };
+    body = `${t === 'check' ? `<fieldset><legend>Где</legend>${radioChoices('stage', CHECK_STAGES, rec ? rec.stage : 'gate')}</fieldset>` : ''}
+      <fieldset><legend>${t === 'check' ? 'Сколько был один' : 'Сколько вас не было'}</legend>${durFields('dur', x.s)}</fieldset>
+      <fieldset><legend>Реакция</legend>${reactRadios('r', x.r)}${REACT_HINT}</fieldset>
+      <label>Беспокойство началось через, с <span class="muted">(необязательно)</span><input name="onset" inputmode="numeric" autocomplete="off" value="${x.o ?? ''}"></label>
+      <fieldset><legend>Успокоился сам</legend>${radioChoices('c', AL.SELF, x.c)}</fieldset>
+      <fieldset><legend>Еда</legend>${radioChoices('food', AL.FOOD, food)}</fieldset>
+      ${t === 'check' ? `<fieldset><legend>Что делал перед беспокойством</legend>${checkChoices('did', AL.DID, rec ? rec.did : [])}</fieldset>` : ''}
+      ${t === 'forced' ? `<fieldset><legend>Что было</legend>${checkChoices('prep', AL.PREP, rec ? rec.prep : [])}</fieldset>` : ''}`;
+  }
+  openSheet(`<form class="form alone-form">${head}${body}${tail}</form>`, (fd) => {
+    const d = String(fd.get('day') || '');
+    const hm = String(fd.get('time') || '');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(d) || !TIME_RE.test(hm)) { toast('Укажите дату и время.'); return false; }
+    let reps;
+    if (t === 'train') {
+      reps = rec.reps.map((x, i) => (fd.get(`x${i}`) === 'on' ? null : AL.cleanRep({ s: readDur(fd, `d${i}`), r: fd.get(`r${i}`), o: readOnset(fd.get(`o${i}`)), c: fd.get(`c${i}`) || '' }))).filter(Boolean);
+      if (!reps.length) { toast('Оставьте хотя бы один повтор — или удалите всю запись.'); return false; }
+    } else {
+      const s = readDur(fd, 'dur');
+      if (!s) { toast('Укажите, сколько он был один.'); return false; }
+      const rep = AL.cleanRep({ s, r: fd.get('r'), o: readOnset(fd.get('onset')), c: fd.get('c') || '' });
+      if (!rep) { toast('Выберите реакцию.'); return false; }
+      reps = [rep];
+    }
+    const out = {
+      type: t, stage: t === 'forced' ? 'front' : String(fd.get('stage') || (rec && rec.stage) || 'gate'), food: String(fd.get('food') || 'none'), reps,
+      did: t === 'check' ? fd.getAll('did').map(String) : [], prep: t === 'forced' ? fd.getAll('prep').map(String) : [],
+      note: String(fd.get('note') || '').trim().slice(0, 2000), at: moscowDate(d, hm), day: d,
+    };
+    if (rec) store.saveAlone(rec.id, out);
+    else store.saveAlone(store.newAloneId(), out, { isNew: true });
+    toast(rec ? 'Запись исправлена.' : `${AL.TYPES[t].label}: записано.`);
+    return true;
+  });
+}
+
+// Выгрузка CSV за период: на телефоне — через «Поделиться», на компьютере — скачать файл
+function aloneExportSheet() {
+  const to = dayKey();
+  const first = S.alone.length ? S.alone[0].day : to;
+  openSheet(`<form class="form"><h2>Выгрузить записи</h2>
+    <p class="muted">Файл CSV: одна строка — один повтор, с датой, ступенью, реакцией и заметками. Открывается в Excel, Numbers и Google Таблицах.</p>
+    <fieldset><legend>За какой срок</legend>${radioChoices('period', { 7: '7 дней', 30: '30 дней', all: 'всё время', custom: 'выбрать даты' }, '30')}</fieldset>
+    <div class="date-time"><label>С<input type="date" name="from" value="${addDays(to, -29)}"></label><label>По<input type="date" name="to" value="${to}"></label></div>
+    <div class="form-actions"><button type="button" class="btn" data-action="sheet-close">Отмена</button><button class="btn primary">Выгрузить</button></div></form>`, (fd) => {
+    const p = String(fd.get('period'));
+    let from = p === 'all' ? first : p === 'custom' ? String(fd.get('from') || first) : addDays(to, -(Number(p) - 1));
+    let till = p === 'custom' ? String(fd.get('to') || to) : to;
+    if (from > till) [from, till] = [till, from];
+    const n = S.alone.filter((r) => r.day >= from && r.day <= till).length;
+    if (!n) { toast('За этот срок записей нет.'); return false; }
+    shareCsv(AL.toCsv(S.alone, from, till), `ostavatsya-doma_${from}_${till}.csv`);
+    return true;
+  });
+}
+async function shareCsv(csv, name) {
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+  try {
+    const file = new File([blob], name, { type: 'text/csv' });
+    if (navigator.canShare && navigator.canShare({ files: [file] }) && /iPhone|iPad|Android/.test(navigator.userAgent)) {
+      await navigator.share({ files: [file], title: 'Учимся оставаться дома' });
+      return;
+    }
+  } catch (err) { if (err && err.name === 'AbortError') return; }
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+}
+
+// Подробности последнего повтора в паузе: «беспокойство через … с» пишется сразу, в базу — когда поле отпустили
+view.addEventListener('input', (e) => {
+  if (!e.target.matches('[name="as-onset"]') || !sess || !sess.reps.length) return;
+  sess.reps[sess.reps.length - 1].o = readOnset(e.target.value);
+  saveSession();
+});
+view.addEventListener('change', (e) => {
+  if (e.target.matches('[name="as-onset"]') && sess) saveSessRecord();
+  if (e.target.matches('[name="as-note"]') && sess) { sess.note = e.target.value.trim().slice(0, 2000); saveSession(); }
+});
 
 // ---------- Библиотека ----------
 
@@ -1981,7 +2476,8 @@ function catalogBody(tab, { showTitle = false } = {}) {
 }
 
 function renderCard(tab, id) {
-  const card = findCard(tab, id);
+  // Старая ссылка на переименованную карточку (#/k/odinochestvo) открывает новую
+  const card = findCard(tab, id) || findCard(...newRef(`${tab}/${id}`).split('/'));
   // «Назад» ведёт туда, откуда пришли (например, на «Сегодня» к тому же месту), иначе — в каталог
   const arrow = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>';
   const from = prevHash && pageTitle(prevHash);
@@ -1997,7 +2493,9 @@ function renderCard(tab, id) {
       if (b.kind === 'result') return resultHtml(tab, card, b);
       const opts = b.kind === 'steps' || b.kind === 'how'
         ? { step: (item) => markButton(stepId(tab, card, stepKeyFor(item.text))) } : {};
-      return `<section class="blk blk-${b.kind}"><h2>${inline(b.title)}</h2><div class="prose">${blocksHtml(b.content, tab, card, opts)}</div></section>`;
+      const old = b.kind === 'steps' ? oldStepsHtml(tab, card) : '';
+      const anchor = b.kind === 'important' ? ' id="blk-vazhno"' : b.kind === 'steps' ? ' id="blk-shagi"' : '';
+      return `<section class="blk blk-${b.kind}"${anchor}><h2>${inline(b.title)}</h2><div class="prose">${blocksHtml(b.content, tab, card, opts)}</div>${old}</section>`;
     }).join('');
   }, card.title + '\n\n' + card.blocks.map((b) => b.title + '\n' + plainText(b.content)).join('\n\n'));
 
@@ -2008,6 +2506,7 @@ function renderCard(tab, id) {
     <div class="page-head"><h1 class="card-title">${inline(card.name)}</h1>
       ${canWrite() ? `<a class="btn small" href="#/edit/${tab}/${card.id}">Изменить</a>` : ''}</div>
     ${card.subtitle ? `<p class="card-sub big">${inline(card.subtitle)}</p>` : ''}
+    ${`${tab}/${card.id}` === AL.ALONE_CARD ? '<a class="btn primary card-diary" href="#/alone">🏠 Учимся оставаться дома</a>' : ''}
     ${tab === 'k' ? `<p class="reps-line">🎯 Повторов в день: <b>${card.reps || MIN_REPS}</b>${canWrite() ? ` <a href="#/edit/k/${card.id}">изменить</a>` : ''}</p>` : ''}
     ${prog}
     ${tab === 'k' ? placesHtml(tab, card) : ''}
@@ -2086,12 +2585,18 @@ async function loadDiary(more) {
 
 // Подпись отметки «Освоено» для дневника: «"Буп": Ладонь у носа»
 function markLabel(id) {
-  const [type, tab0, cid, key] = id.split('_');
-  const tab = tab0 === MOVED_FROM && !findCard(tab0, cid) && findCard('k', cid) ? 'k' : tab0;
+  const [type, tab0, cid0, key] = id.split('_');
+  // Карточки, перенесённые из «Советов», и переименованные — подписываем нынешним названием
+  const moved = tab0 === MOVED_FROM && !findCard(tab0, cid0) ? 'k' : tab0;
+  const [tab, cid] = newRef(`${moved}/${cid0}`).split('/');
   const card = findCard(tab, cid);
   if (!card) return null;
   if (type === 'card') return `${card.name} — вся карточка`;
-  if (type === 'step') return card.stepTitles[key] ? `${card.name}: ${card.stepTitles[key]}` : card.name;
+  if (type === 'step') {
+    const old = (OLD_STEPS[`${tab}/${cid}`] || []).find((t) => stepKeyFor(`**${t}**`) === key);
+    const title = card.stepTitles[key] || old;
+    return title ? `${card.name}: ${title}` : card.name;
+  }
   if (type === 'task') {
     for (const b of card.blocks) for (const x of b.content) {
       if (x.type !== 'list') continue;
@@ -2566,8 +3071,13 @@ function renderPassport() {
     </section>
     <section class="card">
       <div class="card-head"><h2>Уход</h2></div>
-      <ul class="health-list care-list">${CARE_ITEMS.map((item) => careRowHtml(item, careState(item, S.care[item.id], S.day))).join('')}</ul>
+      <ul class="health-list care-list">${careRows(false)}</ul>
       <p class="muted small care-note">«Сегодня» — отметить, что сделали. Нажмите на строку, чтобы выбрать другой день или как часто напоминать.</p>
+    </section>
+    <section class="card" id="clean">
+      <div class="card-head"><h2>Чистота</h2></div>
+      <ul class="health-list care-list">${careRows(true)}</ul>
+      <p class="muted small care-note">Миски, игрушки, лежанка и амуниция. Напоминания — как в «Уходе». <a href="#/t/chistota-miski-igrushki-lezhanka">Что мыть и как ›</a></p>
     </section>
     <section class="card">
       <div class="card-head"><h2>История</h2></div>
@@ -2602,8 +3112,10 @@ function linkCard(href, icon, title, sub, cls = '') {
     <span><strong>${title}</strong><small>${sub}</small></span><span class="link-arrow" aria-hidden="true">›</span></a>`;
 }
 
-// ---------- Уход ----------
+// ---------- Уход и чистота ----------
 
+const careRows = (home) => CARE_ITEMS.filter((item) => !!item.home === home)
+  .map((item) => careRowHtml(item, careState(item, S.care[item.id], S.day))).join('');
 function careRowHtml(item, st) {
   const today = st.last === S.day;
   const when = `${daysAgoText(st.days)}${st.due && st.last ? ' · пора' : ''}`;
@@ -2639,7 +3151,7 @@ function careSheet(id) {
   const recent = st.log.slice(-6).reverse();
   const every = EVERY_OPTIONS.includes(st.every) ? EVERY_OPTIONS : [...EVERY_OPTIONS, st.every].sort((a, b) => a - b);
   openSheet(`<form class="form"><h2>${item.icon} ${item.name}</h2>
-    <p class="muted">${escapeHtml(cap(item.what))}.${item.card ? ` <a href="#/k/${item.card}" data-action="sheet-close-link">Как приучить ›</a>` : ''}</p>
+    <p class="muted">${escapeHtml(cap(item.what))}.${item.card ? ` <a href="#/k/${item.card}" data-action="sheet-close-link">Как приучить ›</a>` : ''}${item.tip ? ` <a href="#/t/${item.tip}" data-action="sheet-close-link">Подробнее ›</a>` : ''}</p>
     <label>Напоминать<select name="every">${every.map((n) => `<option value="${n}"${n === st.every ? ' selected' : ''}>${everyText(n)}</option>`).join('')}</select></label>
     ${canWrite() ? `<label>Когда сделали <input type="date" name="date" value="${S.day}" max="${S.day}" required></label>` : ''}
     ${recent.length ? `<p class="care-hist"><b>Последние разы:</b> ${recent.map((d) => escapeHtml(dayTitle(d, { day: 'numeric', month: 'short' }))).join(', ')}</p>` : '<p class="muted">Пока ни разу не отмечали.</p>'}
@@ -2686,6 +3198,18 @@ function socialEntryHtml() {
   return `<h2 class="lib-title">Социализация</h2>
     ${linkCard('#/social', '🧭', `Новое для ${escapeHtml(DOG() === 'Батончик' ? 'Батончика' : DOG())}`,
       `встретили ${sum.met} из ${sum.total}${sum.again ? ` · повторить ${sum.again}` : ''}`)}`;
+}
+
+// Тренировки → «Одиночество» → «Учимся оставаться дома» — плитка, как у социализации
+function aloneEntryHtml() {
+  const step = AL.currentStep(aloneDone(), S.alone);
+  const rec = AL.allRecords(S.alone);
+  const ws = AL.weekStats(S.alone, mondayOf(S.day), S.day);
+  const sub = S.alone.length
+    ? [sessActive() ? 'идёт сессия' : '', step ? `шаг ${step} из 13` : 'все шаги отмечены', `сессий за неделю: ${ws.sessions}`, rec.front ? `за входной дверью — ${AL.fmtDur(rec.front)}` : ''].filter(Boolean).join(' · ')
+    : 'проверки, сессии с подсказкой длительности, записи';
+  return `<h2 class="lib-title">Одиночество</h2>
+    ${linkCard('#/alone', '🏠', 'Учимся оставаться дома', escapeHtml(sub))}`;
 }
 
 const socialName = (id) => (isOwnSocial(id) ? (S.social[id] && S.social[id].title) || 'Своё' : (SOCIAL_ITEMS.find((x) => x.id === id) || {}).name || id);
@@ -2779,7 +3303,7 @@ function summaryData() {
   const notes = all.filter((e) => days.includes(e.day) && e.text && e.type !== 'train')
     .sort((a, b) => new Date(b.at) - new Date(a.at)).slice(0, 12)
     .map((e) => `${dayTitle(e.day, { day: 'numeric', month: 'short' })}, ${fmtTime(new Date(e.at))} — ${EVENT_TYPES[e.type] ? EVENT_TYPES[e.type].label.toLowerCase() : e.type}: ${e.text}`);
-  const care = CARE_ITEMS.map((item) => ({ item, st: careState(item, S.care[item.id], S.day) })).filter(({ st }) => st.last)
+  const care = CARE_ITEMS.filter((item) => !item.home).map((item) => ({ item, st: careState(item, S.care[item.id], S.day) })).filter(({ st }) => st.last)
     .map(({ item, st }) => `${item.name}: ${daysAgoText(st.days)}`);
   return {
     title: `${DOG()}${pet.breed ? ` — ${pet.breed.toLowerCase()}` : ''}`,
@@ -3429,11 +3953,11 @@ function onHashChange() {
 }
 
 // Название страницы для кнопки «Назад»; для правки карточки — нет (туда не возвращаемся)
-const PAGE_TITLES = { search: 'Поиск', today: 'Главная', day: 'День', k: 'Тренировки', g: 'Тренировки', pass: 'Паспорт', growth: 'Рост и вес', lib: 'Библиотека', weeks: 'Неделя Батончика', t: 'Практика', c: 'Практика', game: 'Игра', d: 'Дневник', me: 'Настройки', social: 'Новое' };
+const PAGE_TITLES = { search: 'Поиск', today: 'Главная', day: 'День', k: 'Тренировки', g: 'Тренировки', pass: 'Паспорт', growth: 'Рост и вес', lib: 'Библиотека', weeks: 'Неделя Батончика', t: 'Практика', c: 'Практика', game: 'Игра', d: 'Дневник', me: 'Настройки', social: 'Новое', alone: 'Учимся оставаться дома' };
 // Вложенные страницы со своим названием для «Назад»
-const SUB_TITLES = { 'pass/summary': 'Для ветеринара', 'pass/lost': 'Если потерялся', 'pass/months': 'Как рос', 'game/play': 'Разминка', 'game/repeat': 'Повтор ошибок' };
+const SUB_TITLES = { 'pass/summary': 'Для ветеринара', 'pass/lost': 'Если потерялся', 'pass/months': 'Как рос', 'game/play': 'Разминка', 'game/repeat': 'Повтор ошибок', 'alone/go': 'Сессия' };
 // Какая вкладка внизу подсвечена: игры с собакой живут во вкладке «Тренировки», Практика, заметки каналов и игра на знания — в «Советах»
-const TAB_OF = { search: 'search', today: 'today', day: 'day', k: 'k', g: 'k', pass: 'pass', growth: 'pass', lib: 't', weeks: 'day', t: 't', c: 't', game: 't', d: 'd', social: 'k' };
+const TAB_OF = { search: 'search', today: 'today', day: 'day', k: 'k', g: 'k', pass: 'pass', growth: 'pass', lib: 't', weeks: 'day', t: 't', c: 't', game: 't', d: 'd', social: 'k', alone: 'k' };
 
 function pageTitle(hash) {
   const parts = hash.replace(/^#\/?/, '').split('/').filter(Boolean);
@@ -3452,6 +3976,9 @@ function render(force) {
   // То же для поиска, пока в нём печатают
   if (r.page === 'search' && !force && document.activeElement && document.activeElement.matches('.search-input')) return;
   if (r.page === 'lib' && r.id === 'dict' && !force && document.activeElement && document.activeElement.matches('.dict-search')) return;
+  // Сессия «Учимся оставаться дома»: пока дописывают подробности или заметку, экран не перерисовываем
+  if (r.page === 'alone' && !force && isTyping() && view.contains(document.activeElement)) return;
+  document.body.classList.toggle('session-on', r.page === 'alone' && r.id === 'go');
   // Тесты «Проверь себя» переехали в игру
   if (r.page === 'lib' && r.id === 'quiz') {
     history.replaceState(null, '', '#/game');
@@ -3471,6 +3998,7 @@ function render(force) {
   else if (r.page === 'd') html = r.id ? renderStoryPage(r.id) : renderDiary();
   else if (r.page === 'c') html = r.id ? renderNote(r.id) : renderTipsPage();
   else if (r.page === 'game') html = renderGame(r);
+  else if (r.page === 'alone') html = r.id === 'go' ? renderAloneSession() : renderAlone();
   else if (TABS[r.tab]) html = r.id ? renderCard(r.tab, r.id) : (r.tab === 't' ? renderTipsPage() : renderTrainingsPage());
   else html = renderHome();
   view.innerHTML = html;
@@ -3495,6 +4023,9 @@ function render(force) {
     const target = r.page === 'lib' && r.sub && r.id !== 'a' && document.getElementById(`lib-${r.id}-${r.sub}`);
     if (target) target.scrollIntoView({ block: 'start' });
     if (target && fromSearch()) target.classList.add('lib-hit');
+    // Ссылка на блок карточки: #/k/ostavatsya-odnomu/vazhno
+    const blk = TABS[r.tab] && r.id && r.sub && document.getElementById(`blk-${r.sub}`);
+    if (blk) blk.scrollIntoView({ block: 'start' });
   } else if (pendingScroll && Date.now() < pendingScroll.until) {
     // Страница дорисовалась (например, подгрузились данные) — дотягиваем до запомненного места
     window.scrollTo(0, pendingScroll.y);
@@ -3846,8 +4377,7 @@ const actions = {
     if (on && el.dataset.confirm && !confirm('Снять отметку «Освоено»?')) return;
     if (on) {
       if (S.marks[id]) store.setMark(id, false);
-      const old = legacyId(id);
-      if (old && S.marks[old]) store.setMark(old, false);
+      legacyIds(id).filter((x) => S.marks[x]).forEach((x) => store.setMark(x, false));
     } else store.setMark(id, true);
   },
   'edit-toggle': (el) => { S.edit[el.dataset.section] = !S.edit[el.dataset.section]; render(); },
@@ -4086,6 +4616,115 @@ const actions = {
     }
   },
   'back': () => history.back(),
+  // Учимся оставаться дома
+  'alone-start': () => {
+    if (!canWrite()) return;
+    if (!sess || sess.phase === 'done') {
+      sess = { phase: 'setup', stage: aloneStage(), food: 'none', reps: [], id: null, at: null, day: null, note: '' };
+      saveSession();
+    }
+    location.hash = '#/alone/go';
+  },
+  'alone-new': (el) => { if (canWrite()) aloneSheet(el.dataset.type); },
+  'alone-open': (el) => aloneSheet(null, el.dataset.id),
+  'alone-del': (el) => {
+    if (!confirm('Удалить эту запись?')) return;
+    store.deleteAlone(el.dataset.id);
+    closeSheet();
+    toast('Запись удалена.');
+  },
+  'alone-chart': (el) => { S.aloneUi.chart = el.dataset.stage; render(); },
+  'alone-more': () => { S.aloneUi.more = true; render(); },
+  'alone-export': () => aloneExportSheet(),
+  'alone-step': (el) => {
+    const card = aloneCard();
+    const n = Number(el.dataset.n);
+    const key = card && card.steps[n - 1];
+    if (!key || !confirm(`Отметить шаг ${n} «${aloneStepTitle(n)}» в карточке «Оставаться одному»?`)) return;
+    store.setMark(stepId('k', card, key), true);
+    toast(`Шаг ${n} отмечен.`);
+  },
+  'as-stage': (el) => { if (!sess) return; sess.stage = el.dataset.stage; saveSession(); render(); },
+  'as-food': (el) => { if (!sess) return; sess.food = el.dataset.food; saveSession(); render(); },
+  'as-begin': () => {
+    if (!sess) return;
+    sess.at = new Date().toISOString();
+    sess.day = S.day;
+    unlockAudio();
+    keepAwake(true);
+    toReady();
+    render();
+  },
+  'as-adj': (el) => { if (!sess) return; sess.plan = AL.stepLadder(sess.plan, Number(el.dataset.d)); sess.sugText = 'Длительность изменена вручную.'; saveSession(); render(); },
+  'as-go': () => {
+    if (!sess) return;
+    unlockAudio();
+    keepAwake(true);
+    sess.phase = 'away';
+    sess.awayAt = Date.now();
+    saveSession();
+    render();
+  },
+  'as-early': () => {
+    if (!sess) return;
+    sess.backSec = Math.max(1, Math.min(sess.plan, Math.round((Date.now() - sess.awayAt) / 1000)));
+    sess.phase = 'back';
+    saveSession();
+    render();
+  },
+  'as-react': (el) => {
+    if (!sess || sess.phase !== 'back') return;
+    const r = el.dataset.r;
+    sess.reps.push({ s: sess.backSec || sess.plan, r, o: null, c: r === 'calm' ? 'na' : '' });
+    sess.backSec = null;
+    saveSessRecord();
+    // Повтор засчитывается и в «Тренировки дня»
+    store.addEvent({ type: 'train', card: AL.ALONE_CARD, at: new Date(), day: S.day });
+    const sug = AL.suggest(sessOthers(), sess.stage, sess.reps);
+    if (sug.done) { sess.phase = 'done'; sess.doneText = sug.done; keepAwake(false); } else {
+      sess.phase = 'pause';
+      sess.pauseAt = Date.now();
+      sess.next = { s: sug.s, text: sug.text };
+    }
+    saveSession();
+    render();
+  },
+  'as-self': (el) => {
+    if (!sess || !sess.reps.length) return;
+    const last = sess.reps[sess.reps.length - 1];
+    last.c = last.c === el.dataset.c ? '' : el.dataset.c;
+    saveSessRecord();
+    render();
+  },
+  'as-next': () => { if (sess) { toReady(); render(); } },
+  'as-end': () => {
+    if (!sess) return;
+    if (!sess.reps.length) {
+      if (sess.phase === 'away' && !confirm('Закончить? Этот уход не запишется.')) return;
+      sess = null;
+      saveSession();
+      keepAwake(false);
+      leaveSession();
+      return;
+    }
+    if (!confirm(sess.phase === 'away' ? 'Закончить сессию? Текущий уход не запишется.' : 'Закончить сессию?')) return;
+    sess.phase = 'done';
+    sess.doneText = 'Сессия закончена.';
+    keepAwake(false);
+    saveSession();
+    render();
+  },
+  'as-finish': () => {
+    if (!sess) return;
+    const field = view.querySelector('[name="as-note"]');
+    const note = field ? field.value.trim().slice(0, 2000) : sess.note || '';
+    if (sess.id && note !== (S.alone.find((r) => r.id === sess.id) || {}).note) { sess.note = note; saveSessRecord(); }
+    if (sess.reps.length) toast('Сессия записана в дневник.');
+    sess = null;
+    saveSession();
+    keepAwake(false);
+    leaveSession();
+  },
   'vv-clear': () => {
     try { localStorage.removeItem(VV_LOG); } catch { /* ничего */ }
     render(true);
