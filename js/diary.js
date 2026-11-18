@@ -259,10 +259,19 @@ const median = (nums) => {
   return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
 };
 const MIN_SAMPLES = 6; // меньше — подсказку не показываем: по двум-трём записям легко ошибиться
-export const RHYTHM_SAMPLES = 30; // берём последние 30 промежутков (примерно 4–5 дней): Батончик растёт и терпит всё дольше
+export const RHYTHM_SAMPLES = 30; // берём последние 30 промежутков (примерно 4–5 будних дней): Батончик растёт и терпит всё дольше
+
+// Суббота или воскресенье (день — по Москве)
+export function isWeekend(key) {
+  const [y, m, d] = key.split('-').map(Number);
+  const weekday = new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+  return weekday === 0 || weekday === 6;
+}
 
 // Промежутки между выходами в туалет днём, от старых к новым (туалет на улице и аварии — одинаково).
-// Только внутри одного дня; ночь (между ними было «Легли»), двойные отметки (до 5 минут) и промежутки дольше 6 часов не считаем
+// Только внутри одного дня; ночь (между ними было «Легли»), двойные отметки (до 5 минут) и промежутки дольше 6 часов не считаем.
+// Выходные тоже не считаем: в субботу и воскресенье гуляем много и часто, он выходит «про запас» и метит,
+// промежутки короткие — и сбивали бы подсказку на всю следующую неделю
 export function toiletGaps(events) {
   const at = (e) => new Date(e.at).getTime();
   const all = events.filter((e) => e.type !== 'train').slice().sort((a, b) => at(a) - at(b));
@@ -273,12 +282,12 @@ export function toiletGaps(events) {
     const b = elim[i];
     const gap = at(b) - at(a);
     const slept = all.some((e) => e.type === 'bed' && at(e) > at(a) && at(e) < at(b));
-    if (a.day === b.day && !slept && gap > 5 * 60000 && gap <= 6 * 3600000) gaps.push(gap);
+    if (a.day === b.day && !isWeekend(a.day) && !slept && gap > 5 * 60000 && gap <= 6 * 3600000) gaps.push(gap);
   }
   return gaps;
 }
 
-// Обычный ритм — середина (медиана) последних 30 промежутков: один случайно долгий или короткий её почти не сдвигает
+// Обычный ритм — середина (медиана) последних 30 будних промежутков: один случайно долгий или короткий её почти не сдвигает
 export function rhythmOf(gaps) {
   const last = gaps.slice(-RHYTHM_SAMPLES);
   return { gap: last.length >= MIN_SAMPLES ? median(last) : null };

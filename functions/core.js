@@ -52,7 +52,7 @@ export async function send(db, messaging, tokens, { title, body, link = '', tag 
   return res.successCount;
 }
 
-// «Пора в туалет»: как на главной — середина последних 30 дневных промежутков между туалетами, отсчёт от прошлого туалета.
+// «Пора в туалет»: как на главной — середина последних 30 дневных промежутков между туалетами (без выходных), отсчёт от прошлого туалета.
 // Промежутки прошлых дней (из журнала за 14 дней) берём раз в день и храним в push/state, сегодняшние — по записям за последние сутки.
 // Присылаем один раз на каждую подсказку, если время подошло не больше часа назад и сейчас не ночь
 async function toiletMessage(db, state, now, patch) {
@@ -60,11 +60,13 @@ async function toiletMessage(db, state, now, patch) {
   const hour = mskHour(now);
   if (hour < 6) return null;
   let before = state.rhythmGaps;
-  if (!Array.isArray(before) || state.rhythmDay !== today) {
+  // rhythmV: 2 — промежутки уже без выходных; старый кэш пересчитываем, не дожидаясь следующего дня
+  if (!Array.isArray(before) || state.rhythmDay !== today || state.rhythmV !== 2) {
     const snap = await db.collection('events').where('day', '>=', addDays(today, -14)).where('day', '<', today).get();
     before = toiletGaps(snap.docs.map((d) => event(d.data()))).slice(-RHYTHM_SAMPLES);
     patch.rhythmGaps = before;
     patch.rhythmDay = today;
+    patch.rhythmV = 2;
   }
   const snap = await db.collection('events').where('at', '>=', new Date(now.getTime() - 30 * H)).get();
   const recent = snap.docs.map((d) => event(d.data())).filter((e) => e.type !== 'train');

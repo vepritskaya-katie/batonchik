@@ -41,8 +41,10 @@ const DIARY_STEP = 14; // вкладка «День»: две недели ис�
 const MIN_REPS = 5;   // цель по умолчанию для тренировки на сегодня: не меньше 5 повторов
 const MAX_REPS = 50;
 // Версия списка тренировок (v у пункта): 2 — цели подняты до MIN_REPS, 3 — добавлены ежедневные
-// «Протокол расслабления» и «Спокойно, пока мы едим», 4 — пояснения из памятки с охраной ресурсов
-const PLAN_VERSION = 4;
+// «Протокол расслабления» и «Спокойно, пока мы едим», 4 — пояснения из памятки с охраной ресурсов,
+// 5 — новое пояснение у «Оставаться одному» (бывшее «Одиночество»), если прежнее не меняли
+const PLAN_VERSION = 5;
+const NOTES_V5 = { 'k/ostavatsya-odnomu': 'во время одного из дневных снов' };
 const ADDED_IN_V3 = ['k/protokol-rasslableniya', 'k/spokoyno-poka-my-edim'];
 // Карточки, переименованные в файлах: старая ссылка → новая (план, журнал, дневник)
 const RENAMED = {
@@ -52,12 +54,19 @@ const RENAMED = {
   'g/tyagalka-beri-i-otday': 'g/tyagalka-beri-i-menyaemsya',
   'g/naydi-v-treh-korobkah': 'g/ischi-v-treh-korobkah',
   'k/zhdi': 'k/zhdat', // «Жди» → «Ждать»
+  'k/odinochestvo': 'k/ostavatsya-odnomu', // «Одиночество» → «Оставаться одному» (13 шагов вместо 3)
 };
 // Здесь поменялось только слово, шаги прежние — отметки читаем и под старым id
 const MARKS_FROM = {
   'g/tyagalka-beri-i-menyaemsya': 'g/tyagalka-beri-i-otday',
   'g/ischi-v-treh-korobkah': 'g/naydi-v-treh-korobkah',
   'k/zhdat': 'k/zhdi',
+  // Шаги новые, но «Освоено», «Где получается» и общие галочки — те же
+  'k/ostavatsya-odnomu': 'k/odinochestvo',
+};
+// Шаги прежней версии карточки, которых больше нет: если у них стояли галочки, показываем их под шагами
+const OLD_STEPS = {
+  'k/ostavatsya-odnomu': ['Выход из комнаты', 'Выход из квартиры', 'Дольше'],
 };
 const newRef = (ref) => RENAMED[ref] || ref;
 const withNewRefs = (events) => (events || []).map((e) => (RENAMED[e.card] ? { ...e, card: RENAMED[e.card] } : e));
@@ -241,7 +250,7 @@ function migratePlan() {
     return;
   }
   // Обновления списка, по одному разу: цели не меньше MIN_REPS (v2), новые ежедневные тренировки (v3),
-  // пояснения из обновлённой памятки (v4)
+  // пояснения из обновлённой памятки (v4), пояснение у «Оставаться одному» (v5)
   if (S.plan.focus.some((f) => f.v < PLAN_VERSION)) {
     S.migrated = true;
     const needsV3 = S.plan.focus.some((f) => f.v < 3);
@@ -250,6 +259,7 @@ function migratePlan() {
       p.focus.forEach((f) => {
         if (f.v < 2) f.target = Math.max(MIN_REPS, f.target);
         if (f.v < 4 && !f.day && notes.has(f.card)) f.note = notes.get(f.card);
+        else if (f.v < 5 && !f.day && notes.has(f.card) && NOTES_V5[f.card] === f.note) f.note = notes.get(f.card);
         f.v = PLAN_VERSION;
       });
       if (!needsV3) return;
@@ -458,18 +468,34 @@ function byLine(m, withDate) {
   return [m.name, when].filter(Boolean).map(escapeHtml).join(' · ');
 }
 
-// Отметки под прежним id: игры, где поменялось только слово (MARKS_FROM), и карточки,
+// Отметки под прежним id: переименованные карточки (MARKS_FROM) и карточки,
 // перенесённые из «Советов», — их отметки раньше хранились с вкладкой t
-function legacyId(id) {
-  const m = id.match(/^(step|task|card)_([kgt])_([^_]+)(.*)$/);
-  if (!m) return null;
+function legacyIds(id) {
+  const m = id.match(/^(step|task|card|lvl)_([kgt])_([^_]+)(.*)$/);
+  if (!m) return [];
+  const out = [];
   const from = MARKS_FROM[`${m[2]}/${m[3]}`];
-  if (from) return `${m[1]}_${from.replace('/', '_')}${m[4]}`;
-  return m[2] === 'k' ? `${m[1]}_${MOVED_FROM}_${m[3]}${m[4]}` : null;
+  if (from) out.push(`${m[1]}_${from.replace('/', '_')}${m[4]}`);
+  const [tab, cid] = from ? from.split('/') : [m[2], m[3]];
+  if (tab === 'k') out.push(`${m[1]}_${MOVED_FROM}_${cid}${m[4]}`);
+  return out;
 }
 function getMark(id) {
-  const old = legacyId(id);
-  return S.marks[id] || (old && S.marks[old]) || null;
+  if (S.marks[id]) return S.marks[id];
+  const old = legacyIds(id).find((x) => S.marks[x]);
+  return old ? S.marks[old] : null;
+}
+
+// «В прежней версии карточки было отмечено: «Выход из комнаты» (Катя · 3 нояб.)»
+function oldStepsHtml(tab, card) {
+  const titles = OLD_STEPS[`${tab}/${card.id}`];
+  if (!titles) return '';
+  const done = titles.map((t) => {
+    const id = stepId(tab, card, stepKeyFor(`**${t}**`));
+    return [t, getMark(id)];
+  }).filter(([, m]) => m);
+  if (!done.length) return '';
+  return `<p class="muted small old-marks">В прежней версии карточки было отмечено: ${done.map(([t, m]) => `«${escapeHtml(t)}» (${byLine(m, true)})`).join(', ')}.</p>`;
 }
 
 function markButton(id, label = 'Освоено') {
@@ -1981,7 +2007,8 @@ function catalogBody(tab, { showTitle = false } = {}) {
 }
 
 function renderCard(tab, id) {
-  const card = findCard(tab, id);
+  // Старая ссылка на переименованную карточку (#/k/odinochestvo) открывает новую
+  const card = findCard(tab, id) || findCard(...newRef(`${tab}/${id}`).split('/'));
   // «Назад» ведёт туда, откуда пришли (например, на «Сегодня» к тому же месту), иначе — в каталог
   const arrow = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>';
   const from = prevHash && pageTitle(prevHash);
@@ -1997,7 +2024,8 @@ function renderCard(tab, id) {
       if (b.kind === 'result') return resultHtml(tab, card, b);
       const opts = b.kind === 'steps' || b.kind === 'how'
         ? { step: (item) => markButton(stepId(tab, card, stepKeyFor(item.text))) } : {};
-      return `<section class="blk blk-${b.kind}"><h2>${inline(b.title)}</h2><div class="prose">${blocksHtml(b.content, tab, card, opts)}</div></section>`;
+      const old = b.kind === 'steps' ? oldStepsHtml(tab, card) : '';
+      return `<section class="blk blk-${b.kind}"><h2>${inline(b.title)}</h2><div class="prose">${blocksHtml(b.content, tab, card, opts)}</div>${old}</section>`;
     }).join('');
   }, card.title + '\n\n' + card.blocks.map((b) => b.title + '\n' + plainText(b.content)).join('\n\n'));
 
@@ -2086,12 +2114,18 @@ async function loadDiary(more) {
 
 // Подпись отметки «Освоено» для дневника: «"Буп": Ладонь у носа»
 function markLabel(id) {
-  const [type, tab0, cid, key] = id.split('_');
-  const tab = tab0 === MOVED_FROM && !findCard(tab0, cid) && findCard('k', cid) ? 'k' : tab0;
+  const [type, tab0, cid0, key] = id.split('_');
+  // Карточки, перенесённые из «Советов», и переименованные — подписываем нынешним названием
+  const moved = tab0 === MOVED_FROM && !findCard(tab0, cid0) ? 'k' : tab0;
+  const [tab, cid] = newRef(`${moved}/${cid0}`).split('/');
   const card = findCard(tab, cid);
   if (!card) return null;
   if (type === 'card') return `${card.name} — вся карточка`;
-  if (type === 'step') return card.stepTitles[key] ? `${card.name}: ${card.stepTitles[key]}` : card.name;
+  if (type === 'step') {
+    const old = (OLD_STEPS[`${tab}/${cid}`] || []).find((t) => stepKeyFor(`**${t}**`) === key);
+    const title = card.stepTitles[key] || old;
+    return title ? `${card.name}: ${title}` : card.name;
+  }
   if (type === 'task') {
     for (const b of card.blocks) for (const x of b.content) {
       if (x.type !== 'list') continue;
@@ -3853,8 +3887,7 @@ const actions = {
     if (on && el.dataset.confirm && !confirm('Снять отметку «Освоено»?')) return;
     if (on) {
       if (S.marks[id]) store.setMark(id, false);
-      const old = legacyId(id);
-      if (old && S.marks[old]) store.setMark(old, false);
+      legacyIds(id).filter((x) => S.marks[x]).forEach((x) => store.setMark(x, false));
     } else store.setMark(id, true);
   },
   'edit-toggle': (el) => { S.edit[el.dataset.section] = !S.edit[el.dataset.section]; render(); },
