@@ -202,7 +202,8 @@ service cloud.firestore {
     }
 
     // «Неделя Батончика»: ответы за воскресенье — три вопроса о благополучии, фигура, заметки,
-    // здоровье за неделю (три галочки, найденные клещи, даты последних обработок от клещей и глистов)
+    // здоровье за неделю (три галочки, найденные клещи, даты последних обработок от клещей и глистов),
+    // одиночество за неделю (рекорд в секундах и ступень, вынужденные уходы дольше рекорда, был ли день отдыха)
     function weekDate(d, key) {
       return !(key in d) || (d[key] is string && (d[key] == '' || d[key].matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')));
     }
@@ -210,7 +211,12 @@ service cloud.firestore {
       allow read: if isAllowed();
       allow create, update: if isAllowed()
         && day.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
-        && request.resource.data.keys().hasOnly(['joy', 'choice', 'sleep', 'ribs', 'waist', 'notes', 'coat', 'stool', 'vigor', 'ticks', 'lastTicks', 'lastWorms', 'updatedAt', 'updatedBy'])
+        && request.resource.data.keys().hasOnly(['joy', 'choice', 'sleep', 'ribs', 'waist', 'notes', 'coat', 'stool', 'vigor', 'ticks', 'lastTicks', 'lastWorms',
+          'aloneBest', 'aloneStage', 'aloneForced', 'aloneRest', 'updatedAt', 'updatedBy'])
+        && (!('aloneBest' in request.resource.data) || (request.resource.data.aloneBest is int && request.resource.data.aloneBest >= 0 && request.resource.data.aloneBest <= 86400))
+        && (!('aloneStage' in request.resource.data) || request.resource.data.aloneStage in ['', 'gate', 'door', 'front', 'both'])
+        && (!('aloneForced' in request.resource.data) || (request.resource.data.aloneForced is int && request.resource.data.aloneForced >= 0 && request.resource.data.aloneForced <= 100))
+        && (!('aloneRest' in request.resource.data) || request.resource.data.aloneRest is bool)
         && (!('coat' in request.resource.data) || request.resource.data.coat is bool)
         && (!('stool' in request.resource.data) || request.resource.data.stool is bool)
         && (!('vigor' in request.resource.data) || request.resource.data.vigor is bool)
@@ -333,6 +339,35 @@ service cloud.firestore {
       allow read: if isAllowed();
       allow create, update: if isAllowed() && request.auth.uid == uid && validGame(request.resource.data);
       allow delete: if isAllowed() && request.auth.uid == uid;
+    }
+
+    // Дневник одиночества: запись — сессия тренировки (несколько повторов), проверка или вынужденный уход.
+    // Видят оба; исправить и удалить запись может только тот, кто её сделал
+    function validAlone(d) {
+      return d.keys().hasOnly(['type', 'stage', 'food', 'reps', 'did', 'prep', 'note', 'at', 'day', 'uid', 'name', 'createdAt', 'updatedAt'])
+        && d.type in ['train', 'check', 'forced']
+        && d.stage in ['gate', 'door', 'front', 'both']
+        && d.food in ['none', 'kong', 'lick']
+        && d.reps is list && d.reps.size() >= 1 && d.reps.size() <= 30
+        && d.did is list && d.did.size() <= 4
+        && d.prep is list && d.prep.size() <= 4
+        && d.note is string && d.note.size() <= 2000
+        && d.at is timestamp
+        && d.day is string && d.day.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+        && d.uid is string && d.name is string && d.name.size() <= 40
+        && d.updatedAt == request.time;
+    }
+    match /alone/{id} {
+      allow read: if isAllowed();
+      allow create: if isAllowed() && id.size() <= 40 && validAlone(request.resource.data)
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.createdAt == request.time;
+      allow update: if isAllowed() && validAlone(request.resource.data)
+        && resource.data.uid == request.auth.uid
+        && request.resource.data.uid == resource.data.uid
+        && request.resource.data.name == resource.data.name
+        && request.resource.data.createdAt == resource.data.createdAt;
+      allow delete: if isAllowed() && resource.data.uid == request.auth.uid;
     }
 
     // Всё остальное закрыто (в том числе push/state — что сервер уже прислал)
