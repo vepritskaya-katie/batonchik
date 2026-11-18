@@ -1504,7 +1504,10 @@ a.story-date { color: inherit; text-decoration: none; }
 
 /* ---------- Дневник одиночества ---------- */
 .card-diary { margin: 2px 0 12px; }
-.item-diary { margin-top: 10px; }
+.alone-how { margin: 0 0 14px; }
+/* Название пункта («Учимся оставаться одному») совпадает со страницей — внутри «Как заниматься» его не повторяем */
+.alone-how .item-head { display: none; }
+.alone-how .item-body { margin-top: 10px; padding: 14px 16px; border-radius: 18px; background: var(--card); border: 1px solid var(--line); }
 .task-btn.hinted { box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--ok) 55%, transparent); }
 .diary-hint { display: block; margin-top: 2px; color: var(--ok); font-size: 13.5px; font-weight: 600; }
 .banner.alone-live { display: block; text-decoration: none; color: var(--text); background: var(--accent-soft); font-weight: 600; }

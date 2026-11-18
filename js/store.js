@@ -87,7 +87,7 @@ function localStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onPet 
     write('bt.events', list.map((e) => ({ ...e, at: e.at.toISOString() })));
     onEvents(allEvents().filter((e) => e.day === day));
   };
-  // Дневник одиночества: { id: запись }, время — строкой
+  // «Учимся оставаться дома» (дневник тренировки «Оставаться одному»): { id: запись }, время — строкой
   const localAlone = () => Object.entries(read('bt.alone', {})).map(([id, r]) => ({ ...r, id, at: new Date(r.at) }));
 
   return {
@@ -210,7 +210,7 @@ function localStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onPet 
       write('bt.monthPhotos', all);
       onMonths(localMonthDates());
     },
-    // Дневник одиночества: запись — сессия, проверка или вынужденный уход
+    // «Учимся оставаться дома» (дневник тренировки «Оставаться одному»): запись — сессия, проверка или вынужденный уход
     newAloneId: () => newId(),
     saveAlone(id, rec) {
       const all = read('bt.alone', {});
@@ -400,7 +400,7 @@ function firebaseStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onE
       if (!list.some((p) => p.me)) list.unshift({ ...cleanGame({ name: state.user.name }), uid: state.user.uid, me: true });
       onGame(list);
     }, fail));
-    // Дневник одиночества: все записи (их немного — сессия в день, проверки и вынужденные уходы)
+    // «Учимся оставаться дома» (дневник тренировки «Оставаться одному»): все записи (их немного — сессия в день, проверки и вынужденные уходы)
     unsubs.push(onSnapshot(collection(db, 'alone'), (snap) => {
       onAlone(snap.docs.map((d) => { const v = d.data({ serverTimestamps: 'estimate' }); return { ...v, id: d.id, at: toDate(v.at) || new Date() }; }));
     }, fail));
@@ -708,7 +708,7 @@ function firebaseStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onE
       const { doc, setDoc, serverTimestamp, deleteField } = fb.fs;
       setDoc(doc(db, 'reads', state.user.uid), { items: { [key]: on ? true : deleteField() }, updatedAt: serverTimestamp() }, { merge: true }).catch(fail);
     },
-    // Дневник одиночества: alone/{id}. Новую запись создаём с createdAt, дальше правим без него —
+    // «Учимся оставаться дома» (дневник тренировки «Оставаться одному»): alone/{id}. Новую запись создаём с createdAt, дальше правим без него —
     // правила разрешают править и удалять только свои записи
     newAloneId() { return fb && db ? fb.fs.doc(fb.fs.collection(db, 'alone')).id : newId(); },
     saveAlone(id, rec, { isNew = false } = {}) {

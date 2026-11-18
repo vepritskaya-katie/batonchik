@@ -127,7 +127,7 @@ const S = {
   care: {},           // уход: { nails: { log: [дни], every } … }
   monthDates: null,   // фото месяца: { 5: 'ГГГГ-ММ-ДД' } — за какие месяцы есть фото и когда снято (null — ещё не знаем)
   monthPhotos: { all: null, loading: false, thumbs: {}, thumbLoading: {} }, // все фото (для «Как рос») и уменьшенные — для календаря дневника
-  alone: [],          // «Дневник одиночества»: записи { id, type: train|check|forced, stage, food, reps: [{ s, r, o, c }], did, prep, note, at, day, uid, name }
+  alone: [],          // «Учимся оставаться дома»: записи { id, type: train|check|forced, stage, food, reps: [{ s, r, o, c }], did, prep, note, at, day, uid, name }
   aloneUi: { chart: '', more: false }, // ступень на графике, «Показать ещё» в списке записей
   aloneFrom: '',      // откуда пришли в дневник — туда ведёт «Назад»
 };
@@ -731,8 +731,8 @@ function trainingsHtml(title = '') {
     <div class="section-head"><h2>${escapeHtml(title || t.title || 'Тренировки на сегодня')}</h2>${editBtn}</div>
     ${weekBanner}
     ${chosen ? `<p class="muted small">Неделя с ${dayTitle(week, { day: 'numeric', month: 'long' })}.</p>` : ''}
-    ${t.intro && t.intro.length ? `<details class="intro"><summary>Как устроены занятия</summary><div class="prose">${renderBlocks(t.intro)}</div></details>` : ''}
-    <p class="muted small">Одно нажатие на «+1» — один повтор. Сделали все повторы — плитка станет зелёной и уйдёт вниз. Ошиблись — нажмите на счёт «2 из 5», чтобы убрать лишний повтор. Счёт начинается заново после «Легли вечером».</p>
+    <details class="intro"><summary>Как устроены занятия</summary><div class="prose">${t.intro && t.intro.length ? renderBlocks(t.intro) : ''}
+      <p>Одно нажатие на «+1» — один повтор. Сделали все повторы — плитка станет зелёной и уйдёт вниз. Ошиблись — нажмите на счёт «2 из 5», чтобы убрать лишний повтор. Счёт начинается заново после «Легли вечером».</p></div></details>
     <ul class="list${edit ? '' : ' tr-tiles'}">${items || '<li class="empty">Список пуст. Нажмите «Изменить», чтобы добавить тренировки.</li>'}</ul>
     ${edit ? `<div class="edit-actions">
       <button class="btn" data-action="tr-add">+ Добавить на сегодня</button>
@@ -1014,13 +1014,15 @@ function renderDayPage() {
 
 // ---------- Тренировки (с играми) ----------
 
-// «В течение дня» из rasporyadok.md: подсказки без отметок
+// «В течение дня» из rasporyadok.md: подсказки без отметок. Раздел «# Одиночество» показывается
+// не здесь, а наверху страницы «Учимся оставаться дома» (блок «Как заниматься»)
+const ALONE_SECTION = 'Одиночество';
 function daySectionsHtml() {
   const t = S.today || {};
-  return (t.sections || []).map((g) => `<section class="section">
+  return (t.sections || []).filter((g) => g.title !== ALONE_SECTION).map((g) => `<section class="section">
       ${g.title ? `<h2>${inline(g.title)}</h2>` : ''}
       ${g.intro && g.intro.length ? `<div class="prose">${renderBlocks(g.intro)}</div>` : ''}
-      <ul class="list">${g.items.map((it) => `<li class="item plain"><div class="item-body">${scheduleItemHtml(it, /оставаться одному/i.test(it.title) ? { after: '<a class="btn small primary item-diary" href="#/alone">Дневник</a>' } : {})}</div></li>`).join('')}</ul>
+      <ul class="list">${g.items.map((it) => `<li class="item plain"><div class="item-body">${scheduleItemHtml(it)}</div></li>`).join('')}</ul>
     </section>`).join('');
 }
 
@@ -1034,6 +1036,7 @@ function renderTrainingsPage() {
     ${ideasHtml()}
     ${daySectionsHtml()}
     ${socialEntryHtml()}
+    ${aloneEntryHtml()}
     <h2 class="lib-title">Все тренировки и игры</h2>
     ${catalogBody('k')}
     ${catalogBody('g', { showTitle: true })}`;
@@ -1614,7 +1617,7 @@ function weekCardHtml() {
   </section>`;
 }
 
-// «Одиночество» за неделю: рекорд и вынужденные уходы — из «Дневника одиночества», день отдыха — галочка
+// «Одиночество» за неделю: рекорд и вынужденные уходы — из записей «Учимся оставаться дома», день отдыха — галочка
 // (заранее отмечена, если по дневнику был день без тренировки)
 function weekAlone(day, w) {
   const ws = AL.weekStats(S.alone, addDays(day, -6), S.day);
@@ -1639,7 +1642,7 @@ function weekSheet(day) {
       <p>Рекорд недели: <strong>${wa.best ? AL.fmtDur(wa.best) : '—'}</strong>${wa.best ? ` <span class="muted">(${escapeHtml(AL.STAGE_LABEL[wa.bestStage])})</span>` : ''}</p>
       <p>Вынужденных уходов дольше рекорда: <strong>${wa.forcedOver}</strong></p>
       <label class="check-row"><input type="checkbox" name="aloneRest"${wa.rest ? ' checked' : ''}>Был хотя бы один день отдыха от тренировок</label>
-      <p class="muted small">Рекорд и вынужденные уходы подставлены из <a href="#/alone" data-action="sheet-close-link">«Дневника одиночества»</a>.</p></fieldset>
+      <p class="muted small">Рекорд и вынужденные уходы подставлены из записей <a href="#/alone" data-action="sheet-close-link">«Учимся оставаться дома»</a>.</p></fieldset>
     <label>Заметки <textarea name="notes" rows="3" maxlength="2000" placeholder="Что получилось на этой неделе, что было трудно, что пробуем дальше">${escapeHtml(w.notes || '')}</textarea></label>
     <div class="form-actions"><button type="button" class="btn" data-action="sheet-close">Отмена</button><button class="btn primary">Сохранить</button></div>
   </form>`, (fd) => {
@@ -1677,7 +1680,7 @@ function renderWeeks() {
       : '<p class="empty">Записей пока нет. Первая карточка появится в воскресенье на вкладке «День».</p>'}`;
 }
 
-// ---------- Дневник одиночества ----------
+// ---------- Учимся оставаться дома (дневник тренировки «Оставаться одному») ----------
 // Страница #/alone: сводка, подсказки, график, неделя, записи и выгрузка. Сессия тренировки — #/alone/go, на весь экран.
 // Ход сессии (какой повтор, когда ушли, пауза) хранится на этом телефоне: если приложение закрылось, сессия продолжится.
 // Повторы сразу записываются в общую базу — второй телефон видит их в реальном времени.
@@ -1808,7 +1811,7 @@ const reactLine = (reps) => reps.map((x) => `<span class="ss-rep" title="${escap
 
 function renderAloneSession() {
   if (!sess) {
-    return `<div class="ss"><p class="muted">Сессии сейчас нет.</p><a class="btn wide" href="#/alone">К дневнику одиночества</a></div>`;
+    return `<div class="ss"><p class="muted">Сессии сейчас нет.</p><a class="btn wide" href="#/alone">К «Учимся оставаться дома»</a></div>`;
   }
   const n = sess.reps.length;
   const repNo = Math.min(n + (['ready', 'away', 'back'].includes(sess.phase) ? 1 : 0), AL.MAX_REPS);
@@ -1892,7 +1895,7 @@ function aloneRowHtml(r) {
 function renderAlone() {
   if (prevHash && !prevHash.startsWith('#/alone')) S.aloneFrom = prevHash;
   const fromTitle = S.aloneFrom === `#/${AL.ALONE_CARD}` ? 'Оставаться одному' : S.aloneFrom && pageTitle(S.aloneFrom);
-  const back = `<a class="back" href="${fromTitle ? S.aloneFrom : `#/${AL.ALONE_CARD}`}">${BACK_SVG}${escapeHtml(fromTitle || 'Оставаться одному')}</a>`;
+  const back = `<a class="back" href="${fromTitle ? S.aloneFrom : '#/k'}">${BACK_SVG}${escapeHtml(fromTitle || 'Тренировки')}</a>`;
   const recs = S.alone;
   const done = aloneDone();
   const step = AL.currentStep(done, recs);
@@ -1956,15 +1959,20 @@ function renderAlone() {
     ${sorted.length > shown.length ? `<button class="btn small wide" data-action="alone-more">Показать ещё ${sorted.length - shown.length}</button>` : ''}
     <p class="muted small">Свою запись можно открыть, исправить или удалить. Выгрузка — файл CSV для специалиста: одна строка — один повтор.</p></section>` : '';
 
-  return `${back}${pageHead({ eyebrow: 'Оставаться одному', title: 'Дневник одиночества', sub: 'Проверки, тренировки и вынужденные уходы — видны обоим.' })}
+  // «Как заниматься» — раздел «# Одиночество» из rasporyadok.md
+  const howSec = ((S.today && S.today.sections) || []).find((g) => g.title === ALONE_SECTION);
+  const how = howSec && howSec.items.length ? `<details class="intro alone-how"><summary>Как заниматься</summary>
+      ${howSec.items.map((it) => `<div class="item-body">${scheduleItemHtml(it)}</div>`).join('')}</details>` : '';
+  return `${back}${pageHead({ eyebrow: 'Одиночество', title: 'Учимся оставаться дома', sub: 'Подсказывает, на сколько уходить, и хранит проверки, сессии и вынужденные уходы. Видно обоим.' })}
     ${statusBanner()}${active}
+    ${how}
+    ${linkCard(`#/${AL.ALONE_CARD}`, '🐾', 'Тренировка «Оставаться одному»', escapeHtml(step ? `13 шагов · сейчас шаг ${step}` : '13 шагов'), 'alone-card-link')}
     <section class="card alone-sum">${now}${tiles}</section>
     ${hints.join('')}
     ${actions}
     ${chart}
     ${week}
-    ${list}
-    <a class="next-link" href="#/${AL.ALONE_CARD}"><span class="muted small">Карточка тренировки</span><strong>Оставаться одному — 13 шагов ›</strong></a>`;
+    ${list}`;
 }
 
 // ---- Формы: проверка, вынужденный уход, правка записи ----
@@ -2070,7 +2078,7 @@ function aloneSheet(type, id) {
 function aloneExportSheet() {
   const to = dayKey();
   const first = S.alone.length ? S.alone[0].day : to;
-  openSheet(`<form class="form"><h2>Выгрузить дневник</h2>
+  openSheet(`<form class="form"><h2>Выгрузить записи</h2>
     <p class="muted">Файл CSV: одна строка — один повтор, с датой, ступенью, реакцией и заметками. Открывается в Excel, Numbers и Google Таблицах.</p>
     <fieldset><legend>За какой срок</legend>${radioChoices('period', { 7: '7 дней', 30: '30 дней', all: 'всё время', custom: 'выбрать даты' }, '30')}</fieldset>
     <div class="date-time"><label>С<input type="date" name="from" value="${addDays(to, -29)}"></label><label>По<input type="date" name="to" value="${to}"></label></div>
@@ -2081,7 +2089,7 @@ function aloneExportSheet() {
     if (from > till) [from, till] = [till, from];
     const n = S.alone.filter((r) => r.day >= from && r.day <= till).length;
     if (!n) { toast('За этот срок записей нет.'); return false; }
-    shareCsv(AL.toCsv(S.alone, from, till), `odinochestvo_${from}_${till}.csv`);
+    shareCsv(AL.toCsv(S.alone, from, till), `ostavatsya-doma_${from}_${till}.csv`);
     return true;
   });
 }
@@ -2090,7 +2098,7 @@ async function shareCsv(csv, name) {
   try {
     const file = new File([blob], name, { type: 'text/csv' });
     if (navigator.canShare && navigator.canShare({ files: [file] }) && /iPhone|iPad|Android/.test(navigator.userAgent)) {
-      await navigator.share({ files: [file], title: 'Дневник одиночества' });
+      await navigator.share({ files: [file], title: 'Учимся оставаться дома' });
       return;
     }
   } catch (err) { if (err && err.name === 'AbortError') return; }
@@ -2498,7 +2506,7 @@ function renderCard(tab, id) {
     <div class="page-head"><h1 class="card-title">${inline(card.name)}</h1>
       ${canWrite() ? `<a class="btn small" href="#/edit/${tab}/${card.id}">Изменить</a>` : ''}</div>
     ${card.subtitle ? `<p class="card-sub big">${inline(card.subtitle)}</p>` : ''}
-    ${`${tab}/${card.id}` === AL.ALONE_CARD ? '<a class="btn primary card-diary" href="#/alone">📓 Дневник</a>' : ''}
+    ${`${tab}/${card.id}` === AL.ALONE_CARD ? '<a class="btn primary card-diary" href="#/alone">🏠 Учимся оставаться дома</a>' : ''}
     ${tab === 'k' ? `<p class="reps-line">🎯 Повторов в день: <b>${card.reps || MIN_REPS}</b>${canWrite() ? ` <a href="#/edit/k/${card.id}">изменить</a>` : ''}</p>` : ''}
     ${prog}
     ${tab === 'k' ? placesHtml(tab, card) : ''}
@@ -3190,6 +3198,18 @@ function socialEntryHtml() {
   return `<h2 class="lib-title">Социализация</h2>
     ${linkCard('#/social', '🧭', `Новое для ${escapeHtml(DOG() === 'Батончик' ? 'Батончика' : DOG())}`,
       `встретили ${sum.met} из ${sum.total}${sum.again ? ` · повторить ${sum.again}` : ''}`)}`;
+}
+
+// Тренировки → «Одиночество» → «Учимся оставаться дома» — плитка, как у социализации
+function aloneEntryHtml() {
+  const step = AL.currentStep(aloneDone(), S.alone);
+  const rec = AL.allRecords(S.alone);
+  const ws = AL.weekStats(S.alone, mondayOf(S.day), S.day);
+  const sub = S.alone.length
+    ? [sessActive() ? 'идёт сессия' : '', step ? `шаг ${step} из 13` : 'все шаги отмечены', `сессий за неделю: ${ws.sessions}`, rec.front ? `за входной дверью — ${AL.fmtDur(rec.front)}` : ''].filter(Boolean).join(' · ')
+    : 'проверки, сессии с подсказкой длительности, записи';
+  return `<h2 class="lib-title">Одиночество</h2>
+    ${linkCard('#/alone', '🏠', 'Учимся оставаться дома', escapeHtml(sub))}`;
 }
 
 const socialName = (id) => (isOwnSocial(id) ? (S.social[id] && S.social[id].title) || 'Своё' : (SOCIAL_ITEMS.find((x) => x.id === id) || {}).name || id);
@@ -3933,7 +3953,7 @@ function onHashChange() {
 }
 
 // Название страницы для кнопки «Назад»; для правки карточки — нет (туда не возвращаемся)
-const PAGE_TITLES = { search: 'Поиск', today: 'Главная', day: 'День', k: 'Тренировки', g: 'Тренировки', pass: 'Паспорт', growth: 'Рост и вес', lib: 'Библиотека', weeks: 'Неделя Батончика', t: 'Практика', c: 'Практика', game: 'Игра', d: 'Дневник', me: 'Настройки', social: 'Новое', alone: 'Дневник одиночества' };
+const PAGE_TITLES = { search: 'Поиск', today: 'Главная', day: 'День', k: 'Тренировки', g: 'Тренировки', pass: 'Паспорт', growth: 'Рост и вес', lib: 'Библиотека', weeks: 'Неделя Батончика', t: 'Практика', c: 'Практика', game: 'Игра', d: 'Дневник', me: 'Настройки', social: 'Новое', alone: 'Учимся оставаться дома' };
 // Вложенные страницы со своим названием для «Назад»
 const SUB_TITLES = { 'pass/summary': 'Для ветеринара', 'pass/lost': 'Если потерялся', 'pass/months': 'Как рос', 'game/play': 'Разминка', 'game/repeat': 'Повтор ошибок', 'alone/go': 'Сессия' };
 // Какая вкладка внизу подсвечена: игры с собакой живут во вкладке «Тренировки», Практика, заметки каналов и игра на знания — в «Советах»
@@ -3956,7 +3976,7 @@ function render(force) {
   // То же для поиска, пока в нём печатают
   if (r.page === 'search' && !force && document.activeElement && document.activeElement.matches('.search-input')) return;
   if (r.page === 'lib' && r.id === 'dict' && !force && document.activeElement && document.activeElement.matches('.dict-search')) return;
-  // Сессия «Дневника одиночества»: пока дописывают подробности или заметку, экран не перерисовываем
+  // Сессия «Учимся оставаться дома»: пока дописывают подробности или заметку, экран не перерисовываем
   if (r.page === 'alone' && !force && isTyping() && view.contains(document.activeElement)) return;
   document.body.classList.toggle('session-on', r.page === 'alone' && r.id === 'go');
   // Тесты «Проверь себя» переехали в игру
@@ -4596,7 +4616,7 @@ const actions = {
     }
   },
   'back': () => history.back(),
-  // Дневник одиночества
+  // Учимся оставаться дома
   'alone-start': () => {
     if (!canWrite()) return;
     if (!sess || sess.phase === 'done') {
@@ -4608,7 +4628,7 @@ const actions = {
   'alone-new': (el) => { if (canWrite()) aloneSheet(el.dataset.type); },
   'alone-open': (el) => aloneSheet(null, el.dataset.id),
   'alone-del': (el) => {
-    if (!confirm('Удалить запись из дневника одиночества?')) return;
+    if (!confirm('Удалить эту запись?')) return;
     store.deleteAlone(el.dataset.id);
     closeSheet();
     toast('Запись удалена.');
