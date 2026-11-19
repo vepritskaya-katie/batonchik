@@ -38,7 +38,7 @@ try {
 const TZ = 'Europe/Moscow';
 const DAY_START_HOUR = 6; // если «Легли вечером» не отметили, новый день начинается в 6:00
 const moscowHour = (d = new Date()) => Number(new Intl.DateTimeFormat('ru-RU', { timeZone: 'Europe/Moscow', hour: 'numeric', hourCycle: 'h23' }).format(d));
-const DIARY_STEP = 14; // вкладка «День»: две недели истории для сводки и графиков
+const DIARY_STEP = 14; // страница «День»: две недели истории для сводки и графиков
 const MIN_REPS = 5;   // цель по умолчанию для тренировки на сегодня: не меньше 5 повторов
 const MAX_REPS = 50;
 // Версия списка тренировок (v у пункта): 2 — цели подняты до MIN_REPS, 3 — добавлены ежедневные
@@ -554,9 +554,9 @@ const doodle = (name, cls = '') => `<svg class="doodle${cls ? ` ${cls}` : ''}" v
 const emptyArt = (text, name = 'paw', tag = 'p') => `<${tag} class="empty empty-art">${doodle(name)}<span>${text}</span></${tag}>`;
 
 // Шапка страницы: надпись сверху, заголовок, подзаголовок и круглая кнопка «+»
-function pageHead({ eyebrow = '', title, sub = '', plus = null }) {
+function pageHead({ eyebrow = '', title, sub = '', plus = null, h1Class = '' }) {
   return `<div class="page-head">
-    <div class="page-head-text">${eyebrow ? `<p class="eyebrow">${escapeHtml(eyebrow)}</p>` : ''}<h1>${title}</h1>${sub ? `<p class="page-sub">${sub}</p>` : ''}</div>
+    <div class="page-head-text">${eyebrow ? `<p class="eyebrow">${escapeHtml(eyebrow)}</p>` : ''}<h1${h1Class ? ` class="${h1Class}"` : ''}>${title}</h1>${sub ? `<p class="page-sub">${sub}</p>` : ''}</div>
     ${plus && canWrite() ? `<button class="round-btn" data-action="${plus.action}" aria-label="${escapeHtml(plus.label)}">${PLUS_SVG}</button>` : ''}
   </div>`;
 }
@@ -1004,7 +1004,7 @@ function homeHealthHtml() {
 }
 
 function renderHome() {
-  return `${pageHead({ eyebrow: cap(dayTitle(S.day)), title: greeting() })}
+  return `${pageHead({ eyebrow: cap(dayTitle(S.day)), title: greeting(), h1Class: 'greet' })}
     ${statusBanner()}
     ${heroHtml()}
     ${weekCardHtml()}
@@ -1025,7 +1025,8 @@ function renderDayPage() {
   st.night = nightFor(S.day, [...S.recent, ...S.events]);
   const p = dayProgress();
   const days = diaryDays();
-  return `${pageHead({ eyebrow: cap(dayTitle(S.day)), title: 'День', sub: 'Всё, что отметили за день. Новый день начнётся после «Легли вечером».', plus: { action: 'ev-menu', label: 'Новая запись' } })}
+  return `<a class="back" href="#/">${BACK_SVG}Главная</a>
+    ${pageHead({ eyebrow: cap(dayTitle(S.day)), title: 'День', sub: 'Всё, что отметили за день. Новый день начнётся после «Легли вечером».', plus: { action: 'ev-menu', label: 'Новая запись' } })}
     ${statusBanner()}
     ${journalHtml()}
     ${rhythmHtml(st, { trainsDone: p.done, trainsTotal: p.total })}
@@ -1678,7 +1679,7 @@ function weekSheet(day) {
       const g = S.growth.find((x) => x.date === day);
       store.saveGrowth(g ? g.id : null, { date: day, weight, height: g ? g.height || 0 : 0 });
     }
-    toast(route().page === 'weeks' ? 'Неделя записана.' : 'Неделя записана — она в «Истории» на вкладке «День».');
+    toast(route().page === 'weeks' ? 'Неделя записана.' : 'Неделя записана. История недель — в «Весь день», внизу.');
   });
 }
 
@@ -1697,7 +1698,7 @@ function renderWeeks() {
       <p class="week-qs">${WEEK_QS.map(([k]) => `<span class="${w[k] ? 'yes' : 'no'}">${w[k] ? '✓' : '—'}</span>`).join('')}</p>
       ${weekSummaryHtml(w, w.id)}
       ${canWrite() ? `<button class="text-link" data-action="week-edit" data-day="${w.id}">Изменить</button>` : ''}</li>`).join('')}</ul></section>`
-      : emptyArt('Записей пока нет. Первая карточка появится в воскресенье на вкладке «День».', 'paw')}`;
+      : emptyArt('Записей пока нет. Первая карточка появится в воскресенье на главной.', 'paw')}`;
 }
 
 // ---------- Учимся оставаться дома (дневник тренировки «Оставаться одному») ----------
@@ -2525,13 +2526,19 @@ function renderCard(tab, id) {
     const lead = card.lead.length ? `<section class="blk blk-lead"><div class="prose">${blocksHtml(card.lead, tab, card)}</div></section>` : '';
     return lead + card.blocks.filter((b) => b.content.length && b.kind !== 'reps').map((b) => {
       if (b.kind === 'result') return resultHtml(tab, card, b);
+      // Освоенный шаг свёрнут до названия и «Освоено · кто · когда»
       const opts = b.kind === 'steps' || b.kind === 'how'
-        ? { step: (item) => markButton(stepId(tab, card, stepKeyFor(item.text))) } : {};
+        ? {
+          step: (item) => markButton(stepId(tab, card, stepKeyFor(item.text))),
+          stepDone: (item) => { const m = getMark(stepId(tab, card, stepKeyFor(item.text))); return m ? `Освоено · ${byLine(m, true)}` : ''; },
+        } : {};
       const old = b.kind === 'steps' ? oldStepsHtml(tab, card) : '';
       const anchor = b.kind === 'important' ? ' id="blk-vazhno"' : b.kind === 'steps' ? ' id="blk-shagi"' : '';
-      // «Зачем и что значит» и «Понадобится» читают один раз — они свёрнуты, чтобы шаги были ближе
-      if (b.kind === 'why' || b.kind === 'need') {
-        return `<details class="blk blk-${b.kind} blk-fold"><summary><h2>${inline(b.title)}</h2>${FOLD_CHEV}</summary><div class="prose">${blocksHtml(b.content, tab, card, opts)}</div></details>`;
+      // «Зачем и что значит» и «Понадобится» читают один раз — они свёрнуты, чтобы шаги были ближе.
+      // Навык освоен («Итог» отмечен) — свёрнуты и шаги: на виду «Как поддерживать»
+      const masteredSteps = (b.kind === 'steps' || b.kind === 'how') && cardProgress(tab, card).mastered;
+      if (b.kind === 'why' || b.kind === 'need' || masteredSteps) {
+        return `<details class="blk blk-${b.kind} blk-fold"${anchor}><summary><span class="fold-head"><h2>${inline(b.title)}</h2>${masteredSteps ? '<span class="fold-meta">навык освоен</span>' : ''}</span>${FOLD_CHEV}</summary><div class="prose">${blocksHtml(b.content, tab, card, opts)}</div>${old}</details>`;
       }
       return `<section class="blk blk-${b.kind}"${anchor}><h2>${inline(b.title)}</h2><div class="prose">${blocksHtml(b.content, tab, card, opts)}</div>${old}</section>`;
     }).join('');
@@ -3107,21 +3114,13 @@ function renderPassport() {
       ${next.length ? `<ul class="health-list">${next.map((r) => healthRowHtml(r, S.day)).join('')}</ul>`
         : '<p class="muted">Запланированных событий нет. Нажмите «+», чтобы добавить прививку, обработку от клещей, глистогонное или визит к врачу.</p>'}
     </section>
-    <section class="card">
-      <div class="card-head"><h2 class="with-doodle">${doodle('bone')}Уход</h2></div>
-      <ul class="health-list care-list">${careRows(false)}</ul>
-      <p class="muted small care-note">«Сегодня» — отметить, что сделали. Нажмите на строку, чтобы выбрать другой день или как часто напоминать.</p>
-    </section>
-    <section class="card" id="clean">
-      <div class="card-head"><h2 class="with-doodle">${doodle('bowl')}Чистота</h2></div>
-      <ul class="health-list care-list">${careRows(true)}</ul>
-      <p class="muted small care-note">Миски, игрушки, лежанка и амуниция. Напоминания — как в «Уходе». <a href="#/t/chistota-miski-igrushki-lezhanka">Что мыть и как ›</a></p>
-    </section>
-    <section class="card">
-      <div class="card-head"><h2>История</h2></div>
-      ${done.length ? `<ul class="health-list">${done.map((r) => healthRowHtml(r, S.day)).join('')}</ul>`
-        : '<p class="muted">Здесь появится всё, что уже сделано: прививки, обработки, таблетки, визиты к врачу.</p>'}
-    </section>`;
+    ${foldHtml('pass:care', `${doodle('bone')}Уход`, careMeta(false), `<ul class="health-list care-list">${careRows(false)}</ul>
+      <p class="muted small care-note">«Сегодня» — отметить, что сделали. Нажмите на строку, чтобы выбрать другой день или как часто напоминать.</p>`, { cls: 'pass-fold' })}
+    ${foldHtml('pass:clean', `${doodle('bowl')}Чистота`, careMeta(true), `<ul class="health-list care-list">${careRows(true)}</ul>
+      <p class="muted small care-note">Миски, игрушки, лежанка и амуниция. Напоминания — как в «Уходе». <a href="#/t/chistota-miski-igrushki-lezhanka">Что мыть и как ›</a></p>`, { cls: 'pass-fold', attrs: ' id="clean"' })}
+    ${foldHtml('pass:history', 'История', done.length ? `${done.length} ${plural(done.length, 'запись', 'записи', 'записей')}` : 'пока пусто',
+      done.length ? `<ul class="health-list">${done.map((r) => healthRowHtml(r, S.day)).join('')}</ul>`
+        : '<p class="muted">Здесь появится всё, что уже сделано: прививки, обработки, таблетки, визиты к врачу.</p>', { cls: 'pass-fold' })}`;
 }
 
 function petSheet() {
@@ -3176,6 +3175,12 @@ function linkCard(href, icon, title, sub, cls = '') {
 
 // ---------- Уход и чистота ----------
 
+// Строка в заголовке свёрнутого «Ухода» и «Чистоты»: что пора сделать
+function careMeta(home) {
+  const due = CARE_ITEMS.filter((item) => !!item.home === home)
+    .filter((item) => { const st = careState(item, S.care[item.id], S.day); return st.due && st.last; });
+  return due.length ? `<span class="fold-due">пора: ${due.map((item) => escapeHtml(item.name.toLowerCase())).join(', ')}</span>` : 'всё вовремя';
+}
 const careRows = (home) => CARE_ITEMS.filter((item) => !!item.home === home)
   .map((item) => careRowHtml(item, careState(item, S.care[item.id], S.day))).join('');
 function careRowHtml(item, st) {
@@ -4019,7 +4024,8 @@ const PAGE_TITLES = { search: 'Поиск', today: 'Главная', day: 'Де�
 // Вложенные страницы со своим названием для «Назад»
 const SUB_TITLES = { 'pass/summary': 'Для ветеринара', 'pass/lost': 'Если потерялся', 'pass/months': 'Как рос', 'game/play': 'Разминка', 'game/repeat': 'Повтор ошибок', 'alone/go': 'Сессия' };
 // Какая вкладка внизу подсвечена: игры с собакой живут во вкладке «Тренировки», Практика, заметки каналов и игра на знания — в «Советах»
-const TAB_OF = { search: 'search', today: 'today', day: 'day', k: 'k', g: 'k', pass: 'pass', growth: 'pass', lib: 't', weeks: 'day', t: 't', c: 't', game: 't', d: 'd', social: 'k', alone: 'k' };
+// «День» и «Неделя Батончика» — страницы главной (вкладки «День» внизу нет)
+const TAB_OF = { search: 'search', today: 'today', day: 'today', k: 'k', g: 'k', pass: 'pass', growth: 'pass', lib: 't', weeks: 'today', t: 't', c: 't', game: 't', d: 'd', social: 'k', alone: 'k' };
 
 function pageTitle(hash) {
   const parts = hash.replace(/^#\/?/, '').split('/').filter(Boolean);
@@ -4087,6 +4093,7 @@ function render(force) {
     if (target && fromSearch()) target.classList.add('lib-hit');
     // Ссылка на блок карточки: #/k/ostavatsya-odnomu/vazhno
     const blk = TABS[r.tab] && r.id && r.sub && document.getElementById(`blk-${r.sub}`);
+    if (blk && blk.tagName === 'DETAILS') blk.open = true;
     if (blk) blk.scrollIntoView({ block: 'start' });
   } else if (pendingScroll && Date.now() < pendingScroll.until) {
     // Страница дорисовалась (например, подгрузились данные) — дотягиваем до запомненного места

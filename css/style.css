@@ -121,27 +121,24 @@
 
 /* ---------- Цвет раздела ----------
    У каждой вкладки свой цвет: шапка и верх страницы, кнопки, ссылки, большая карточка, значок вкладки.
-   Главная — оливковая с узором «красный мрамор» (окрас Батончика), День — бирюзовый, Тренировки — травяной,
+   Главная (и её страницы «День», «Неделя Батончика») — оливковая с узором «красный мрамор» (окрас Батончика), Тренировки — травяной,
    Паспорт — серо-синий, Советы — горчичный, Дневник — терракотовый.
    Зелёный «сделано» (--ok), красный «срочно» и цвета отметок в календаре — общие для всех.
    Контраст текста и кнопок — не ниже 4,5 : 1 на фоне карточек и страницы. */
 body { --wash: color-mix(in srgb, var(--accent-soft) 62%, var(--bg)); }
 body[data-tab="today"] { --hero: #6e3423; }
-body[data-tab="day"] { --accent: #2e6b67; --accent-dark: #24524f; --accent-text: #245955; --accent-soft: #dcebe6; --hero: #27504d; }
 body[data-tab="k"] { --accent: #3c7343; --accent-dark: #2f5a35; --accent-text: #2f5e36; --accent-soft: #dfecd8; --hero: #2f5a35; }
 body[data-tab="pass"] { --accent: #4a6487; --accent-dark: #3a4f6b; --accent-text: #3b5372; --accent-soft: #e1e8f1; --hero: #3a4f6b; }
 body[data-tab="t"] { --accent: #86650f; --accent-dark: #6a5010; --accent-text: #6f540c; --accent-soft: #f3e7c4; --hero: #6a5212; }
 body[data-tab="d"] { --accent: #a3502e; --accent-dark: #84401f; --accent-text: #8a4224; --accent-soft: #f5e1d6; --hero: #87422a; }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) body[data-tab="today"] { --hero: #5a2b1d; }
-  :root:not([data-theme="light"]) body[data-tab="day"] { --accent: #8ac6bf; --accent-dark: #2a4643; --accent-text: #a3d4cd; --accent-soft: #1f3230; --accent-ink: #10201f; --hero: #234240; }
   :root:not([data-theme="light"]) body[data-tab="k"] { --accent: #9fcd8d; --accent-dark: #2e472b; --accent-text: #b3d9a5; --accent-soft: #21321f; --accent-ink: #132011; --hero: #2a4527; }
   :root:not([data-theme="light"]) body[data-tab="pass"] { --accent: #a5b9d8; --accent-dark: #334259; --accent-text: #bccbe4; --accent-soft: #232b37; --accent-ink: #141b26; --hero: #2f3e55; }
   :root:not([data-theme="light"]) body[data-tab="t"] { --accent: #dcc072; --accent-dark: #4b4122; --accent-text: #e5ce8d; --accent-soft: #352f1b; --accent-ink: #241d08; --hero: #4a3f1c; }
   :root:not([data-theme="light"]) body[data-tab="d"] { --accent: #e39b79; --accent-dark: #553326; --accent-text: #ecb196; --accent-soft: #382520; --accent-ink: #2a1409; --hero: #5a3324; }
 }
 :root[data-theme="dark"] body[data-tab="today"] { --hero: #5a2b1d; }
-:root[data-theme="dark"] body[data-tab="day"] { --accent: #8ac6bf; --accent-dark: #2a4643; --accent-text: #a3d4cd; --accent-soft: #1f3230; --accent-ink: #10201f; --hero: #234240; }
 :root[data-theme="dark"] body[data-tab="k"] { --accent: #9fcd8d; --accent-dark: #2e472b; --accent-text: #b3d9a5; --accent-soft: #21321f; --accent-ink: #132011; --hero: #2a4527; }
 :root[data-theme="dark"] body[data-tab="pass"] { --accent: #a5b9d8; --accent-dark: #334259; --accent-text: #bccbe4; --accent-soft: #232b37; --accent-ink: #141b26; --hero: #2f3e55; }
 :root[data-theme="dark"] body[data-tab="t"] { --accent: #dcc072; --accent-dark: #4b4122; --accent-text: #e5ce8d; --accent-soft: #352f1b; --accent-ink: #241d08; --hero: #4a3f1c; }
@@ -250,6 +247,11 @@ body.tb-on .logo { opacity: 0; visibility: hidden; transform: translateY(-6px); 
 .tabbar a.on::before { content: ""; position: absolute; top: -4px; left: 50%; width: 26px; height: 3px; margin-left: -13px; border-radius: 0 0 3px 3px; background: var(--accent); }
 /* Иконки Material Symbols — залитые фигуры, а не линии */
 .tabbar a svg.ms { fill: currentColor; stroke: none; }
+/* «Главная» в центре — значок Батончика; выбрана — с кольцом цвета раздела */
+.tabbar a.tab-home img { width: 30px; height: 30px; border-radius: 50%; box-shadow: 0 0 0 2px var(--surface), 0 0 0 3.5px color-mix(in srgb, var(--muted) 35%, transparent); transition: box-shadow .2s, transform .2s; }
+.tabbar a.tab-home.on img { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--accent); transform: scale(1.06); }
+.tabbar a.tab-home.on::before { display: none; }
+@media (prefers-reduced-motion: reduce) { .tabbar a.tab-home img { transition: none; } }
 
 /* ---------- Кнопки ---------- */
 .btn {
@@ -395,6 +397,17 @@ ol.steps .num {
 }
 ol.steps .step-body { flex: 1; min-width: 0; }
 ol.steps .step-body > ul { padding-left: 20px; margin: 8px 0 0; }
+/* Освоенный шаг свёрнут: зелёный номер, название и «Освоено · кто · когда» */
+ol.steps > li.step.done { display: block; padding: 0; background: color-mix(in srgb, var(--ok-soft) 70%, transparent); }
+ol.steps .step-fold > summary { display: flex; align-items: center; gap: 12px; min-height: 56px; padding: 10px 14px; cursor: pointer; list-style: none; }
+ol.steps .step-fold > summary::-webkit-details-marker { display: none; }
+ol.steps li.step.done .num { background: var(--ok); color: var(--surface); margin-top: 0; }
+.step-sum { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.step-name { font-weight: 650; line-height: 1.3; }
+.step-sum .mark-by { font-size: 13.5px; color: var(--ok); font-weight: 600; }
+ol.steps .step-fold > .step-body { padding: 0 14px 14px 54px; }
+ol.steps .step-fold[open] > summary .fold-chev { transform: rotate(180deg); }
+ol.steps .step-fold[open] > summary .step-name { color: var(--muted); }
 .hint-box {
   margin-top: 8px; padding: 8px 12px; border-radius: 12px; font-size: 15.5px;
   background: var(--hint); border: 1px solid var(--hint-border);
@@ -710,12 +723,12 @@ h2.with-doodle .doodle { width: 24px; height: 24px; }
 
 /* ---------- Красный мрамор: окрас Батончика (рисунок img/merle*.svg) ---------- */
 /* Приветствие на главной — буквами в мраморе Батончика */
-body[data-tab="today"] .page-head h1 {
+.page-head h1.greet {
   color: #6e3423; background: #73382a url(../img/merle.svg) 0 35% / 150px auto;
   -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
 }
-@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) body[data-tab="today"] .page-head h1 { background: none; -webkit-text-fill-color: #eac3a2; color: #eac3a2; } }
-:root[data-theme="dark"] body[data-tab="today"] .page-head h1 { background: none; -webkit-text-fill-color: #eac3a2; color: #eac3a2; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .page-head h1.greet { background: none; -webkit-text-fill-color: #eac3a2; color: #eac3a2; } }
+:root[data-theme="dark"] .page-head h1.greet { background: none; -webkit-text-fill-color: #eac3a2; color: #eac3a2; }
 body[data-tab="today"] { --wash: #f3e9da; }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) body[data-tab="today"] { --wash: #1f1c16; } }
 :root[data-theme="dark"] body[data-tab="today"] { --wash: #1f1c16; }
@@ -1269,6 +1282,9 @@ details.fold > summary::-webkit-details-marker { display: none; }
 .fold-head { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
 .fold-head h2 { margin: 0; font-size: 18px; line-height: 1.25; }
 .fold-meta { color: var(--muted); font-size: 14px; font-weight: 600; }
+.fold-head h2 { display: flex; align-items: center; gap: 8px; }
+.fold-head h2 .doodle { width: 22px; height: 22px; }
+.fold-due { color: var(--urg-today-ink); }
 .fold-chev { flex: none; width: 22px; height: 22px; color: var(--accent-text); transition: transform .2s; }
 details[open] > summary .fold-chev { transform: rotate(180deg); }
 .fold-body { padding: 0 10px 12px; }
@@ -1280,6 +1296,7 @@ details.blk-fold { padding: 0; }
 details.blk-fold > summary { display: flex; align-items: center; gap: 10px; min-height: 56px; padding: 8px 16px; cursor: pointer; list-style: none; }
 details.blk-fold > summary::-webkit-details-marker { display: none; }
 details.blk-fold > summary h2 { flex: 1; margin: 0; }
+details.blk-fold > summary .fold-head h2 { flex: none; }
 details.blk-fold > .prose { padding: 0 16px 16px; }
 details.blk-fold[open] > summary .fold-chev { transform: rotate(180deg); }
 @media (prefers-reduced-motion: reduce) { .fold-chev { transition: none; } }
