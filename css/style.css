@@ -1791,12 +1791,27 @@ button.choice.on { background: var(--accent-soft); border-color: var(--accent); 
 .ask-typing .paw-ico:nth-child(3) { animation-delay: .4s; }
 @keyframes ask-paw { 0%, 100% { opacity: .25; transform: translateY(0); } 40% { opacity: 1; transform: translateY(-3px); } }
 @media (prefers-reduced-motion: reduce) { .ask-typing .paw-ico { animation: none; opacity: .6; } }
-/* Поле вопроса — над нижней панелью, всегда под рукой */
+/* Поле вопроса — над нижней панелью, всегда под рукой; сверху — фото к вопросу, если приложили */
 .ask-form {
   position: sticky; z-index: 5; bottom: calc(env(safe-area-inset-bottom) + 74px);
-  display: flex; align-items: flex-end; gap: 8px; padding: 6px 6px 6px 8px; border-radius: 24px;
+  display: flex; flex-direction: column; gap: 6px; padding: 6px; border-radius: 24px;
   background: var(--surface); border: 1px solid var(--border); box-shadow: 0 6px 22px rgba(48, 57, 42, .08);
 }
+.ask-row { display: flex; align-items: flex-end; gap: 4px; }
+.ask-attach {
+  flex: none; width: 44px; height: 44px; display: grid; place-items: center; border: 0; border-radius: 50%; cursor: pointer;
+  background: transparent; color: var(--accent-text);
+}
+.ask-attach svg { width: 25px; height: 25px; stroke-width: 1.8; }
+.ask-attach:disabled { opacity: .4; }
+.ask-att { display: flex; align-items: center; gap: 10px; padding: 4px 4px 0; }
+.ask-att[hidden] { display: none; }
+.ask-att img { width: 56px; height: 56px; object-fit: cover; border-radius: 12px; }
+.ask-att .small { flex: 1; min-width: 0; }
+.ask-att-x { flex: none; width: 36px; height: 36px; border: 0; border-radius: 50%; background: var(--surface-2); color: var(--text); font-size: 16px; cursor: pointer; }
+.ask-msg.me .ask-img { display: block; width: 100%; max-width: 220px; border-radius: 12px; }
+.ask-msg.me.has-img { padding: 6px; }
+.ask-msg.me.has-img p { padding: 6px 8px 2px; }
 .ask-input {
   flex: 1; min-width: 0; min-height: 40px; max-height: 33vh; padding: 9px 8px; border: 0; resize: none; outline: none;
   background: transparent; color: var(--text); font: inherit; font-size: 16px; line-height: 1.4;
@@ -1818,3 +1833,10 @@ button.choice.on { background: var(--accent-soft); border-color: var(--accent); 
 .ask-chip:active { background: var(--accent-soft); }
 .ask-foot { margin-top: 10px; }
 .ask-foot .text-link { min-height: 36px; margin-left: 4px; }
+/* Источники из поиска Google и блок поисковых подсказок */
+.ask-sources { margin: 10px 0 0; font-size: 14px; line-height: 1.5; color: var(--muted); }
+.ask-sources span { font-weight: 650; }
+.ask-sources a { overflow-wrap: anywhere; }
+.ask-search { display: block; width: 100%; height: 56px; margin-top: 8px; border: 0; background: transparent; color-scheme: normal; }
+/* Реплика не прячется под шапкой сверху и под полем вопроса с нижней панелью снизу */
+.ask-msg { scroll-margin-top: 84px; scroll-margin-bottom: calc(env(safe-area-inset-bottom) + 150px); }

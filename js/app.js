@@ -8,7 +8,7 @@ import {
   rhythmHtml, weekStatsHtml, daySummaryLine, trainsLine, MONTHS_SHORT, toiletRhythm, toiletHint, fmtDuration,
 } from './diary.js';
 import { HEALTH_KINDS, NEXT_OPTIONS, nextDate, suggestNext, dueText, ageText, upcoming, doneRecords, googleCalendarUrl, icsText, healthRowHtml, daysBetween, ageShort, ageMonths, hasTime, TIME_RE } from './passport.js';
-import { pickPhotos, compressPhoto } from './photo.js';
+import { pickPhotos, pickPhoto, compressPhoto } from './photo.js';
 import { fmtNum, parseNum, series, deltaText, lineChartSvg } from './growth.js';
 import { buildIndex, resultsHtml, entryItems } from './search.js';
 import * as ASK from './ask.js';
@@ -1070,11 +1070,13 @@ function renderTrainingsPage() {
 
 const SPARK_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 3.5l1.7 4.6 4.6 1.7-4.6 1.7L11 16.1l-1.7-4.6L4.7 9.8l4.6-1.7z"/><path d="M18 14.5l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8z"/></svg>';
 const SEND_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h13M13 6l6 6-6 6"/></svg>';
+const CAMERA_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8.5A2.5 2.5 0 0 1 6.5 6h1.6l1.4-2h5l1.4 2h1.6A2.5 2.5 0 0 1 20 8.5v8a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 4 16.5z"/><circle cx="12" cy="12.5" r="3.5"/></svg>';
 const AI_NAMES = { 'gemini-3.1-pro-preview': 'Gemini 3.1 Pro', 'gemini-3.8-flash': 'Gemini 3.8 Flash' };
 const modelLabel = (m) => AI_NAMES[m] || String(m || '').replace(/^gemini-/, 'Gemini ').replace(/-preview$/, '');
 
 function askState() {
-  if (!S.ask) S.ask = { chat: ASK.loadChat(lsGet(ASK.ASK_KEY)), busy: false, left: null, draft: '' };
+  // photo — фото, приложенное к следующему вопросу: { full, thumb } (data:image/jpeg); lastPhoto — для «Спросить ещё раз»
+  if (!S.ask) S.ask = { chat: ASK.loadChat(lsGet(ASK.ASK_KEY)), busy: false, left: null, draft: '', photo: null, lastPhoto: null, photoBusy: false };
   return S.ask;
 }
 const saveChat = () => lsSet(ASK.ASK_KEY, JSON.stringify(askState().chat.slice(-ASK.KEEP)));
@@ -1082,12 +1084,16 @@ const saveChat = () => lsSet(ASK.ASK_KEY, JSON.stringify(askState().chat.slice(-
 function renderAsk() {
   const a = askState();
   const can = canWrite();
-  return `${pageHead({ eyebrow: 'ИИ-помощник', title: 'Спросить', sub: 'Отвечает Gemini — по записям Батончика и материалам приложения. Это подсказка, а не ветеринар.' })}
+  return `${pageHead({ eyebrow: 'ИИ-помощник', title: 'Спросить', sub: 'Отвечает Gemini — по записям Батончика, материалам приложения, а где их нет — по общим знаниям о собаках. Это подсказка, а не ветеринар.' })}
     ${statusBanner()}
     <div class="ask-log" id="ask-log" aria-live="polite">${askLogHtml()}</div>
     <form class="ask-form" data-ask-form>
-      <textarea class="ask-input" name="q" rows="1" maxlength="2000" placeholder="Ваш вопрос о Батончике" aria-label="Вопрос"${can ? '' : ' disabled'}>${escapeHtml(a.draft)}</textarea>
-      <button class="ask-send" type="submit" aria-label="Отправить"${can && !a.busy ? '' : ' disabled'}>${SEND_SVG}</button>
+      <div class="ask-att" id="ask-att"${a.photo || a.photoBusy ? '' : ' hidden'}>${askAttachHtml()}</div>
+      <div class="ask-row">
+        <button class="ask-attach" type="button" data-action="ask-photo" aria-label="Приложить фото"${can && !a.busy ? '' : ' disabled'}>${CAMERA_SVG}</button>
+        <textarea class="ask-input" name="q" rows="1" maxlength="2000" placeholder="Ваш вопрос о Батончике" aria-label="Вопрос"${can ? '' : ' disabled'}>${escapeHtml(a.draft)}</textarea>
+        <button class="ask-send" type="submit" aria-label="Отправить"${can && !a.busy ? '' : ' disabled'}>${SEND_SVG}</button>
+      </div>
     </form>
     <p class="muted small ask-foot" id="ask-foot">${askFootHtml()}</p>`;
 }
@@ -1096,30 +1102,68 @@ function askLogHtml() {
   const a = askState();
   if (!a.chat.length && !a.busy) {
     return `<div class="ask-empty">${doodle('ball')}<p>Спросите о Батончике. Например:</p>
-      <div class="ask-starters">${ASK.STARTERS.map((t) => `<button type="button" class="ask-chip" data-action="ask-starter" data-q="${escapeHtml(t)}"${canWrite() ? '' : ' disabled'}>${escapeHtml(t)}</button>`).join('')}</div></div>`;
+      <div class="ask-starters">${ASK.STARTERS.map((t) => `<button type="button" class="ask-chip" data-action="ask-starter" data-q="${escapeHtml(t)}"${canWrite() ? '' : ' disabled'}>${escapeHtml(t)}</button>`).join('')}</div>
+      <p class="muted small">Можно приложить фото — кнопка с фотоаппаратом слева от поля: «что у него на лапе?», «нормальный ли стул?»</p></div>`;
   }
   const msgs = a.chat.map((m, i) => {
-    if (m.r === 'me') return `<div class="ask-msg me"><p>${escapeHtml(m.t)}</p></div>`;
+    if (m.r === 'me') {
+      return `<div class="ask-msg me${m.img ? ' has-img' : ''}">${m.img && ASK.isThumb(m.img) ? `<img class="ask-img" src="${m.img}" alt="Фото к вопросу">` : ''}${m.t ? `<p>${escapeHtml(m.t)}</p>` : ''}</div>`;
+    }
     if (m.r === 'err') {
       const last = i === a.chat.length - 1;
       return `<div class="ask-msg err"><p>${escapeHtml(m.t)}</p>${last && !a.busy ? '<button type="button" class="text-link" data-action="ask-retry">Спросить ещё раз</button>' : ''}</div>`;
     }
-    return `<div class="ask-msg ai"><div class="prose">${safe(() => mdHtml(m.t), m.t)}</div>
-      <span class="ask-model">${m.demo ? 'пример ответа — в превью ИИ не подключён' : escapeHtml(modelLabel(m.model))}</span></div>`;
+    return `<div class="ask-msg ai"><div class="prose">${safe(() => mdHtml(m.t), m.t)}</div>${askSourcesHtml(m)}
+      <span class="ask-model">${m.demo ? 'пример ответа — в превью ИИ не подключён' : `${escapeHtml(modelLabel(m.model))}${m.src && m.src.length ? ' · с поиском Google' : ''}`}</span></div>`;
   }).join('');
   const busy = a.busy ? `<div class="ask-msg ai busy"><span class="ask-typing" role="status" aria-label="Думаю">${pawIcon()}${pawIcon()}${pawIcon()}</span></div>` : '';
   return msgs + busy;
 }
 
+// Источники из поиска Google и блок поисковых подсказок Google (его показывать обязательно — условие Google).
+// Блок подсказок — в отдельной рамке без скриптов: его оформление не смешивается с приложением
+const SEARCH_DOC = (html) => `<!doctype html><html><head><meta charset="utf-8"><base target="_blank"><meta name="color-scheme" content="light dark">
+  <style>html,body{margin:0;padding:0;background:transparent}</style></head><body>${html}</body></html>`;
+function askSourcesHtml(m) {
+  const src = (m.src || []).filter((x) => x && /^https:\/\//.test(x.uri || ''));
+  const list = src.length ? `<p class="ask-sources"><span>Источники:</span> ${src.map((x) => `<a href="${escapeHtml(x.uri)}" target="_blank" rel="noopener noreferrer">${escapeHtml(x.title || 'источник')}</a>`).join(' · ')}</p>` : '';
+  const chips = m.sh ? `<iframe class="ask-search" title="Поиск Google" sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox" srcdoc="${escapeHtml(SEARCH_DOC(m.sh))}"></iframe>` : '';
+  return list + chips;
+}
+// Высота рамки — по содержимому
+function fitSearchFrame(f) {
+  try { const h = f.contentDocument && f.contentDocument.documentElement.scrollHeight; if (h) f.style.height = `${Math.min(h, 240)}px`; } catch { /* нет доступа — оставляем как есть */ }
+}
+view.addEventListener('load', (e) => { if (e.target && e.target.matches && e.target.matches('iframe.ask-search')) fitSearchFrame(e.target); }, true);
+
 function askFootHtml() {
   const a = askState();
   const left = a.left != null ? ` Осталось сегодня: ${a.left} из ${ASK.DAILY_LIMIT}.` : '';
-  return `Вопрос и записи Батончика уходят в Gemini (Google Cloud) через наш сервер.${left}
+  return `Вопрос, фото и записи Батончика уходят в Gemini (Google Cloud) через наш сервер; для свежих сведений Gemini может искать в Google. Фото на сервере не сохраняются.${left}
     ${a.chat.length && !a.busy ? '<button type="button" class="text-link" data-action="ask-new">Новый разговор</button>' : ''}`;
 }
 
-// Обновить разговор, не трогая поле ввода (в нём может быть начатый вопрос)
-function updateAsk({ scroll = true } = {}) {
+// Фото к следующему вопросу: миниатюра и «убрать»
+function askAttachHtml() {
+  const a = askState();
+  if (a.photoBusy) return '<span class="muted small">Готовим фото…</span>';
+  if (!a.photo) return '';
+  return `<img src="${a.photo.thumb}" alt="Фото к вопросу"><span class="muted small">Фото уйдёт вместе с вопросом</span>
+    <button type="button" class="ask-att-x" data-action="ask-photo-remove" aria-label="Убрать фото">✕</button>`;
+}
+function updateAskAttach() {
+  const el = $('#ask-att');
+  if (!el) return;
+  const a = askState();
+  el.innerHTML = askAttachHtml();
+  el.hidden = !a.photo && !a.photoBusy;
+  const btn = view.querySelector('.ask-attach');
+  if (btn) btn.disabled = !canWrite() || a.busy;
+}
+
+// Обновить разговор, не трогая поле ввода (в нём может быть начатый вопрос).
+// scroll: 'last' — показать последнюю реплику над полем ввода; 'answer' — начало нового ответа; false — не прокручивать
+function updateAsk({ scroll = 'last' } = {}) {
   const log = $('#ask-log');
   if (!log) return;
   log.innerHTML = askLogHtml();
@@ -1127,11 +1171,24 @@ function updateAsk({ scroll = true } = {}) {
   if (foot) foot.innerHTML = askFootHtml();
   const send = view.querySelector('.ask-send');
   if (send) send.disabled = !canWrite() || askState().busy;
-  if (scroll) {
-    const last = log.lastElementChild;
-    if (last) last.scrollIntoView({ block: 'nearest', behavior: calmMotion() ? 'auto' : 'smooth' });
-  }
+  updateAskAttach();
+  if (scroll) scrollAsk(scroll);
 }
+// Фото и блоки поиска догружаются уже после прокрутки и меняют высоту — ещё секунду держим разговор на месте
+let askPin = { how: '', until: 0 };
+function scrollAsk(how = 'last', smooth = true) {
+  const last = $('#ask-log') && $('#ask-log').lastElementChild;
+  if (!last) return;
+  askPin = { how, until: Date.now() + 1500 };
+  last.scrollIntoView({ block: how === 'answer' ? 'start' : 'end', behavior: smooth && !calmMotion() ? 'smooth' : 'auto' });
+}
+view.addEventListener('load', (e) => {
+  const t = e.target;
+  if (!t || !t.closest || !t.closest('#ask-log') || Date.now() > askPin.until) return;
+  const last = $('#ask-log').lastElementChild;
+  if (last) last.scrollIntoView({ block: askPin.how === 'answer' ? 'start' : 'end' });
+}, true);
+['touchstart', 'wheel'].forEach((ev) => window.addEventListener(ev, () => { askPin.until = 0; }, { passive: true }));
 
 // Что знает модель: коротко о Батончике, журнал за две недели, план, одиночество, социализация, уход, здоровье,
 // последние заметки о днях и материалы приложения, подходящие к вопросу
@@ -1202,29 +1259,33 @@ function askErrorText(err) {
   return 'Сервер не ответил. Если ИИ-помощника только что подключили, проверьте, что GitHub выложил сервер (README, «ИИ-помощник»), и попробуйте ещё раз.';
 }
 
-async function askSend(text) {
+async function askSend(text, photo = askState().photo) {
   const a = askState();
   const q = String(text || '').trim();
-  if (!q || a.busy) return;
+  if ((!q && !photo) || a.busy || a.photoBusy) return;
   if (!canWrite()) { toast('Чтобы спросить, войдите в приложение.'); return; }
   // Неудачная попытка перед этим вопросом не нужна в разговоре
   if (a.chat.length && a.chat[a.chat.length - 1].r === 'err') a.chat.pop();
   const history = ASK.historyFor(a.chat);
-  a.chat.push({ r: 'me', t: q, at: Date.now() });
+  a.chat.push({ r: 'me', t: q, at: Date.now(), ...(photo ? { img: photo.thumb } : {}) });
   a.busy = true;
   a.draft = '';
+  a.photo = null;
+  a.lastPhoto = photo || null;
   saveChat();
   const input = view.querySelector('.ask-input');
   if (input) { input.value = ''; fitAskInput(input); }
   updateAsk();
   let msg;
   try {
-    const res = await store.askAi({ question: q, context: askContext(q), history });
+    const image = photo ? { mime: 'image/jpeg', data: photo.full.slice(photo.full.indexOf(',') + 1) } : null;
+    const res = await store.askAi({ question: q, context: askContext(q || 'фото'), history, ...(image ? { image } : {}) });
     if (!res) {
       await new Promise((ok) => { setTimeout(ok, 900); });
-      msg = { r: 'ai', t: ASK.demoAnswer(q), at: Date.now(), demo: true };
+      const demo = ASK.demoAnswer(q, !!photo);
+      msg = { r: 'ai', t: demo.t, src: demo.src || [], at: Date.now(), demo: true };
     } else {
-      msg = { r: 'ai', t: String(res.text || ''), at: Date.now(), model: res.model || '' };
+      msg = { r: 'ai', t: String(res.text || ''), at: Date.now(), model: res.model || '', src: Array.isArray(res.sources) ? res.sources.slice(0, 6) : [], sh: typeof res.searchHtml === 'string' ? res.searchHtml : '' };
       if (res.left != null) a.left = res.left;
     }
   } catch (err) {
@@ -1234,7 +1295,7 @@ async function askSend(text) {
   a.chat.push(msg);
   a.busy = false;
   saveChat();
-  if (route().page === 'ask') updateAsk();
+  if (route().page === 'ask') updateAsk({ scroll: msg.r === 'ai' ? 'answer' : 'last' });
 }
 
 // Поле вопроса растёт по тексту, но не выше трети экрана
@@ -4284,6 +4345,8 @@ function render(force) {
     const isCard = !!((TABS[r.tab] || r.page === 'c' || r.page === 'd') && r.id) || !!(r.page === 'lib' && r.sub);
     pendingScroll = !isCard && saved ? { y: saved, until: Date.now() + 2000 } : null;
     window.scrollTo(0, pendingScroll ? saved : 0);
+    // Открыли «Спросить» с прошлым разговором — сразу последние реплики над полем ввода
+    if (r.page === 'ask' && askState().chat.length) { pendingScroll = null; scrollAsk('last', false); }
     // Ссылка на вопрос или миф — раскрытый пункт сразу на экране
     const target = r.page === 'lib' && r.sub && r.id !== 'a' && document.getElementById(`lib-${r.id}-${r.sub}`);
     if (target) target.scrollIntoView({ block: 'start' });
@@ -4989,10 +5052,30 @@ const actions = {
     const a = askState();
     const i = a.chat.map((m) => m.r).lastIndexOf('me');
     if (i < 0 || a.busy) return;
-    const q = a.chat[i].t;
+    const { t, img } = a.chat[i];
     a.chat = a.chat.slice(0, i);
-    askSend(q);
+    askSend(t, img && a.lastPhoto ? a.lastPhoto : null);
   },
+  // Фото к вопросу: большое — для Gemini, маленькое — для разговора на телефоне
+  'ask-photo': async () => {
+    const a = askState();
+    if (!canWrite() || a.busy || a.photoBusy) return;
+    const file = await pickPhoto();
+    if (!file) return;
+    a.photoBusy = true;
+    updateAskAttach();
+    try {
+      const full = await compressPhoto(file, { max: 1280, quality: 0.82, limit: 1100000 });
+      const thumb = await compressPhoto(file, { max: 360, quality: 0.72, limit: 90000 });
+      a.photo = { full, thumb };
+    } catch (err) {
+      console.error(err);
+      toast('Не получилось открыть фото. Попробуйте другое.');
+    }
+    a.photoBusy = false;
+    updateAskAttach();
+  },
+  'ask-photo-remove': () => { askState().photo = null; updateAskAttach(); },
   'ask-new': () => {
     const a = askState();
     if (a.busy) return;

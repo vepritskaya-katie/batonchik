@@ -37,20 +37,22 @@ export const sendTestPush = onCall(async (req) => {
   return testPush({ db, messaging: getMessaging(), uid });
 });
 
-// «Спросить»: Gemini в Google Cloud от имени проекта — без ключа. Нужны включённый сервис Vertex AI
+// «Спросить»: Gemini в Google Cloud от имени проекта — без ключа; может искать в Google. Нужны включённый сервис Vertex AI
 // и роль «Vertex AI User» у сервисного аккаунта функций (README, «ИИ-помощник»)
 let genai = null;
 export const askAi = onCall({ timeoutSeconds: 120, memory: '512MiB' }, async (req) => {
   const { db, uid } = await allowedUser(req);
   let input;
-  try { input = cleanInput(req.data); } catch { throw new HttpsError('invalid-argument', 'Пустой вопрос.'); }
+  try { input = cleanInput(req.data); } catch (err) {
+    throw new HttpsError('invalid-argument', err && err.code === 'image' ? 'Не получилось прочитать фото — попробуйте другое.' : 'Пустой вопрос.');
+  }
   const day = moscowDay();
   const quota = await takeQuota(db, uid, day);
   if (!quota.ok) throw new HttpsError('resource-exhausted', 'На сегодня вопросы закончились — завтра можно снова.');
   if (!genai) genai = new GoogleGenAI({ enterprise: true, project: process.env.GCLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT, location: AI_LOCATION });
   try {
-    const { text, model } = await askModel((params) => genai.models.generateContent(params), buildContents(input));
-    return { text, model, left: quota.left };
+    const { text, model, sources, searchHtml, queries } = await askModel((params) => genai.models.generateContent(params), buildContents(input));
+    return { text, model, sources, searchHtml, queries, left: quota.left };
   } catch (err) {
     console.error('askAi:', err && err.status, err && err.message);
     await refundQuota(db, uid, day);
