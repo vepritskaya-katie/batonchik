@@ -212,7 +212,7 @@ export function daySummaryLine(st) {
   return parts.join(' · ');
 }
 
-// «Ритм дня» на вкладке «День»: кольцо — какая доля туалета сегодня на улице, ниже — строки
+// «Ритм дня» на странице «День»: кольцо — какая доля туалета сегодня на улице, ниже — строки
 export function rhythmHtml(st, { trainsDone, trainsTotal }) {
   const all = st.toilet + st.accident;
   const pct = all ? Math.round((st.toilet / all) * 100) : null;
@@ -230,7 +230,7 @@ export function rhythmHtml(st, { trainsDone, trainsTotal }) {
   </section>`;
 }
 
-// Неделя на вкладке «День»: сводка в сравнении с прошлой неделей и столбики по дням
+// Неделя на странице «День»: сводка в сравнении с прошлой неделей и столбики по дням
 export function weekStatsHtml({ days, prevWeek, loading }) {
   const week = days.slice(0, 7).reverse(); // слева направо — от старых к новым
   const summary = weekSummary(days.slice(0, 7), prevWeek);

@@ -182,6 +182,7 @@ const CHILD_HINT_RE = /^\*\*((?:Дальше|Переход),?\s+когда)\s*:
 
 // opts.task(text) → {key, html} — разметка общей галочки вместо «[ ]»
 // opts.step(item, index) → html — кнопка «Освоено» у пункта нумерованного списка верхнего уровня
+// opts.stepDone(item, index) → строка «Освоено · кто · когда», если шаг освоен: такой шаг свёрнут до названия
 export function renderBlocks(blocks, opts = {}, depth = 0) {
   return blocks.map((b) => renderBlock(b, opts, depth)).join('\n');
 }
@@ -215,9 +216,17 @@ function renderSteps(b, opts, depth) {
     const last = children[children.length - 1];
     const m = !hint && last && last.type === 'para' && last.text.match(CHILD_HINT_RE);
     if (m) { label = m[1]; hint = m[2]; children = children.slice(0, -1); }
+    const inner = `<div class="li-text">${inline(main)}</div>${renderBlocks(children, opts, depth + 1)}
+      ${hint ? hintHtml(label, hint) : ''}${opts.step(it, idx)}`;
+    const done = typeof opts.stepDone === 'function' ? opts.stepDone(it, idx) : '';
+    if (done) {
+      return `<li class="step done"><details class="step-fold"><summary><span class="num">${num}</span>
+        <span class="step-sum"><span class="step-name">${inline(stepTitle(it.text))}</span><span class="mark-by">${done}</span></span>
+        <svg class="fold-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></summary>
+        <div class="step-body">${inner}</div></details></li>`;
+    }
     return `<li class="step"><span class="num">${num}</span><div class="step-body">
-      <div class="li-text">${inline(main)}</div>${renderBlocks(children, opts, depth + 1)}
-      ${hint ? hintHtml(label, hint) : ''}${opts.step(it, idx)}</div></li>`;
+      ${inner}</div></li>`;
   }).join('');
   return `<ol class="steps">${items}</ol>`;
 }
