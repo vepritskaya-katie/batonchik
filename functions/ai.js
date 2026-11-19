@@ -15,6 +15,9 @@ export const MAX_CONTEXT = 60000;   // символов: записи Батон
 export const MAX_HISTORY = 8;       // прошлых реплик разговора
 export const MAX_REPLY = 6000;      // символов в одной прошлой реплике
 export const MAX_SOURCES = 6;       // источников из поиска под ответом
+export const MAX_IMAGE = 1600000;   // фото к вопросу: символов base64 (~1,2 МБ; приложение сжимает до 1280 px)
+export const IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
+export const PHOTO_ONLY = 'Посмотри на фото.'; // если прислали фото без слов
 export const MAX_SEARCH_HTML = 30000; // блок поисковых подсказок Google
 
 export const SYSTEM = `Ты — помощник в приложении «Батончик». Его ведут двое хозяев щенка австралийской овчарки (аусси) по кличке Батончик. Они не профессиональные кинологи и учатся вместе со щенком.
@@ -25,6 +28,7 @@ export const SYSTEM = `Ты — помощник в приложении «Ба�
 - Сначала опирайся на данные Батончика из приложения (журнал, план, записи «Учимся оставаться дома», социализация, уход, паспорт) и на материалы приложения — карточки тренировок, Библиотеку и «Практику». Они даны в сообщении пользователя в блоке «Данные из приложения». Если материалы приложения и общие знания расходятся, держись материалов приложения.
 - Если в материалах приложения этой темы нет или вопрос общий — отвечай по своим знаниям о собаках: поведение, дрессировка, здоровье и уход, кормление, снаряжение, породы, жизнь с собакой в городе и в поездках. Такой ответ начни с короткой пометки: «В приложении об этом пока нет — вот что известно в целом:». Держись современного научного взгляда; если специалисты расходятся во мнениях или ты не уверен, так и скажи.
 - Можно отвечать и на вопросы не о Батончике — о собаках вообще.
+- К вопросу может быть приложено фото (лапа, кожа, глаз, стул, игрушка, корм, растение, поза или поведение). Сначала коротко опиши, что видно, потом ответь. По фото диагнозов не ставь: если видно что-то похожее на срочное (кровь, сильный отёк, рана, клещ в коже, необычный цвет стула) — советуй ветеринара. Если по фото не понять, скажи, как переснять: ближе, при дневном свете, с другого ракурса.
 - Данные Батончика не придумывай: цифры, даты, события и записи бери только из блока данных. Если для ответа их не хватает, скажи, что стоит записать или проверить.
 - Ищи в Google, когда нужны свежие или конкретные сведения: адреса и часы работы клиник и магазинов, цены, правила перевозки и поездок, новости, отзывы о кормах и снаряжении, — или когда темы нет в приложении и ты не уверен в ответе. Если хватает данных и материалов приложения, не ищи. Найденное перескажи своими словами и скажи, если источники расходятся.
 - Ссылайся на карточки и статьи приложения markdown-ссылками ровно в том виде, как они даны в данных, например [«Ко мне»](#/k/ko-mne). Адреса сайтов в текст не вставляй и не придумывай: найденные в поиске источники приложение само покажет под ответом.
@@ -41,23 +45,33 @@ const cut = (s, n) => String(s == null ? '' : s).slice(0, n);
 // Что пришло из приложения: вопрос, данные и прошлые реплики. Лишнее обрезаем, чтобы запрос не разрастался
 export function cleanInput(data) {
   const d = data && typeof data === 'object' ? data : {};
-  const question = cut(d.question, MAX_QUESTION).trim();
+  let image = null;
+  if (d.image) {
+    const mime = String(d.image.mime || '');
+    const b64 = String(d.image.data || '');
+    if (!IMAGE_TYPES.includes(mime) || !b64 || b64.length > MAX_IMAGE || !/^[A-Za-z0-9+/]+={0,2}$/.test(b64)) {
+      throw Object.assign(new Error('image'), { code: 'image' });
+    }
+    image = { mime, data: b64 };
+  }
+  let question = cut(d.question, MAX_QUESTION).trim();
+  if (!question && image) question = PHOTO_ONLY;
   if (!question) throw Object.assign(new Error('empty'), { code: 'empty' });
   const context = cut(d.context, MAX_CONTEXT).trim();
   const history = (Array.isArray(d.history) ? d.history : [])
     .filter((m) => m && (m.r === 'me' || m.r === 'ai') && typeof m.t === 'string' && m.t.trim())
     .slice(-MAX_HISTORY)
     .map((m) => ({ r: m.r, t: cut(m.t, MAX_REPLY) }));
-  return { question, context, history };
+  return { question, context, history, image };
 }
 
 // Разговор для модели: прошлые реплики, затем данные приложения и новый вопрос
-export function buildContents({ question, context, history }) {
+export function buildContents({ question, context, history, image = null }) {
   const contents = history.map((m) => ({ role: m.r === 'me' ? 'user' : 'model', parts: [{ text: m.t }] }));
   // У Gemini разговор начинается с реплики пользователя
   while (contents.length && contents[0].role !== 'user') contents.shift();
-  const text = context ? `Данные из приложения на сейчас:\n\n${context}\n\n---\n\nВопрос: ${question}` : question;
-  contents.push({ role: 'user', parts: [{ text }] });
+  const text = context ? `Данные из приложения на сейчас:\n\n${context}\n\n---\n\n${image ? 'К вопросу приложено фото.\n' : ''}Вопрос: ${question}` : question;
+  contents.push({ role: 'user', parts: image ? [{ inlineData: { mimeType: image.mime, data: image.data } }, { text }] : [{ text }] });
   return contents;
 }
 

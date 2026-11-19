@@ -43,7 +43,9 @@ let genai = null;
 export const askAi = onCall({ timeoutSeconds: 120, memory: '512MiB' }, async (req) => {
   const { db, uid } = await allowedUser(req);
   let input;
-  try { input = cleanInput(req.data); } catch { throw new HttpsError('invalid-argument', 'Пустой вопрос.'); }
+  try { input = cleanInput(req.data); } catch (err) {
+    throw new HttpsError('invalid-argument', err && err.code === 'image' ? 'Не получилось прочитать фото — попробуйте другое.' : 'Пустой вопрос.');
+  }
   const day = moscowDay();
   const quota = await takeQuota(db, uid, day);
   if (!quota.ok) throw new HttpsError('resource-exhausted', 'На сегодня вопросы закончились — завтра можно снова.');

@@ -98,19 +98,27 @@ export function pickMaterials(items, question, { n = 4, maxChars = 2500 } = {}) 
 }
 
 // ---------- Разговор на этом телефоне ----------
+// Миниатюра фото к вопросу хранится в разговоре на телефоне — только своя, JPEG из photo.js
+export const isThumb = (s) => typeof s === 'string' && /^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/.test(s) && s.length < 200000;
 export function loadChat(raw) {
   try {
     const v = JSON.parse(raw || '[]');
-    return Array.isArray(v) ? v.filter((m) => m && (m.r === 'me' || m.r === 'ai' || m.r === 'err') && typeof m.t === 'string').slice(-KEEP) : [];
+    return Array.isArray(v) ? v.filter((m) => m && (m.r === 'me' || m.r === 'ai' || m.r === 'err') && typeof m.t === 'string')
+      .map((m) => (m.img && !isThumb(m.img) ? { ...m, img: '' } : m)).slice(-KEEP) : [];
   } catch { return []; }
 }
-// Что отправить серверу как прошлый разговор: без ошибок, последние реплики
-export const historyFor = (chat) => chat.filter((m) => m.r === 'me' || m.r === 'ai').slice(-SEND_HISTORY).map((m) => ({ r: m.r, t: m.t }));
+// Что отправить серверу как прошлый разговор: без ошибок, последние реплики. Фото прошлых вопросов не отправляем — только отметку
+export const historyFor = (chat) => chat.filter((m) => m.r === 'me' || m.r === 'ai').slice(-SEND_HISTORY)
+  .map((m) => ({ r: m.r, t: m.img ? `${m.t ? `${m.t}\n` : ''}[к этому вопросу было приложено фото]` : m.t }))
+  .filter((m) => m.t);
 
 // ---------- Превью без сервера: примерный ответ ----------
 // { t: текст, src: источники } — в превью нет ни сервера, ни поиска
-export function demoAnswer(question) {
+export function demoAnswer(question, withPhoto = false) {
   const q = String(question || '').toLowerCase();
+  if (withPhoto) {
+    return { t: '**Это пример ответа на вопрос с фото** — в превью ИИ не подключён.\n\nВ приложении Gemini сначала коротко опишет, что видно на фото, потом ответит на вопрос. Диагнозов по фото не ставит: если увидит что-то похожее на срочное, посоветует ветеринара и даст ссылку на [«Срочно»](#/lib/vet). Если по фото не понять — подскажет, как переснять.' };
+  }
   if (/авари|писает дома|лужа/.test(q)) {
     return { t: 'По журналу за две недели аварий дома **3**, и все — днём, примерно через **2 ч 30 мин** после прошлого туалета. Обычно между выходами у Батончика около 2 часов, так что дело скорее в том, что выход немного затягивается.\n\n- Выводи его через 1 ч 45 мин – 2 ч, не дожидаясь сигналов.\n- После сна, еды и игры — сразу на улицу.\n- Если авария всё же случилась — спокойно убрать ферментным средством, без ругани.\n\nПодробнее — в карточке [«Туалет: от пелёнки к улице»](#/k/tualet-ot-pelenki-k-ulice).' };
   }
