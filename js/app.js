@@ -1082,7 +1082,7 @@ const saveChat = () => lsSet(ASK.ASK_KEY, JSON.stringify(askState().chat.slice(-
 function renderAsk() {
   const a = askState();
   const can = canWrite();
-  return `${pageHead({ eyebrow: 'ИИ-помощник', title: 'Спросить', sub: 'Отвечает Gemini — по записям Батончика и материалам приложения. Это подсказка, а не ветеринар.' })}
+  return `${pageHead({ eyebrow: 'ИИ-помощник', title: 'Спросить', sub: 'Отвечает Gemini — по записям Батончика, материалам приложения, а где их нет — по общим знаниям о собаках. Это подсказка, а не ветеринар.' })}
     ${statusBanner()}
     <div class="ask-log" id="ask-log" aria-live="polite">${askLogHtml()}</div>
     <form class="ask-form" data-ask-form>
