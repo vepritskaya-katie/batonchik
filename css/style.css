@@ -123,7 +123,7 @@
    У каждой вкладки свой цвет: шапка и верх страницы, кнопки, ссылки, большая карточка, значок вкладки.
    Шапка — всех вкладок одного цвета, как полоса со временем на iPhone; оттенок вкладки начинается под ней.
    Главная (и её страницы «День», «Неделя Батончика») — оливковая с узором «красный мрамор» (окрас Батончика), Тренировки — травяной,
-   Паспорт — серо-синий, Советы — горчичный, Дневник — терракотовый.
+   Паспорт — серо-синий, Советы — горчичный, Дневник — оливковый, как было с самого начала (основные цвета, без своих правил).
    Зелёный «сделано» (--ok), красный «срочно» и цвета отметок в календаре — общие для всех.
    Контраст текста и кнопок — не ниже 4,5 : 1 на фоне карточек и страницы. */
 body { --wash: color-mix(in srgb, var(--accent-soft) 62%, var(--bg)); }
@@ -131,19 +131,16 @@ body[data-tab="today"] { --hero: #6e3423; }
 body[data-tab="k"] { --accent: #3c7343; --accent-dark: #2f5a35; --accent-text: #2f5e36; --accent-soft: #dfecd8; --hero: #2f5a35; }
 body[data-tab="pass"] { --accent: #4a6487; --accent-dark: #3a4f6b; --accent-text: #3b5372; --accent-soft: #e1e8f1; --hero: #3a4f6b; }
 body[data-tab="t"] { --accent: #86650f; --accent-dark: #6a5010; --accent-text: #6f540c; --accent-soft: #f3e7c4; --hero: #6a5212; }
-body[data-tab="d"] { --accent: #a3502e; --accent-dark: #84401f; --accent-text: #8a4224; --accent-soft: #f5e1d6; --hero: #87422a; }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) body[data-tab="today"] { --hero: #5a2b1d; }
   :root:not([data-theme="light"]) body[data-tab="k"] { --accent: #9fcd8d; --accent-dark: #2e472b; --accent-text: #b3d9a5; --accent-soft: #21321f; --accent-ink: #132011; --hero: #2a4527; }
   :root:not([data-theme="light"]) body[data-tab="pass"] { --accent: #a5b9d8; --accent-dark: #334259; --accent-text: #bccbe4; --accent-soft: #232b37; --accent-ink: #141b26; --hero: #2f3e55; }
   :root:not([data-theme="light"]) body[data-tab="t"] { --accent: #dcc072; --accent-dark: #4b4122; --accent-text: #e5ce8d; --accent-soft: #352f1b; --accent-ink: #241d08; --hero: #4a3f1c; }
-  :root:not([data-theme="light"]) body[data-tab="d"] { --accent: #e39b79; --accent-dark: #553326; --accent-text: #ecb196; --accent-soft: #382520; --accent-ink: #2a1409; --hero: #5a3324; }
 }
 :root[data-theme="dark"] body[data-tab="today"] { --hero: #5a2b1d; }
 :root[data-theme="dark"] body[data-tab="k"] { --accent: #9fcd8d; --accent-dark: #2e472b; --accent-text: #b3d9a5; --accent-soft: #21321f; --accent-ink: #132011; --hero: #2a4527; }
 :root[data-theme="dark"] body[data-tab="pass"] { --accent: #a5b9d8; --accent-dark: #334259; --accent-text: #bccbe4; --accent-soft: #232b37; --accent-ink: #141b26; --hero: #2f3e55; }
 :root[data-theme="dark"] body[data-tab="t"] { --accent: #dcc072; --accent-dark: #4b4122; --accent-text: #e5ce8d; --accent-soft: #352f1b; --accent-ink: #241d08; --hero: #4a3f1c; }
-:root[data-theme="dark"] body[data-tab="d"] { --accent: #e39b79; --accent-dark: #553326; --accent-text: #ecb196; --accent-soft: #382520; --accent-ink: #2a1409; --hero: #5a3324; }
 
 /* Заголовки — Manrope (OFL, файлы в папке fonts); основной текст — системный шрифт телефона */
 @font-face {
