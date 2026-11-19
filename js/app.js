@@ -4388,18 +4388,22 @@ function renderHeader() {
 
 function updateNet() { $('#net').hidden = navigator.onLine; }
 
-// Цвет строки состояния телефона — как шапка раздела (Android; в Safari — цвет панели браузера)
+// Цвет строки состояния телефона — как шапка: цвет страницы светлой или тёмной темы (с учётом темы из «Настроек»).
+// Оттенок вкладки сюда не идёт: на iPhone в приложении с экрана «Домой» строка состояния его не подхватывает,
+// и шапка с ней разошлась бы по цвету
 let colorProbe = null;
 function updateThemeColor() {
   if (!colorProbe) {
     colorProbe = document.createElement('i');
-    colorProbe.style.cssText = 'position:absolute;width:0;height:0;overflow:hidden;background:var(--wash)';
+    colorProbe.style.cssText = 'position:absolute;width:0;height:0;overflow:hidden;background:var(--bg)';
     colorProbe.setAttribute('aria-hidden', 'true');
     document.body.append(colorProbe);
   }
   const v = getComputedStyle(colorProbe).backgroundColor;
+  const hex = (xs) => `#${xs.map((x) => Math.max(0, Math.min(255, Math.round(x))).toString(16).padStart(2, '0')).join('')}`;
   const m = v.match(/color\(srgb ([\d.e-]+) ([\d.e-]+) ([\d.e-]+)/);
-  const color = m ? `#${m.slice(1, 4).map((x) => Math.max(0, Math.min(255, Math.round(+x * 255))).toString(16).padStart(2, '0')).join('')}` : v;
+  const rgb = v.match(/^rgba?\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)/);
+  const color = m ? hex(m.slice(1, 4).map((x) => +x * 255)) : rgb ? hex(rgb.slice(1, 4).map(Number)) : v;
   if (color) document.querySelectorAll('meta[name="theme-color"]').forEach((el) => { el.content = color; });
 }
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change', updateThemeColor);
