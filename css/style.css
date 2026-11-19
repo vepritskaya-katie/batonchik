@@ -156,6 +156,18 @@ body[data-tab="d"] { --accent: #a3502e; --accent-dark: #84401f; --accent-text: #
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 
+/* Заголовки страниц и разделов — Lora, с засечками (OFL, файлы в папке fonts, лицензия — fonts/OFL-Lora.txt) */
+@font-face {
+  font-family: "Lora"; font-style: normal; font-weight: 500 700; font-display: swap;
+  src: url(../fonts/lora-cyrillic.woff2) format("woff2");
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+@font-face {
+  font-family: "Lora"; font-style: normal; font-weight: 500 700; font-display: swap;
+  src: url(../fonts/lora-latin.woff2) format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
 /* ---------- Основа ---------- */
 * { box-sizing: border-box; }
 html { -webkit-text-size-adjust: 100%; touch-action: manipulation; } /* без приближения от двойного касания */
@@ -169,12 +181,12 @@ body {
 }
 body.no-scroll { overflow: hidden; }
 a { color: var(--accent); }
-:root { --font-ui: "Manrope", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; --font-head: var(--font-ui); }
+:root { --font-ui: "Manrope", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; --font-head: "Lora", Georgia, "Times New Roman", serif; }
 h1, h2, h3, .logo, .card-name, .item-head, .idea-name, .eyebrow, .tabbar a span { font-family: var(--font-ui); }
 /* Заголовки страниц и разделов — шрифт с характером (--font-head) */
 h1, h2 { font-family: var(--font-head); }
-h1 { font-size: 31px; line-height: 1.12; margin: 8px 0 12px; letter-spacing: -.04em; font-weight: 700; }
-h2 { font-size: 19px; line-height: 1.25; margin: 0 0 10px; letter-spacing: -.02em; font-weight: 700; }
+h1 { font-size: 32px; line-height: 1.12; margin: 8px 0 12px; letter-spacing: -.02em; font-weight: 650; }
+h2 { font-size: 20px; line-height: 1.25; margin: 0 0 10px; letter-spacing: -.01em; font-weight: 650; }
 h3 { font-size: 16px; margin: 18px 0 8px; font-weight: 650; }
 .eyebrow { margin: 0; font-size: 13px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: color-mix(in srgb, var(--accent) 85%, var(--bg)); }
 p { margin: 0 0 12px; }
@@ -212,7 +224,7 @@ body.tb-on .logo { opacity: 0; visibility: hidden; transform: translateY(-6px); 
   border: 0; background: none; color: var(--text); font: inherit; text-align: left; cursor: pointer;
 }
 .tb-parent { max-width: 100%; font-size: 12.5px; line-height: 1.2; font-weight: 650; color: var(--accent-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.tb-title { max-width: 100%; font-family: var(--font-head); font-size: 17px; line-height: 1.25; font-weight: 700; letter-spacing: -.02em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tb-title { max-width: 100%; font-family: var(--font-head); font-size: 17px; line-height: 1.25; font-weight: 650; letter-spacing: -.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tb-where:not(.inner) .tb-parent { display: none; }
 .tb-where:not(.inner) .tb-title { font-size: 19px; }
 @media (prefers-reduced-motion: reduce) { .tb-left > * { transition: none; } }
@@ -712,7 +724,7 @@ button.ev-row { cursor: pointer; }
 .text-link { color: var(--accent-text); font-weight: 600; font-size: 15px; text-decoration: none; min-height: 40px; display: inline-flex; align-items: center; }
 .text-link.more { margin-top: 8px; }
 button.text-link { padding: 0; border: 0; background: none; font: inherit; font-weight: 600; font-size: 15px; cursor: pointer; }
-.lib-title { margin: 34px 0 4px; font-size: 25px; letter-spacing: -.03em; }
+.lib-title { margin: 34px 0 4px; font-size: 26px; letter-spacing: -.02em; }
 /* Рисунки линией (DOODLES в app.js) */
 .doodle { flex: none; width: 26px; height: 26px; stroke: var(--accent); stroke-width: 1.7; }
 .lib-title, h2.with-doodle { display: flex; align-items: center; gap: 10px; }
@@ -759,7 +771,7 @@ body[data-tab="today"] .hero.no-photo .hero-copy { background: linear-gradient(1
   position: absolute; z-index: 2; top: 16px; right: 16px; min-height: 40px; padding: 6px 14px; border-radius: 99px; cursor: pointer;
   border: 1px solid rgba(255, 255, 255, .45); background: rgba(255, 255, 255, .12); color: #fff; font: inherit; font-size: 14px; font-weight: 700;
 }
-.hero h2 { margin: 0 0 6px; font-size: 28px; font-weight: 700; line-height: 1.12; letter-spacing: -.035em; color: #fff; }
+.hero h2 { margin: 0 0 6px; font-size: 28px; font-weight: 650; line-height: 1.12; letter-spacing: -.02em; color: #fff; }
 .hero p { margin: 0; color: rgba(255, 255, 255, .82); font-size: 15px; line-height: 1.45; }
 .hero-meta { display: flex; justify-content: space-between; margin-top: 16px; font-size: 14px; color: rgba(255, 255, 255, .8); }
 .hero-meta strong { color: #fff; }
@@ -856,7 +868,7 @@ button.mini-count { text-decoration: underline dotted; text-underline-offset: 3p
 .id-photo img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: center 30%; }
 .id-photo svg { width: 44px; height: 44px; }
 .id-label { margin: 0; font-size: 13px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: rgba(255, 255, 255, .55); }
-.id-body h2 { margin: 2px 0 16px; font-size: 30px; font-weight: 700; letter-spacing: -.03em; color: #fff; }
+.id-body h2 { margin: 2px 0 16px; font-size: 30px; font-weight: 650; letter-spacing: -.02em; color: #fff; }
 .id-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 18px; margin: 0; }
 .id-grid .wide { grid-column: 1 / -1; }
 .id-grid dt { font-size: 13px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: rgba(255, 255, 255, .5); }
@@ -1758,3 +1770,51 @@ button.choice.on { background: var(--accent-soft); border-color: var(--accent); 
   100% { opacity: 0; transform: translate(var(--dx), calc(var(--dy) + 26px)) rotate(var(--rot)) scale(.9); }
 }
 @media (prefers-reduced-motion: reduce) { .paw-stamp, .paw-fly { display: none; } }
+
+/* ---------- Спросить (ИИ-помощник, #/ask) ---------- */
+.ask-btn svg { width: 25px; height: 25px; stroke-width: 1.8; }
+.ask-btn svg path { fill: color-mix(in srgb, var(--accent) 20%, transparent); }
+.ask-btn.on { color: var(--accent-text); }
+.ask-log { display: flex; flex-direction: column; gap: 10px; margin: 8px 0 14px; }
+.ask-msg { max-width: 90%; padding: 10px 14px; border-radius: 18px; font-size: 16px; line-height: 1.45; overflow-wrap: anywhere; }
+.ask-msg p { margin: 0 0 8px; }
+.ask-msg > p:last-child, .ask-msg .prose > :last-child { margin-bottom: 0; }
+.ask-msg .prose ul, .ask-msg .prose ol { padding-left: 20px; }
+.ask-msg.me { align-self: flex-end; background: var(--accent); color: var(--accent-ink); border-bottom-right-radius: 6px; white-space: pre-wrap; }
+.ask-msg.ai { align-self: flex-start; background: var(--card); border: 1px solid var(--line); border-bottom-left-radius: 6px; }
+.ask-msg.err { align-self: flex-start; background: var(--hint); border: 1px solid var(--hint-border); }
+.ask-msg.err .text-link { min-height: 36px; }
+.ask-model { display: block; margin-top: 6px; font-size: 12.5px; color: var(--muted); }
+.ask-typing { display: inline-flex; gap: 6px; padding: 4px 2px; }
+.ask-typing .paw-ico { width: 16px; height: 16px; color: var(--accent); opacity: .25; animation: ask-paw 1.2s ease-in-out infinite; }
+.ask-typing .paw-ico:nth-child(2) { animation-delay: .2s; }
+.ask-typing .paw-ico:nth-child(3) { animation-delay: .4s; }
+@keyframes ask-paw { 0%, 100% { opacity: .25; transform: translateY(0); } 40% { opacity: 1; transform: translateY(-3px); } }
+@media (prefers-reduced-motion: reduce) { .ask-typing .paw-ico { animation: none; opacity: .6; } }
+/* Поле вопроса — над нижней панелью, всегда под рукой */
+.ask-form {
+  position: sticky; z-index: 5; bottom: calc(env(safe-area-inset-bottom) + 74px);
+  display: flex; align-items: flex-end; gap: 8px; padding: 6px 6px 6px 8px; border-radius: 24px;
+  background: var(--surface); border: 1px solid var(--border); box-shadow: 0 6px 22px rgba(48, 57, 42, .08);
+}
+.ask-input {
+  flex: 1; min-width: 0; min-height: 40px; max-height: 33vh; padding: 9px 8px; border: 0; resize: none; outline: none;
+  background: transparent; color: var(--text); font: inherit; font-size: 16px; line-height: 1.4;
+}
+.ask-send {
+  flex: none; width: 44px; height: 44px; display: grid; place-items: center; border: 0; border-radius: 50%; cursor: pointer;
+  background: var(--accent); color: var(--accent-ink);
+}
+.ask-send svg { width: 22px; height: 22px; stroke-width: 2.4; }
+.ask-send:disabled { opacity: .4; }
+.ask-empty { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 18px 4px 6px; text-align: center; }
+.ask-empty .doodle { width: 46px; height: 46px; stroke-width: 1.4; opacity: .6; }
+.ask-empty p { margin: 0; color: var(--muted); }
+.ask-starters { display: flex; flex-direction: column; align-items: stretch; gap: 8px; width: 100%; margin-top: 4px; }
+.ask-chip {
+  min-height: 44px; padding: 8px 14px; border-radius: 16px; border: 1px solid var(--border); background: var(--surface);
+  color: var(--text); font: inherit; font-size: 15.5px; text-align: left; cursor: pointer;
+}
+.ask-chip:active { background: var(--accent-soft); }
+.ask-foot { margin-top: 10px; }
+.ask-foot .text-link { min-height: 36px; margin-left: 4px; }

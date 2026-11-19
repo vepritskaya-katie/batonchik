@@ -11,6 +11,7 @@ import { HEALTH_KINDS, NEXT_OPTIONS, nextDate, suggestNext, dueText, ageText, up
 import { pickPhotos, compressPhoto } from './photo.js';
 import { fmtNum, parseNum, series, deltaText, lineChartSvg } from './growth.js';
 import { buildIndex, resultsHtml, entryItems } from './search.js';
+import * as ASK from './ask.js';
 import { RUBRICS, parseLibrary, readKey, readCount, readBtn, metaChips, articleBody, foldList, agesHtml, dictHtml, booksHtml, introHtml, casesHtml, healthBody, fillBlocks, fillItems } from './library.js';
 import {
   FORMATS, DAILY, POINTS, READ_POINTS, LEVELS, parseQuestions, formatOf, optionOrder, todayIds, answered, finished, rightCount, readPoints,
@@ -1062,6 +1063,196 @@ function renderTrainingsPage() {
     ${catalogBody('k', { fold: true })}
     ${catalogBody('g', { showTitle: true, fold: true })}`;
 }
+
+// ---------- Спросить (ИИ-помощник) ----------
+// Кнопка ✨ в шапке. Вопрос, коротко о Батончике и подходящие материалы уходят на сервер (функция askAi),
+// там отвечает Gemini. Разговор хранится только на этом телефоне. Без сервера (превью) — примерный ответ
+
+const SPARK_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 3.5l1.7 4.6 4.6 1.7-4.6 1.7L11 16.1l-1.7-4.6L4.7 9.8l4.6-1.7z"/><path d="M18 14.5l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8z"/></svg>';
+const SEND_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h13M13 6l6 6-6 6"/></svg>';
+const AI_NAMES = { 'gemini-3.1-pro-preview': 'Gemini 3.1 Pro', 'gemini-3.8-flash': 'Gemini 3.8 Flash' };
+const modelLabel = (m) => AI_NAMES[m] || String(m || '').replace(/^gemini-/, 'Gemini ').replace(/-preview$/, '');
+
+function askState() {
+  if (!S.ask) S.ask = { chat: ASK.loadChat(lsGet(ASK.ASK_KEY)), busy: false, left: null, draft: '' };
+  return S.ask;
+}
+const saveChat = () => lsSet(ASK.ASK_KEY, JSON.stringify(askState().chat.slice(-ASK.KEEP)));
+
+function renderAsk() {
+  const a = askState();
+  const can = canWrite();
+  return `${pageHead({ eyebrow: 'ИИ-помощник', title: 'Спросить', sub: 'Отвечает Gemini — по записям Батончика и материалам приложения. Это подсказка, а не ветеринар.' })}
+    ${statusBanner()}
+    <div class="ask-log" id="ask-log" aria-live="polite">${askLogHtml()}</div>
+    <form class="ask-form" data-ask-form>
+      <textarea class="ask-input" name="q" rows="1" maxlength="2000" placeholder="Ваш вопрос о Батончике" aria-label="Вопрос"${can ? '' : ' disabled'}>${escapeHtml(a.draft)}</textarea>
+      <button class="ask-send" type="submit" aria-label="Отправить"${can && !a.busy ? '' : ' disabled'}>${SEND_SVG}</button>
+    </form>
+    <p class="muted small ask-foot" id="ask-foot">${askFootHtml()}</p>`;
+}
+
+function askLogHtml() {
+  const a = askState();
+  if (!a.chat.length && !a.busy) {
+    return `<div class="ask-empty">${doodle('ball')}<p>Спросите о Батончике. Например:</p>
+      <div class="ask-starters">${ASK.STARTERS.map((t) => `<button type="button" class="ask-chip" data-action="ask-starter" data-q="${escapeHtml(t)}"${canWrite() ? '' : ' disabled'}>${escapeHtml(t)}</button>`).join('')}</div></div>`;
+  }
+  const msgs = a.chat.map((m, i) => {
+    if (m.r === 'me') return `<div class="ask-msg me"><p>${escapeHtml(m.t)}</p></div>`;
+    if (m.r === 'err') {
+      const last = i === a.chat.length - 1;
+      return `<div class="ask-msg err"><p>${escapeHtml(m.t)}</p>${last && !a.busy ? '<button type="button" class="text-link" data-action="ask-retry">Спросить ещё раз</button>' : ''}</div>`;
+    }
+    return `<div class="ask-msg ai"><div class="prose">${safe(() => mdHtml(m.t), m.t)}</div>
+      <span class="ask-model">${m.demo ? 'пример ответа — в превью ИИ не подключён' : escapeHtml(modelLabel(m.model))}</span></div>`;
+  }).join('');
+  const busy = a.busy ? `<div class="ask-msg ai busy"><span class="ask-typing" role="status" aria-label="Думаю">${pawIcon()}${pawIcon()}${pawIcon()}</span></div>` : '';
+  return msgs + busy;
+}
+
+function askFootHtml() {
+  const a = askState();
+  const left = a.left != null ? ` Осталось сегодня: ${a.left} из ${ASK.DAILY_LIMIT}.` : '';
+  return `Вопрос и записи Батончика уходят в Gemini (Google Cloud) через наш сервер.${left}
+    ${a.chat.length && !a.busy ? '<button type="button" class="text-link" data-action="ask-new">Новый разговор</button>' : ''}`;
+}
+
+// Обновить разговор, не трогая поле ввода (в нём может быть начатый вопрос)
+function updateAsk({ scroll = true } = {}) {
+  const log = $('#ask-log');
+  if (!log) return;
+  log.innerHTML = askLogHtml();
+  const foot = $('#ask-foot');
+  if (foot) foot.innerHTML = askFootHtml();
+  const send = view.querySelector('.ask-send');
+  if (send) send.disabled = !canWrite() || askState().busy;
+  if (scroll) {
+    const last = log.lastElementChild;
+    if (last) last.scrollIntoView({ block: 'nearest', behavior: calmMotion() ? 'auto' : 'smooth' });
+  }
+}
+
+// Что знает модель: коротко о Батончике, журнал за две недели, план, одиночество, социализация, уход, здоровье,
+// последние заметки о днях и материалы приложения, подходящие к вопросу
+function askContext(question) {
+  const pet = S.pet || {};
+  const L = [];
+  const d = (key, opts = { day: 'numeric', month: 'long' }) => dayTitle(key, opts);
+  L.push(`Сегодня: ${d(S.day, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}, ${fmtTime(new Date())} по Москве. Спрашивает: ${(S.store.user && S.store.user.name) || 'хозяин'}.`);
+  const age = ageText(pet.birth, S.day);
+  const w = [...S.growth].filter((g) => g.weight).sort((a, b) => (a.date < b.date ? -1 : 1)).pop();
+  const h = [...S.growth].filter((g) => g.height).sort((a, b) => (a.date < b.date ? -1 : 1)).pop();
+  L.push(`${DOG()}: ${pet.breed || 'австралийская овчарка (аусси)'}, ${(pet.sex || 'кобель').toLowerCase()}${age ? `, ${age}` : ''}${pet.birth ? ` (родился ${d(pet.birth, { day: 'numeric', month: 'long', year: 'numeric' })})` : ''}`
+    + `${w ? `, вес ${w.weight} кг (${d(w.date)})` : ''}${h ? `, рост в холке ${h.height} см` : ''}${pet.mdr1 ? `, MDR1: ${pet.mdr1}` : ''}.`);
+  const all = [...S.recent, ...S.events];
+  const hint = toiletHint(toiletRhythm(all), all, S.day);
+  if (hint) L.push(`Туалет: ${hint.due <= new Date() ? hint.now : hint.wait} (по будням; выходные не считаются).`);
+  L.push(`\nЖурнал за две недели (сначала новые; повторы — сколько раз за день сделали упражнение):\n${ASK.journalText(all, { today: S.day, cardName: (ref) => cardName(ref) }) || 'записей нет'}`);
+  // План на неделю и прогресс по карточкам
+  const p = dayProgress();
+  if (p.items.length) {
+    L.push(`\nПлан на неделю (сегодня сделано повторов из цели; текущий шаг):\n${p.items.map((it) => {
+      const { tab, id, card } = cardByRef(it.card);
+      const n = p.counts[it.card] || 0;
+      return `- [${card ? card.name : it.card}](#/${tab}/${id}): ${n} из ${targetOf(it)}${card && tab === 'k' ? `; ${currentStep(tab, card)}` : ''}`;
+    }).join('\n')}`);
+  }
+  const mastered = commandCards().filter((c) => { const q = cardProgress('k', c); return q.mastered || (q.total && q.done === q.total); }).map((c) => c.name);
+  if (mastered.length) L.push(`Освоено: ${mastered.join(', ')}.`);
+  // Учимся оставаться дома
+  if (S.alone.length) {
+    const step = AL.currentStep(aloneDone(), S.alone);
+    const rec = AL.allRecords(S.alone);
+    const ws = AL.weekStats(S.alone, mondayOf(S.day), S.day);
+    const recs = AL.STAGES.filter(([k]) => rec[k]).map(([k]) => `${AL.STAGE_LABEL[k] || k} — ${AL.fmtDur(rec[k])}`);
+    L.push(`\n[Учимся оставаться дома](#/alone): ${step ? `шаг ${step} из 13` : 'все шаги отмечены'}; сессий на этой неделе ${ws.sessions}; вынужденных уходов дольше рекорда ${ws.forcedOver || 0}${recs.length ? `; рекорды спокойного ожидания: ${recs.join(', ')}` : ''}.`);
+  }
+  // Социализация
+  const soc = socialSummary(S.social);
+  const again = Object.keys(S.social).filter((id) => socialState(S.social[id]).again).map((id) => socialName(id));
+  L.push(`[Социализация](#/social): встретили ${soc.met} из ${soc.total}${again.length ? `; повторить спокойнее: ${again.slice(0, 10).join(', ')}` : ''}.`);
+  // Уход, здоровье
+  const care = careDue(S.care, S.day).map(({ item, st }) => `${item.name.toLowerCase()} (${daysAgoText(st.days)})`);
+  if (care.length) L.push(`Уход — пора: ${care.join(', ')}.`);
+  const soon = upcoming(S.health).slice(0, 5).map((r) => `${r.title} — ${d(r.date)}`);
+  if (soon.length) L.push(`Здоровье — впереди: ${soon.join('; ')}.`);
+  const past = doneRecords(S.health).slice(0, 5).map((r) => `${r.title} — ${d(r.date)}`);
+  if (past.length) L.push(`Здоровье — было: ${past.join('; ')}.`);
+  const wk = [...S.weeks].sort((a, b) => (a.id < b.id ? 1 : -1))[0];
+  if (wk) L.push(`Последняя «Неделя Батончика» (${d(wk.id)}): радовался жизни — ${wk.joy ? 'да' : 'нет'}, выбор — ${wk.choice ? 'да' : 'нет'}, спал хорошо — ${wk.sleep ? 'да' : 'нет'}${wk.notes ? `; заметки: «${String(wk.notes).slice(0, 400)}»` : ''}.`);
+  const stories = Object.entries(S.stories).filter(([day, st]) => day <= S.day && st && (st.title || st.text)).sort((a, b) => (a[0] < b[0] ? 1 : -1)).slice(0, 3);
+  if (stories.length) L.push(`\nЗаметки о днях (Дневник):\n${stories.map(([day, st]) => `- ${d(day)}: ${st.title ? `${st.title}. ` : ''}${String(st.text || '').replace(/\s+/g, ' ').slice(0, 400)}`).join('\n')}`);
+  // Материалы приложения по вопросу
+  const src = { lib: S.lib, cat: S.catalogs.t, notes: S.notes, k: S.catalogs.k, g: S.catalogs.g };
+  if (!searchIndex || Object.keys(src).some((key) => searchIndex[key] !== src[key])) searchIndex = { ...src, items: buildIndex(src) };
+  const mats = ASK.pickMaterials(searchIndex.items, question);
+  if (mats.length) L.push(`\nМатериалы приложения по вопросу:\n${mats.map((m) => `### [${m.title}](${m.href}) — ${m.group}\n${m.text}`).join('\n\n')}`);
+  const cards = ['k', 'g'].flatMap((tab) => (S.catalogs[tab] ? S.catalogs[tab].groups.flatMap((g) => g.cards.map((c) => `[${c.name}](#/${tab}/${c.id})`)) : []));
+  if (cards.length) L.push(`\nВсе тренировки и игры в приложении (для ссылок): ${cards.join(', ')}.`);
+  return L.join('\n');
+}
+
+function askErrorText(err) {
+  const code = String((err && err.code) || '');
+  const msg = String((err && err.message) || '');
+  if (/unavailable|resource-exhausted|permission-denied|unauthenticated|invalid-argument/.test(code) && msg) return msg;
+  if (/deadline-exceeded/.test(code)) return 'Ответ готовился слишком долго. Попробуйте ещё раз или спросите короче.';
+  if (!navigator.onLine) return 'Нет интернета. Вопрос не отправлен.';
+  return 'Сервер не ответил. Если ИИ-помощника только что подключили, проверьте, что GitHub выложил сервер (README, «ИИ-помощник»), и попробуйте ещё раз.';
+}
+
+async function askSend(text) {
+  const a = askState();
+  const q = String(text || '').trim();
+  if (!q || a.busy) return;
+  if (!canWrite()) { toast('Чтобы спросить, войдите в приложение.'); return; }
+  // Неудачная попытка перед этим вопросом не нужна в разговоре
+  if (a.chat.length && a.chat[a.chat.length - 1].r === 'err') a.chat.pop();
+  const history = ASK.historyFor(a.chat);
+  a.chat.push({ r: 'me', t: q, at: Date.now() });
+  a.busy = true;
+  a.draft = '';
+  saveChat();
+  const input = view.querySelector('.ask-input');
+  if (input) { input.value = ''; fitAskInput(input); }
+  updateAsk();
+  let msg;
+  try {
+    const res = await store.askAi({ question: q, context: askContext(q), history });
+    if (!res) {
+      await new Promise((ok) => { setTimeout(ok, 900); });
+      msg = { r: 'ai', t: ASK.demoAnswer(q), at: Date.now(), demo: true };
+    } else {
+      msg = { r: 'ai', t: String(res.text || ''), at: Date.now(), model: res.model || '' };
+      if (res.left != null) a.left = res.left;
+    }
+  } catch (err) {
+    console.error(err);
+    msg = { r: 'err', t: askErrorText(err), at: Date.now() };
+  }
+  a.chat.push(msg);
+  a.busy = false;
+  saveChat();
+  if (route().page === 'ask') updateAsk();
+}
+
+// Поле вопроса растёт по тексту, но не выше трети экрана
+function fitAskInput(el) {
+  el.style.height = 'auto';
+  el.style.height = `${Math.min(el.scrollHeight, Math.round(innerHeight / 3))}px`;
+}
+view.addEventListener('input', (e) => {
+  if (!e.target.matches('.ask-input')) return;
+  askState().draft = e.target.value;
+  fitAskInput(e.target);
+});
+view.addEventListener('submit', (e) => {
+  if (!e.target.matches('[data-ask-form]')) return;
+  e.preventDefault();
+  const input = e.target.querySelector('.ask-input');
+  askSend(input ? input.value : '');
+});
 
 // ---------- Советы и Каналы ----------
 
@@ -4020,12 +4211,12 @@ function onHashChange() {
 }
 
 // Название страницы для кнопки «Назад»; для правки карточки — нет (туда не возвращаемся)
-const PAGE_TITLES = { search: 'Поиск', today: 'Главная', day: 'День', k: 'Тренировки', g: 'Тренировки', pass: 'Паспорт', growth: 'Рост и вес', lib: 'Библиотека', weeks: 'Неделя Батончика', t: 'Практика', c: 'Практика', game: 'Игра', d: 'Дневник', me: 'Настройки', social: 'Новое для Батончика', alone: 'Учимся оставаться дома' };
+const PAGE_TITLES = { search: 'Поиск', today: 'Главная', day: 'День', k: 'Тренировки', g: 'Тренировки', pass: 'Паспорт', growth: 'Рост и вес', lib: 'Библиотека', weeks: 'Неделя Батончика', t: 'Практика', c: 'Практика', game: 'Игра', d: 'Дневник', me: 'Настройки', ask: 'Спросить', social: 'Новое для Батончика', alone: 'Учимся оставаться дома' };
 // Вложенные страницы со своим названием для «Назад»
 const SUB_TITLES = { 'pass/summary': 'Для ветеринара', 'pass/lost': 'Если потерялся', 'pass/months': 'Как рос', 'game/play': 'Разминка', 'game/repeat': 'Повтор ошибок', 'alone/go': 'Сессия' };
 // Какая вкладка внизу подсвечена: игры с собакой живут во вкладке «Тренировки», Практика, заметки каналов и игра на знания — в «Советах»
 // «День» и «Неделя Батончика» — страницы главной (вкладки «День» внизу нет)
-const TAB_OF = { search: 'search', today: 'today', day: 'today', k: 'k', g: 'k', pass: 'pass', growth: 'pass', lib: 't', weeks: 'today', t: 't', c: 't', game: 't', d: 'd', social: 'k', alone: 'k' };
+const TAB_OF = { search: 'search', ask: 'ask', today: 'today', day: 'today', k: 'k', g: 'k', pass: 'pass', growth: 'pass', lib: 't', weeks: 'today', t: 't', c: 't', game: 't', d: 'd', social: 'k', alone: 'k' };
 
 function pageTitle(hash) {
   const parts = hash.replace(/^#\/?/, '').split('/').filter(Boolean);
@@ -4043,6 +4234,8 @@ function render(force) {
   if (r.page === 'edit' && !force && S.editor && S.editor.key === editorKey(r) && view.querySelector('[data-editor]')) return;
   // То же для поиска, пока в нём печатают
   if (r.page === 'search' && !force && document.activeElement && document.activeElement.matches('.search-input')) return;
+  // «Спросить»: пока пишут вопрос, экран не перерисовываем — разговор обновляется отдельно (updateAsk)
+  if (r.page === 'ask' && !force && isTyping() && view.contains(document.activeElement)) return;
   if (r.page === 'lib' && r.id === 'dict' && !force && document.activeElement && document.activeElement.matches('.dict-search')) return;
   // Сессия «Учимся оставаться дома»: пока дописывают подробности или заметку, экран не перерисовываем
   if (r.page === 'alone' && !force && isTyping() && view.contains(document.activeElement)) return;
@@ -4056,6 +4249,7 @@ function render(force) {
   let html;
   if (r.page === 'search') html = renderSearch();
   else if (r.page === 'me') html = renderMe();
+  else if (r.page === 'ask') html = renderAsk();
   else if (r.page === 'edit') html = renderEditor(r);
   else if (r.page === 'day') html = renderDayPage();
   else if (r.page === 'pass') html = r.id === 'summary' ? renderSummary() : r.id === 'lost' ? renderLost() : r.id === 'months' ? renderMonths() : renderPassport();
@@ -4079,6 +4273,9 @@ function render(force) {
   }
   const sb = $('#search-btn');
   if (sb) { sb.classList.toggle('on', r.page === 'search'); if (r.page === 'search') sb.setAttribute('aria-current', 'page'); else sb.removeAttribute('aria-current'); }
+  const ab = $('#ask-btn');
+  if (ab) { ab.classList.toggle('on', r.page === 'ask'); if (r.page === 'ask') ab.setAttribute('aria-current', 'page'); else ab.removeAttribute('aria-current'); }
+  if (r.page === 'ask') { const inp = view.querySelector('.ask-input'); if (inp) fitAskInput(inp); }
 
   const routeKey = r.page + '/' + (r.tab || '') + '/' + (r.id || '') + '/' + (r.sub || '');
   if (routeKey !== lastRouteKey) {
@@ -4786,6 +4983,23 @@ const actions = {
     }
   },
   'back': () => history.back(),
+  'ask-starter': (el) => askSend(el.dataset.q),
+  // Ещё раз тот же вопрос: убираем его и ошибку после него, отправляем заново
+  'ask-retry': () => {
+    const a = askState();
+    const i = a.chat.map((m) => m.r).lastIndexOf('me');
+    if (i < 0 || a.busy) return;
+    const q = a.chat[i].t;
+    a.chat = a.chat.slice(0, i);
+    askSend(q);
+  },
+  'ask-new': () => {
+    const a = askState();
+    if (a.busy) return;
+    a.chat = [];
+    saveChat();
+    updateAsk({ scroll: false });
+  },
   'to-top': () => window.scrollTo({ top: 0, behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' }),
   // Учимся оставаться дома
   'alone-start': () => {

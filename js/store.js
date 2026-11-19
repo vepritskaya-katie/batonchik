@@ -279,6 +279,8 @@ function localStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onPet 
     // Уведомления — только с общей базой (Firebase)
     async pushToken() { throw new Error('local'); },
     async pushSave() {}, async pushRemove() {}, async pushTest() { return null; },
+    // «Спросить»: без сервера ИИ нет — приложение покажет примерный ответ (__BT_ASK_STUB__ — для проверок)
+    async askAi(payload) { const stub = window.__BT_ASK_STUB__; return stub ? stub(payload) : null; },
   };
 }
 
@@ -835,6 +837,15 @@ function firebaseStore({ onState, onPlan, onDay, onMarks, onEvents, onCards, onE
       await deleteDoc(doc(db, 'pushTokens', id)).catch(() => {});
       if (!unsubscribe || window.__BT_PUSH_STUB__) return;
       try { const m = await import(SDK + 'firebase-messaging.js'); await m.deleteToken(m.getMessaging(fbApp)); } catch { /* уже нет */ }
+    },
+    // «Спросить» — функция askAi на сервере: { question, context, history } → { text, model, left }.
+    // Ошибку сервер присылает понятным текстом (err.message)
+    async askAi(payload) {
+      const stub = window.__BT_ASK_STUB__;
+      if (stub) return stub(payload);
+      const f = await import(SDK + 'firebase-functions.js');
+      const res = await f.httpsCallable(f.getFunctions(fbApp, 'europe-west1'), 'askAi', { timeout: 125000 })(payload);
+      return res.data;
     },
     // «Прислать проверочное» — функция sendTestPush на сервере
     async pushTest() {
