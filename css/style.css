@@ -1818,3 +1818,10 @@ button.choice.on { background: var(--accent-soft); border-color: var(--accent); 
 .ask-chip:active { background: var(--accent-soft); }
 .ask-foot { margin-top: 10px; }
 .ask-foot .text-link { min-height: 36px; margin-left: 4px; }
+/* Источники из поиска Google и блок поисковых подсказок */
+.ask-sources { margin: 10px 0 0; font-size: 14px; line-height: 1.5; color: var(--muted); }
+.ask-sources span { font-weight: 650; }
+.ask-sources a { overflow-wrap: anywhere; }
+.ask-search { display: block; width: 100%; height: 56px; margin-top: 8px; border: 0; background: transparent; color-scheme: normal; }
+/* Реплика не прячется под шапкой сверху и под полем вопроса с нижней панелью снизу */
+.ask-msg { scroll-margin-top: 84px; scroll-margin-bottom: calc(env(safe-area-inset-bottom) + 150px); }

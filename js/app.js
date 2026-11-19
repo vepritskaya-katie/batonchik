@@ -1104,22 +1104,39 @@ function askLogHtml() {
       const last = i === a.chat.length - 1;
       return `<div class="ask-msg err"><p>${escapeHtml(m.t)}</p>${last && !a.busy ? '<button type="button" class="text-link" data-action="ask-retry">Спросить ещё раз</button>' : ''}</div>`;
     }
-    return `<div class="ask-msg ai"><div class="prose">${safe(() => mdHtml(m.t), m.t)}</div>
-      <span class="ask-model">${m.demo ? 'пример ответа — в превью ИИ не подключён' : escapeHtml(modelLabel(m.model))}</span></div>`;
+    return `<div class="ask-msg ai"><div class="prose">${safe(() => mdHtml(m.t), m.t)}</div>${askSourcesHtml(m)}
+      <span class="ask-model">${m.demo ? 'пример ответа — в превью ИИ не подключён' : `${escapeHtml(modelLabel(m.model))}${m.src && m.src.length ? ' · с поиском Google' : ''}`}</span></div>`;
   }).join('');
   const busy = a.busy ? `<div class="ask-msg ai busy"><span class="ask-typing" role="status" aria-label="Думаю">${pawIcon()}${pawIcon()}${pawIcon()}</span></div>` : '';
   return msgs + busy;
 }
 
+// Источники из поиска Google и блок поисковых подсказок Google (его показывать обязательно — условие Google).
+// Блок подсказок — в отдельной рамке без скриптов: его оформление не смешивается с приложением
+const SEARCH_DOC = (html) => `<!doctype html><html><head><meta charset="utf-8"><base target="_blank"><meta name="color-scheme" content="light dark">
+  <style>html,body{margin:0;padding:0;background:transparent}</style></head><body>${html}</body></html>`;
+function askSourcesHtml(m) {
+  const src = (m.src || []).filter((x) => x && /^https:\/\//.test(x.uri || ''));
+  const list = src.length ? `<p class="ask-sources"><span>Источники:</span> ${src.map((x) => `<a href="${escapeHtml(x.uri)}" target="_blank" rel="noopener noreferrer">${escapeHtml(x.title || 'источник')}</a>`).join(' · ')}</p>` : '';
+  const chips = m.sh ? `<iframe class="ask-search" title="Поиск Google" sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox" srcdoc="${escapeHtml(SEARCH_DOC(m.sh))}"></iframe>` : '';
+  return list + chips;
+}
+// Высота рамки — по содержимому
+function fitSearchFrame(f) {
+  try { const h = f.contentDocument && f.contentDocument.documentElement.scrollHeight; if (h) f.style.height = `${Math.min(h, 240)}px`; } catch { /* нет доступа — оставляем как есть */ }
+}
+view.addEventListener('load', (e) => { if (e.target && e.target.matches && e.target.matches('iframe.ask-search')) fitSearchFrame(e.target); }, true);
+
 function askFootHtml() {
   const a = askState();
   const left = a.left != null ? ` Осталось сегодня: ${a.left} из ${ASK.DAILY_LIMIT}.` : '';
-  return `Вопрос и записи Батончика уходят в Gemini (Google Cloud) через наш сервер.${left}
+  return `Вопрос и записи Батончика уходят в Gemini (Google Cloud) через наш сервер; для свежих сведений Gemini может искать в Google.${left}
     ${a.chat.length && !a.busy ? '<button type="button" class="text-link" data-action="ask-new">Новый разговор</button>' : ''}`;
 }
 
-// Обновить разговор, не трогая поле ввода (в нём может быть начатый вопрос)
-function updateAsk({ scroll = true } = {}) {
+// Обновить разговор, не трогая поле ввода (в нём может быть начатый вопрос).
+// scroll: 'last' — показать последнюю реплику над полем ввода; 'answer' — начало нового ответа; false — не прокручивать
+function updateAsk({ scroll = 'last' } = {}) {
   const log = $('#ask-log');
   if (!log) return;
   log.innerHTML = askLogHtml();
@@ -1127,10 +1144,11 @@ function updateAsk({ scroll = true } = {}) {
   if (foot) foot.innerHTML = askFootHtml();
   const send = view.querySelector('.ask-send');
   if (send) send.disabled = !canWrite() || askState().busy;
-  if (scroll) {
-    const last = log.lastElementChild;
-    if (last) last.scrollIntoView({ block: 'nearest', behavior: calmMotion() ? 'auto' : 'smooth' });
-  }
+  if (scroll) scrollAsk(scroll);
+}
+function scrollAsk(how = 'last', smooth = true) {
+  const last = $('#ask-log') && $('#ask-log').lastElementChild;
+  if (last) last.scrollIntoView({ block: how === 'answer' ? 'start' : 'end', behavior: smooth && !calmMotion() ? 'smooth' : 'auto' });
 }
 
 // Что знает модель: коротко о Батончике, журнал за две недели, план, одиночество, социализация, уход, здоровье,
@@ -1222,9 +1240,10 @@ async function askSend(text) {
     const res = await store.askAi({ question: q, context: askContext(q), history });
     if (!res) {
       await new Promise((ok) => { setTimeout(ok, 900); });
-      msg = { r: 'ai', t: ASK.demoAnswer(q), at: Date.now(), demo: true };
+      const demo = ASK.demoAnswer(q);
+      msg = { r: 'ai', t: demo.t, src: demo.src || [], at: Date.now(), demo: true };
     } else {
-      msg = { r: 'ai', t: String(res.text || ''), at: Date.now(), model: res.model || '' };
+      msg = { r: 'ai', t: String(res.text || ''), at: Date.now(), model: res.model || '', src: Array.isArray(res.sources) ? res.sources.slice(0, 6) : [], sh: typeof res.searchHtml === 'string' ? res.searchHtml : '' };
       if (res.left != null) a.left = res.left;
     }
   } catch (err) {
@@ -1234,7 +1253,7 @@ async function askSend(text) {
   a.chat.push(msg);
   a.busy = false;
   saveChat();
-  if (route().page === 'ask') updateAsk();
+  if (route().page === 'ask') updateAsk({ scroll: msg.r === 'ai' ? 'answer' : 'last' });
 }
 
 // Поле вопроса растёт по тексту, но не выше трети экрана
@@ -4284,6 +4303,8 @@ function render(force) {
     const isCard = !!((TABS[r.tab] || r.page === 'c' || r.page === 'd') && r.id) || !!(r.page === 'lib' && r.sub);
     pendingScroll = !isCard && saved ? { y: saved, until: Date.now() + 2000 } : null;
     window.scrollTo(0, pendingScroll ? saved : 0);
+    // Открыли «Спросить» с прошлым разговором — сразу последние реплики над полем ввода
+    if (r.page === 'ask' && askState().chat.length) { pendingScroll = null; scrollAsk('last', false); }
     // Ссылка на вопрос или миф — раскрытый пункт сразу на экране
     const target = r.page === 'lib' && r.sub && r.id !== 'a' && document.getElementById(`lib-${r.id}-${r.sub}`);
     if (target) target.scrollIntoView({ block: 'start' });
